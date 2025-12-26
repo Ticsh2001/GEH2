@@ -1,0 +1,157 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "1020maa",
+    "type": "parameter",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": ""
+  },
+  "elements": {
+    "input-signal-1": {
+      "id": "input-signal-1",
+      "type": "input-signal",
+      "x": 83,
+      "y": 163,
+      "width": 186,
+      "height": 50,
+      "props": {
+        "name": "Сигнал",
+        "signalType": "number"
+      }
+    },
+    "formula-3": {
+      "id": "formula-3",
+      "type": "formula",
+      "x": 913,
+      "y": 394,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "Сигнал",
+        "inputCount": 1
+      }
+    },
+    "const-4": {
+      "id": "const-4",
+      "type": "const",
+      "x": 153,
+      "y": 325,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "if-5": {
+      "id": "if-5",
+      "type": "if",
+      "x": 444,
+      "y": 239,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">"
+      }
+    },
+    "output-6": {
+      "id": "output-6",
+      "type": "output",
+      "x": 1218,
+      "y": 351,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "formula-7": {
+      "id": "formula-7",
+      "type": "formula",
+      "x": 938,
+      "y": 42,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "const-8",
+        "inputCount": 1
+      }
+    },
+    "const-8": {
+      "id": "const-8",
+      "type": "const",
+      "x": 384,
+      "y": 546,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": -1
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input-signal-1",
+      "fromPort": "out-0",
+      "toElement": "if-5",
+      "toPort": "in-0",
+      "signalType": "number"
+    },
+    {
+      "fromElement": "const-4",
+      "fromPort": "out-0",
+      "toElement": "if-5",
+      "toPort": "in-1",
+      "signalType": "number"
+    },
+    {
+      "fromElement": "if-5",
+      "fromPort": "out-0",
+      "toElement": "formula-3",
+      "toPort": "cond-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "input-signal-1",
+      "fromPort": "out-0",
+      "toElement": "formula-3",
+      "toPort": "in-0",
+      "signalType": "number"
+    },
+    {
+      "fromElement": "formula-3",
+      "fromPort": "out-0",
+      "toElement": "output-6",
+      "toPort": "in-0",
+      "signalType": "number"
+    },
+    {
+      "fromElement": "if-5",
+      "fromPort": "out-1",
+      "toElement": "formula-7",
+      "toPort": "cond-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "const-8",
+      "fromPort": "out-0",
+      "toElement": "formula-7",
+      "toPort": "in-0",
+      "signalType": "number"
+    },
+    {
+      "fromElement": "formula-7",
+      "fromPort": "out-0",
+      "toElement": "output-6",
+      "toPort": "in-0",
+      "signalType": "number"
+    }
+  ],
+  "counter": 9,
+  "viewport": {
+    "zoom": 1,
+    "panX": 0,
+    "panY": 0
+  }
+}

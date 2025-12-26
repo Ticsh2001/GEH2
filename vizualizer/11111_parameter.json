@@ -1,0 +1,274 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "11111",
+    "type": "parameter",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": ""
+  },
+  "elements": {
+    "input-signal-1": {
+      "id": "input-signal-1",
+      "type": "input-signal",
+      "x": 24,
+      "y": 143,
+      "width": 194,
+      "height": 50,
+      "props": {
+        "name": "Сигнал 1",
+        "signalType": "undefined"
+      }
+    },
+    "input-signal-2": {
+      "id": "input-signal-2",
+      "type": "input-signal",
+      "x": 19,
+      "y": 229,
+      "width": 223,
+      "height": 50,
+      "props": {
+        "name": "Сигнал 2",
+        "signalType": "undefined"
+      }
+    },
+    "input-signal-3": {
+      "id": "input-signal-3",
+      "type": "input-signal",
+      "x": 20,
+      "y": 318,
+      "width": 242,
+      "height": 50,
+      "props": {
+        "name": "Сигнал 3",
+        "signalType": "undefined"
+      }
+    },
+    "if-4": {
+      "id": "if-4",
+      "type": "if",
+      "x": 569,
+      "y": 126,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">"
+      }
+    },
+    "const-5": {
+      "id": "const-5",
+      "type": "const",
+      "x": 107,
+      "y": 437,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 30
+      }
+    },
+    "if-6": {
+      "id": "if-6",
+      "type": "if",
+      "x": 556,
+      "y": 278,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">"
+      }
+    },
+    "if-7": {
+      "id": "if-7",
+      "type": "if",
+      "x": 562,
+      "y": 424,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">"
+      }
+    },
+    "and-8": {
+      "id": "and-8",
+      "type": "and",
+      "x": 904,
+      "y": 240,
+      "width": 120,
+      "height": 124,
+      "props": {
+        "inputCount": 3
+      }
+    },
+    "separator-9": {
+      "id": "separator-9",
+      "type": "separator",
+      "x": 1145,
+      "y": 266,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "formula-10": {
+      "id": "formula-10",
+      "type": "formula",
+      "x": 1462,
+      "y": 369,
+      "width": 140,
+      "height": 117,
+      "props": {
+        "expression": "Сигнал 1+Сигнал 2+Сигнал 3",
+        "inputCount": 3
+      }
+    },
+    "const-12": {
+      "id": "const-12",
+      "type": "const",
+      "x": 1460,
+      "y": 591,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "output-13": {
+      "id": "output-13",
+      "type": "output",
+      "x": 1682,
+      "y": 488,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input-signal-1",
+      "fromPort": "out-0",
+      "toElement": "if-4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const-5",
+      "fromPort": "out-0",
+      "toElement": "if-4",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input-signal-2",
+      "fromPort": "out-0",
+      "toElement": "if-6",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input-signal-3",
+      "fromPort": "out-0",
+      "toElement": "if-7",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const-5",
+      "fromPort": "out-0",
+      "toElement": "if-6",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const-5",
+      "fromPort": "out-0",
+      "toElement": "if-7",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if-4",
+      "fromPort": "out-0",
+      "toElement": "and-8",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "if-6",
+      "fromPort": "out-0",
+      "toElement": "and-8",
+      "toPort": "in-1",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "if-7",
+      "fromPort": "out-0",
+      "toElement": "and-8",
+      "toPort": "in-2",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "and-8",
+      "fromPort": "out-0",
+      "toElement": "separator-9",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "input-signal-1",
+      "fromPort": "out-0",
+      "toElement": "formula-10",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input-signal-2",
+      "fromPort": "out-0",
+      "toElement": "formula-10",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input-signal-3",
+      "fromPort": "out-0",
+      "toElement": "formula-10",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "separator-9",
+      "fromPort": "out-0",
+      "toElement": "formula-10",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "separator-9",
+      "fromPort": "out-1",
+      "toElement": "const-12",
+      "toPort": "cond-0",
+      "signalType": "false"
+    },
+    {
+      "fromElement": "formula-10",
+      "fromPort": "out-0",
+      "toElement": "output-13",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const-12",
+      "fromPort": "out-0",
+      "toElement": "output-13",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 13,
+  "viewport": {
+    "zoom": 1,
+    "panX": -116,
+    "panY": -58
+  }
+}

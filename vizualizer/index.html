@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Редактор логических схем</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div id="menu">
+            <button class="menu-btn" id="btn-new">📄 Новый</button>
+            <button class="menu-btn" id="btn-save">💾 Сохранить</button>
+            <button class="menu-btn" id="btn-load">📂 Загрузить</button>
+            <button class="menu-btn" id="btn-generate-code">🧩 Код</button>
+            <button class="menu-btn" id="btn-project-settings">⚙️ Свойства проекта</button>
+            <div class="menu-separator"></div>
+            <div class="zoom-controls">
+                <button class="menu-btn zoom-btn" id="btn-zoom-out">−</button>
+                <span id="zoom-level">100%</span>
+                <button class="menu-btn zoom-btn" id="btn-zoom-in">+</button>
+                <button class="menu-btn" id="btn-zoom-fit">⊡ Вписать</button>
+                <button class="menu-btn" id="btn-zoom-reset">1:1</button>
+            </div>
+            <input type="file" id="file-input" accept=".json">
+        </div>
+
+        <div id="main">
+            <div id="palette">
+                <h3>📦 Элементы</h3>
+
+                <div class="palette-section">
+                    <div class="palette-section-title">ВХОДЫ</div>
+
+                    <div class="palette-item" data-type="input-signal">
+                        <svg viewBox="0 0 60 40">
+                            <polygon points="0,5 40,5 55,20 40,35 0,35" fill="#0f3460" stroke="#4a90d9" stroke-width="2"/>
+                            <text x="12" y="24" fill="#eee" font-size="10">IN</text>
+                        </svg>
+                        <div class="palette-item-name">Входной сигнал</div>
+                    </div>
+                </div>
+                <div class="palette-section">
+                    <div class="palette-section-title">ВЫХОДЫ</div>
+
+                    <div class="palette-item" data-type="output">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="6" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="4,2"/>
+                            <text x="12" y="24" fill="#10b981" font-size="9">ВЫХОД</text>
+                        </svg>
+                        <div class="palette-item-name">Выход</div>
+                    </div>
+                </div>
+
+                <div class="palette-section">
+                    <div class="palette-section-title">ЛОГИЧЕСКИЕ</div>
+
+                    <div class="palette-item" data-type="and">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="5" fill="#0f3460" stroke="#a855f7" stroke-width="2"/>
+                            <text x="22" y="25" fill="#eee" font-size="12" font-weight="bold">И</text>
+                        </svg>
+                        <div class="palette-item-name">И (AND)</div>
+                    </div>
+
+                    <div class="palette-item" data-type="or">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="5" fill="#0f3460" stroke="#a855f7" stroke-width="2"/>
+                            <text x="12" y="25" fill="#eee" font-size="11" font-weight="bold">ИЛИ</text>
+                        </svg>
+                        <div class="palette-item-name">ИЛИ (OR)</div>
+                    </div>
+
+                    <div class="palette-item" data-type="not">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="5" fill="#0f3460" stroke="#a855f7" stroke-width="2"/>
+                            <text x="12" y="25" fill="#eee" font-size="11" font-weight="bold">НЕТ</text>
+                        </svg>
+                        <div class="palette-item-name">НЕТ (NOT)</div>
+                    </div>
+                </div>
+
+                <div class="palette-section">
+                    <div class="palette-section-title">СРАВНЕНИЕ</div>
+
+                    <div class="palette-item" data-type="if">
+                        <svg viewBox="0 0 60 40">
+                            <polygon points="30,3 57,20 30,37 3,20" fill="#0f3460" stroke="#e94560" stroke-width="2"/>
+                            <text x="14" y="24" fill="#eee" font-size="9" font-weight="bold">ЕСЛИ</text>
+                        </svg>
+                        <div class="palette-item-name">ЕСЛИ (IF)</div>
+                    </div>
+                </div>
+
+                <div class="palette-section">
+                    <div class="palette-section-title">РАЗВЕТВЛЕНИЕ</div>
+
+                    <div class="palette-item" data-type="separator">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="8" width="50" height="24" rx="3" fill="#0f3460" stroke="#f59e0b" stroke-width="2"/>
+                            <text x="8" y="25" fill="#f59e0b" font-size="10" font-weight="bold">✓/✗</text>
+                        </svg>
+                        <div class="palette-item-name">Сепаратор</div>
+                    </div>
+                </div>                
+
+                <div class="palette-section">
+                    <div class="palette-section-title">ЗНАЧЕНИЯ</div>
+
+                    <div class="palette-item" data-type="const">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="10" y="8" width="40" height="24" rx="3" fill="#0f3460" stroke="#3b82f6" stroke-width="2"/>
+                            <text x="24" y="25" fill="#3b82f6" font-size="14" font-weight="bold">C</text>
+                        </svg>
+                        <div class="palette-item-name">Константа</div>
+                    </div>
+
+                    <div class="palette-item" data-type="formula">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="5" fill="#0f3460" stroke="#f59e0b" stroke-width="2"/>
+                            <text x="12" y="25" fill="#f59e0b" font-size="11" font-weight="bold">f(x)</text>
+                        </svg>
+                        <div class="palette-item-name">Формула</div>
+                    </div>
+                </div>
+
+                <div class="type-legend">
+                    <div class="type-legend-item">
+                        <div class="type-legend-dot logic"></div>
+                        <span>Логический</span>
+                    </div>
+                    <div class="type-legend-item">
+                        <div class="type-legend-dot number"></div>
+                        <span>Числовой</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="workspace-container">
+                <svg id="connections-svg"></svg>
+                <div id="workspace"></div>
+
+                <!-- Мини-карта -->
+                <div id="minimap">
+                    <div id="minimap-viewport"></div>
+                    <canvas id="minimap-canvas"></canvas>
+                </div>
+
+                <!-- Координаты и информация -->
+                <div id="viewport-info">
+                    <span id="cursor-pos">X: 0, Y: 0</span>
+                    <span id="selection-info"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальные окна -->
+    <div id="modal-overlay">
+        <div id="modal">
+            <h3 id="modal-title">Свойства элемента</h3>
+            <div id="modal-content"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="modal-cancel">Отмена</button>
+                <button class="modal-btn save" id="modal-save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно свойств проекта -->
+    <div id="project-modal-overlay" class="modal-overlay-class">
+        <div id="project-modal" class="modal-class">
+            <h3>Свойства проекта</h3>
+            <div id="project-modal-content"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="project-modal-cancel">Отмена</button>
+                <button class="modal-btn save" id="project-modal-save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="code-modal-overlay" class="modal-overlay-class">
+        <div id="code-modal" class="modal-class">
+            <h3>Сгенерированный код</h3>
+            <textarea id="code-output" style="width:100%; height:300px;"></textarea>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="code-modal-close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="context-menu">
+        <div class="context-item" id="ctx-properties">⚙️ Свойства</div>
+        <div class="context-item" id="ctx-delete">🗑️ Удалить</div>
+    </div>
+
+   <!-- Модули JavaScript -->
+    <!-- Модули JavaScript -->
+    <script src="js/config.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/viewport.js"></script>
+    <script src="js/elements.js"></script>
+    <script src="js/connections.js"></script>
+    <script src="js/outputs.js"></script>  <!-- ← Этот файл опционален теперь -->
+    <script src="js/modal.js"></script>
+    <script src="js/project.js"></script>
+    <script src="js/codegen.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
