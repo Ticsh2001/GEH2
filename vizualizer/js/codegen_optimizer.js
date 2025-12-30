@@ -54,6 +54,204 @@ function negateOp(op) {
     }
 }
 
+// Преобразует cmp-условие в интервал по одной переменной
+// Возвращает { varName, min, minInc, max, maxInc } или null
+function cmpToInterval(c) {
+    if (!c || c.type !== 'cmp') return null;
+
+    const lNum = parseNumberLiteral(c.l);
+    const rNum = parseNumberLiteral(c.r);
+
+    let varName, op, val;
+
+    if (lNum == null && rNum != null) {
+        // var OP const
+        varName = c.l;
+        op = c.op;
+        val = rNum;
+    } else if (lNum != null && rNum == null) {
+        // const OP var  ->  var (OP') const
+        varName = c.r;
+        op = reverseOp(c.op);
+        if (!op) return null;
+        val = lNum;
+    } else {
+        // Либо обе стороны числа, либо обе не числа — не трогаем
+        return null;
+    }
+
+    // Интересуют только упорядочивающие операторы
+    switch (op) {
+        case '<':
+        case '<=':
+        case '>':
+        case '>=':
+        case '=':
+            break;
+        default:
+            return null;
+    }
+
+    let min = Number.NEGATIVE_INFINITY;
+    let max = Number.POSITIVE_INFINITY;
+    let minInc = false;
+    let maxInc = false;
+
+    switch (op) {
+        case '<':
+            max = val; maxInc = false; break;
+        case '<=':
+            max = val; maxInc = true; break;
+        case '>':
+            min = val; minInc = false; break;
+        case '>=':
+            min = val; minInc = true; break;
+        case '=':
+            min = val; minInc = true;
+            max = val; maxInc = true;
+            break;
+    }
+
+    return { varName, min, minInc, max, maxInc };
+}
+
+function intervalSubset(a, b) {
+    if (!a || !b) return false;
+
+    // Нижняя граница: a.min >= b.min
+    const amin = a.min, bmin = b.min;
+    if (amin === Number.NEGATIVE_INFINITY) {
+        if (bmin !== Number.NEGATIVE_INFINITY) return false;
+        // оба -∞ — ок
+    } else if (bmin === Number.NEGATIVE_INFINITY) {
+        // b начинается “раньше” — ок
+    } else if (amin > bmin) {
+        // a стартует правее b — ок
+    } else if (amin < bmin) {
+        // a захватывает меньшее значение — не подмножество
+        return false;
+    } else {
+        // amin === bmin
+        if (a.minInc && !b.minInc) {
+            // a включает границу, а b — нет → в a есть точка, не входящая в b
+            return false;
+        }
+    }
+
+    // Верхняя граница: a.max <= b.max
+    const amax = a.max, bmax = b.max;
+    if (amax === Number.POSITIVE_INFINITY) {
+        if (bmax !== Number.POSITIVE_INFINITY) return false;
+    } else if (bmax === Number.POSITIVE_INFINITY) {
+        // b идёт дальше — ок
+    } else if (amax < bmax) {
+        // a заканчивается раньше — ок
+    } else if (amax > bmax) {
+        return false;
+    } else {
+        // amax === bmax
+        if (a.maxInc && !b.maxInc) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Удаляет избыточные cmp-условия в массиве атомов
+// mode: 'and' | 'or'
+function removeRedundantCmpAtoms(atoms, mode) {
+    if (!atoms || atoms.length < 2) return atoms;
+
+    const keep = new Array(atoms.length).fill(true);
+
+    for (let i = 0; i < atoms.length; i++) {
+        if (!keep[i]) continue;
+        const a = atoms[i];
+        if (!a || a.type !== 'cmp') continue;
+
+        for (let j = 0; j < atoms.length; j++) {
+            if (i === j || !keep[j]) continue;
+            const b = atoms[j];
+            if (!b || b.type !== 'cmp') continue;
+
+            const rel = cmpImplicationRelation(a, b);
+            if (!rel) continue;
+
+            if (rel === 'a_in_b') {
+                if (mode === 'or') {
+                    // A ⊆ B → A OR B = B  → A лишнее
+                    keep[i] = false;
+                    break;
+                } else if (mode === 'and') {
+                    // A ⊆ B → A AND B = A → B лишнее
+                    keep[j] = false;
+                }
+            } else if (rel === 'b_in_a') {
+                if (mode === 'or') {
+                    // B ⊆ A → A OR B = A → B лишнее
+                    keep[j] = false;
+                } else if (mode === 'and') {
+                    // B ⊆ A → A AND B = B → A лишнее
+                    keep[i] = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    return atoms.filter((_, idx) => keep[idx]);
+}
+
+// Отношение между двумя cmp-условиями через интервалы
+// 'a_in_b'  — A ⊆ B
+// 'b_in_a'  — B ⊆ A
+// 'equal'   — одинаковые интервалы (редко используем)
+// null      — не можем определить
+function cmpImplicationRelation(c1, c2) {
+    const i1 = cmpToInterval(c1);
+    const i2 = cmpToInterval(c2);
+    if (!i1 || !i2) return null;
+    if (i1.varName !== i2.varName) return null;
+
+    const aInB = intervalSubset(i1, i2);
+    const bInA = intervalSubset(i2, i1);
+
+    if (aInB && bInA) return 'equal';
+    if (aInB) return 'a_in_b';
+    if (bInA) return 'b_in_a';
+    return null;
+}
+
+// Разворот оператора при перестановке аргументов (левый/правый)
+function reverseOp(op) {
+    switch (op) {
+        case '<':  return '>';
+        case '>':  return '<';
+        case '<=': return '>=';
+        case '>=': return '<=';
+        case '=':
+        case '!=':
+            return op;
+        default:
+            return null;
+    }
+}
+
+// Аккуратный парсер числового литерала.
+// Возвращает число или null, если строка не чисто числовая.
+function parseNumberLiteral(s) {
+    if (typeof s !== 'string') return null;
+    const trimmed = s.trim().replace(',', '.');
+
+    // Только простые вещи: -123, 45, 3.14
+    if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
+
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+}
+
+
 function negateAtomKey(key) {
     if (!key) return null;
     if (key.startsWith('eq0:')) return 'ne0:' + key.slice(4);
@@ -210,7 +408,10 @@ function simplifyCondCore(c) {
                 }
             }
 
-            const uniqueAtoms = Array.from(atomMap.values());
+            let uniqueAtoms = Array.from(atomMap.values());
+            // Убираем избыточные сравнения по одному и тому же сигналу
+            uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'and');
+
             const result = [...uniqueAtoms, ...otherTerms];
 
             if (result.length === 0) return TrueCond;
@@ -251,7 +452,10 @@ function simplifyCondCore(c) {
                 }
             }
 
-            const uniqueAtoms = Array.from(atomMap.values());
+            let uniqueAtoms = Array.from(atomMap.values());
+            // Убираем избыточные сравнения по одному и тому же сигналу
+            uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'or');
+
             const result = [...uniqueAtoms, ...otherTerms];
 
             if (result.length === 0) return FalseCond;

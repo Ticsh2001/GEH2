@@ -168,13 +168,27 @@ const CodeGen = {
         const elem = AppState.elements[id];
         if (!elem) return Optimizer.Const(0);
 
-        if (elem.type === 'input-signal') {
-            return this.toExpr(elem.props.name || id);
+        switch (elem.type) {
+            case 'input-signal':
+                // Имя сигнала или id как Var(...)
+                return this.toExpr(elem.props.name || id);
+
+            case 'const':
+                return Optimizer.Const(Number(elem.props.value) || 0);
+
+            case 'formula': {
+                // Используем текст формулы как выражение
+                const exprStr = this.buildFormulaExpr(elem) || '0';
+                return this.toExpr(exprStr);
+            }
+
+            default:
+                // На всякий случай — даём символическое имя, а не 0
+                if (elem.props && typeof elem.props.name === 'string') {
+                    return this.toExpr(elem.props.name);
+                }
+                return this.toExpr(id);
         }
-        if (elem.type === 'const') {
-            return Optimizer.Const(Number(elem.props.value) || 0);
-        }
-        return Optimizer.Const(0);
     },
 
     // === Получить ПОЛНОЕ условие для ветки сепаратора ===
