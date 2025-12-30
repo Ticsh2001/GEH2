@@ -1,6 +1,44 @@
 // js/codegen_graph.js
 
 const CodeGenGraph = {
+        /**
+     * Собрать все условия вверх по цепочке cond‑портов (до корня).
+     * Возвращает null или объединённое через AND условие.
+     */
+/**
+ * Собрать ВСЕ условия: и через cond-порты, и через контекст обычных входов
+ */
+    collectAllCond(graph) {
+        if (!graph) return null;
+        
+        let c = null;
+        const elem = graph.elem;
+
+        // 1. Собираем условия через cond-порт (как было)
+        if (graph.condInput) {
+            const condConn = graph.condInput.conn;
+            const fromGraph = graph.condInput.fromGraph;
+            const oneCond = this.evalConditionFromPort(fromGraph, condConn.fromPort);
+            c = oneCond;
+
+            // Рекурсивно идём вверх по cond-цепочке
+            const upCond = this.collectAllCond(fromGraph);
+            if (upCond) {
+                c = c ? Optimizer.And(c, upCond) : upCond;
+            }
+        }
+
+        // 2. НОВОЕ: если это separator — учитываем контекст его входа
+        if (elem.type === 'separator' && graph.inputs.length > 0) {
+            const inputGraph = graph.inputs[0].fromGraph;
+            const inputContext = this.collectAllCond(inputGraph);
+            if (inputContext) {
+                c = c ? Optimizer.And(c, inputContext) : inputContext;
+            }
+        }
+
+        return c;
+    },
     buildDependencyGraph(elementId) {
         const graph = {
             nodeId: elementId,
@@ -112,8 +150,50 @@ const CodeGenGraph = {
         }
     },
 
+    // js/codegen_graph.js
+
     /**
-     * Вычислить УСЛОВИЕ для cond-порта элемента
+     * Рекурсивно собрать полный контекст условий для элемента
+     * через всю цепочку cond-портов вверх
+     */
+ // В codegen_graph.js, в evalFullContext добавь:
+
+    evalFullContext(graph) {
+        if (!graph) return null;
+
+        let context = null;
+        const elem = graph.elem;
+
+        console.log(`evalFullContext для ${elem.id} (${elem.type})`);
+
+        // 1. Если сам элемент имеет cond-порт — собираем его условие
+        if (graph.condInput) {
+            const condConn = graph.condInput.conn;
+            console.log(`  → имеет cond-0 от ${graph.condInput.fromGraph.elem.id}.${condConn.fromPort}`);
+            
+            const condLogic = this.evalConditionFromPort(
+                graph.condInput.fromGraph,
+                condConn.fromPort
+            );
+            console.log(`  → условие от cond-0: ${Optimizer.printCond(condLogic)}`);
+            context = condLogic;
+
+            // 2. Рекурсивно собираем контекст элемента, на который указывает cond-порт
+            const upstreamContext = this.evalFullContext(graph.condInput.fromGraph);
+            if (upstreamContext) {
+                console.log(`  → upstreamContext: ${Optimizer.printCond(upstreamContext)}`);
+                context = context ? Optimizer.And(context, upstreamContext) : upstreamContext;
+            }
+        } else {
+            console.log(`  → нет cond-0`);
+        }
+
+        console.log(`  → итоговый контекст: ${Optimizer.printCond(context)}`);
+        return context;
+    },
+
+    /**
+     * Получить УСЛОВИЕ для cond-порта элемента
      * Учитывает цепочку сепараторов с TRUE/FALSE ветвлением
      */
     evalConditionFromPort(graph, fromPort) {
@@ -143,20 +223,14 @@ const CodeGenGraph = {
      * Главная функция: получить {cond, expr} для элемента
      */
     evalGraphValue(graph) {
+
         if (!graph) return { cond: null, expr: Optimizer.Const(0) };
 
         const elem = graph.elem;
-        let cond = null;
+        //let cond = null;
 
-        // Если есть cond-порт — вычисляем условие от него
-        if (graph.condInput) {
-            const condConn = graph.condInput.conn;
-            const fromPortLogic = this.evalConditionFromPort(
-                graph.condInput.fromGraph,
-                condConn.fromPort
-            );
-            cond = fromPortLogic;
-        }
+        // ← НОВОЕ: собираем полный контекст через цепочку cond-портов
+        let cond = this.collectAllCond(graph);
 
         let expr = null;
 
@@ -190,7 +264,6 @@ const CodeGenGraph = {
                 return this.evalGraphValue(graph.inputs[0]?.fromGraph);
 
             // Логические элементы не должны здесь быть
-            // (они только как условия, а не как значения)
             case 'and':
             case 'or':
             case 'not':

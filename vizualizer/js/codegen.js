@@ -335,8 +335,10 @@ const CodeGen = {
                 const conns = this.getConns(out.id, 'in-');
 
                 for (const conn of conns) {
+                    console.log(`\n=== Обработка выхода ${out.id}, вход от ${conn.fromElement} ===`);
                     const graph = CodeGenGraph.buildDependencyGraph(conn.fromElement);
                     const result = CodeGenGraph.evalGraphValue(graph);
+                    console.log(`Результат: cond=${Optimizer.printCond(result.cond)}, expr=${Optimizer.printExpr(result.expr)}`);
 
                     if (!result || !result.expr) continue;
 
