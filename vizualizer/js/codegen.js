@@ -4,11 +4,13 @@ const CodeGen = {
     _cache: {},
     _branchCache: {},
     _resolveCache: {},
+    _visiting: new Set(),
 
     reset() {
         this._cache = {};
         this._branchCache = {};
         this._resolveCache = {};
+        this._visiting = new Set();
     },
 
     toExpr(valueStr) {
@@ -46,19 +48,19 @@ const CodeGen = {
         const expression = elem.props.expression || '0';
         let result = expression;
         const formulaRefs = result.match(/formula-\d+/g) || [];
-        
+
         for (const ref of formulaRefs) {
             const refElem = AppState.elements[ref];
             if (refElem && refElem.type === 'formula') {
                 const refExpr = this.buildFormulaExpr(refElem);
-                result = result.replace(ref, `(${refExpr})`);
+                result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
-        
+
         return result;
     },
 
-    // === Получить ЧИСТУЮ логику элемента (без учёта контекста) ===
+    // === Получить ЧИСТУЮ логику элемента ===
     getPureLogic(id) {
         const cacheKey = `logic:${id}`;
         if (cacheKey in this._cache) {
@@ -79,21 +81,40 @@ const CodeGen = {
                 const rightVal = rightConn ? this.getValue(rightConn.fromElement) : Optimizer.Const(0);
 
                 const op = (elem.props.operator || '=').trim();
+                const leftName = this.exprToName(leftVal);
+                const rightName = this.exprToName(rightVal);
+
                 const leftZero = leftVal.type === 'const' && leftVal.n === 0;
                 const rightZero = rightVal.type === 'const' && rightVal.n === 0;
 
-                if (op === '=' || op === '!=') {
-                    if (rightZero) {
-                        const name = this.exprToName(leftVal);
-                        logic = op === '=' ? Optimizer.Eq0(name) : Optimizer.Ne0(name);
-                    } else if (leftZero) {
-                        const name = this.exprToName(rightVal);
-                        logic = op === '=' ? Optimizer.Eq0(name) : Optimizer.Ne0(name);
-                    } else {
+                // Поддержка всех операторов
+                switch (op) {
+                    case '=':
+                        if (rightZero) {
+                            logic = Optimizer.Eq0(leftName);
+                        } else if (leftZero) {
+                            logic = Optimizer.Eq0(rightName);
+                        } else {
+                            logic = Optimizer.Cmp(leftName, '=', rightName);
+                        }
+                        break;
+                    case '!=':
+                        if (rightZero) {
+                            logic = Optimizer.Ne0(leftName);
+                        } else if (leftZero) {
+                            logic = Optimizer.Ne0(rightName);
+                        } else {
+                            logic = Optimizer.Cmp(leftName, '!=', rightName);
+                        }
+                        break;
+                    case '>':
+                    case '<':
+                    case '>=':
+                    case '<=':
+                        logic = Optimizer.Cmp(leftName, op, rightName);
+                        break;
+                    default:
                         logic = Optimizer.TrueCond;
-                    }
-                } else {
-                    logic = Optimizer.TrueCond;
                 }
                 break;
             }
@@ -142,7 +163,7 @@ const CodeGen = {
         return logic;
     },
 
-    // === Получить значение (для input-signal, const) ===
+    // === Получить значение ===
     getValue(id) {
         const elem = AppState.elements[id];
         if (!elem) return Optimizer.Const(0);
@@ -166,13 +187,9 @@ const CodeGen = {
         const sep = AppState.elements[sepId];
         if (!sep || sep.type !== 'separator') return null;
 
-        // 1. Логика на входе этого сепаратора
         const inputLogic = this.getPureLogic(sepId);
-
-        // 2. Контекст этого сепаратора (от его cond-0)
         const sepContext = this.getConditionFromPort(sepId);
 
-        // 3. Логика ветки
         let branchLogic;
         if (fromPort === 'out-1') {
             branchLogic = inputLogic ? Optimizer.Not(inputLogic) : Optimizer.TrueCond;
@@ -180,7 +197,6 @@ const CodeGen = {
             branchLogic = inputLogic || Optimizer.TrueCond;
         }
 
-        // 4. Полное условие = контекст AND логика_ветки
         let result;
         if (sepContext) {
             result = Optimizer.And(sepContext, branchLogic);
@@ -192,7 +208,7 @@ const CodeGen = {
         return result;
     },
 
-    // === Получить условие от cond-порта элемента ===
+    // === Получить условие от cond-порта ===
     getConditionFromPort(id) {
         const conn = this.getConn(id, 'cond-0');
         if (!conn) return null;
@@ -207,74 +223,83 @@ const CodeGen = {
         return this.getPureLogic(conn.fromElement);
     },
 
-    // === Основная функция разрешения (для значений с условиями) ===
+    // === Основная функция разрешения ===
     resolve(id) {
         if (id in this._resolveCache) {
             return this._resolveCache[id];
         }
 
+        if (this._visiting.has(id)) {
+            return null;
+        }
+        this._visiting.add(id);
+
         const elem = AppState.elements[id];
-        if (!elem) return null;
+        if (!elem) {
+            this._visiting.delete(id);
+            return null;
+        }
 
         let result = null;
 
-        switch (elem.type) {
-            case 'input-signal':
-                result = {
-                    isValue: true,
-                    cond: null,
-                    expr: this.toExpr(elem.props.name || id)
-                };
-                break;
+        try {
+            switch (elem.type) {
+                case 'input-signal':
+                    result = {
+                        isValue: true,
+                        cond: null,
+                        expr: this.toExpr(elem.props.name || id)
+                    };
+                    break;
 
-            case 'const': {
-                const cond = this.getConditionFromPort(id);
-                result = {
-                    isValue: true,
-                    cond: cond,
-                    expr: Optimizer.Const(Number(elem.props.value) || 0)
-                };
-                break;
-            }
-
-            case 'formula': {
-                // Условие от cond-порта
-                let cond = this.getConditionFromPort(id);
-                
-                // ВАЖНО: собираем условия от ВХОДОВ формулы (in-0, in-1, ...)
-                const inConns = this.getConns(id, 'in-');
-                for (const conn of inConns) {
-                    const inputNode = this.resolve(conn.fromElement);
-                    if (inputNode && inputNode.cond) {
-                        cond = this.mergeCond(cond, inputNode.cond);
-                    }
+                case 'const': {
+                    const cond = this.getConditionFromPort(id);
+                    result = {
+                        isValue: true,
+                        cond: cond,
+                        expr: Optimizer.Const(Number(elem.props.value) || 0)
+                    };
+                    break;
                 }
-                
-                const fullExpr = this.buildFormulaExpr(elem);
-                result = {
-                    isValue: true,
-                    cond: cond,
-                    expr: Optimizer.Var(fullExpr)
-                };
-                break;
-            }
 
-            default:
-                result = null;
+                case 'formula': {
+                    let cond = this.getConditionFromPort(id);
+
+                    const inConns = this.getConns(id, 'in-');
+                    for (const conn of inConns) {
+                        const inputNode = this.resolve(conn.fromElement);
+                        if (inputNode && inputNode.cond) {
+                            cond = this.mergeCond(cond, inputNode.cond);
+                        }
+                    }
+
+                    const fullExpr = this.buildFormulaExpr(elem);
+                    result = {
+                        isValue: true,
+                        cond: cond,
+                        expr: Optimizer.Var(fullExpr)
+                    };
+                    break;
+                }
+
+                default:
+                    result = null;
+            }
+        } finally {
+            this._visiting.delete(id);
         }
 
         this._resolveCache[id] = result;
         return result;
     },
 
-    // === Генерация единого выражения ===
+    // === Генерация ===
     generate() {
         console.log('=== Генерация кода ===');
         this.reset();
 
         try {
             const outputs = Object.values(AppState.elements).filter(e => e.type === 'output');
-            console.log('Найдено выходов:', outputs.length);
 
             if (outputs.length === 0) {
                 return '/* Нет выходов */';
@@ -284,14 +309,14 @@ const CodeGen = {
 
             for (const out of outputs) {
                 const conns = this.getConns(out.id, 'in-');
-                
+
                 for (const conn of conns) {
                     const node = this.resolve(conn.fromElement);
                     if (!node || !node.isValue || !node.expr) continue;
 
                     const cond = node.cond ? Optimizer.simplifyCond(node.cond) : null;
                     const isZero = node.expr.type === 'const' && node.expr.n === 0;
-                    
+
                     if (isZero && !cond) continue;
 
                     allVariants.push({
@@ -303,18 +328,17 @@ const CodeGen = {
                 }
             }
 
-            console.log('Всего вариантов:', allVariants.length);
-            allVariants.forEach((v, i) => {
-                console.log(`  ${i}: source=${v.source}, cond=${Optimizer.printCond(v.cond)}`);
-            });
+            console.log('Варианты:', allVariants.map(v => ({
+                source: v.source,
+                cond: Optimizer.printCond(v.cond),
+                expr: Optimizer.printExpr(v.expr)
+            })));
 
             if (allVariants.length === 0) {
                 return '0';
             }
 
             const valueVariants = allVariants.filter(v => !v.isZero);
-            
-            console.log('Значимых вариантов:', valueVariants.length);
 
             if (valueVariants.length === 0) {
                 return '0';
