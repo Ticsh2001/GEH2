@@ -333,6 +333,72 @@ function buildOr(terms) {
     return result;
 }
 
+// Поглощение для AND: X AND (X OR Y) = X
+function applyAndAbsorption(terms) {
+    if (!terms || terms.length < 2) return terms;
+
+    const keep = new Array(terms.length).fill(true);
+
+    for (let i = 0; i < terms.length; i++) {
+        if (!keep[i]) continue;
+        const ti = terms[i];
+        if (!ti || ti.type !== 'or') continue;
+
+        const orParts = flattenOr(ti);
+        let drop = false;
+
+        outer:
+        for (const part of orParts) {
+            for (let j = 0; j < terms.length; j++) {
+                if (j === i || !keep[j]) continue;
+                if (condEq(part, terms[j])) {
+                    drop = true;
+                    break outer;
+                }
+            }
+        }
+
+        if (drop) {
+            keep[i] = false;
+        }
+    }
+
+    return terms.filter((_, idx) => keep[idx]);
+}
+
+// Поглощение для OR: X OR (X AND Y) = X
+function applyOrAbsorption(terms) {
+    if (!terms || terms.length < 2) return terms;
+
+    const keep = new Array(terms.length).fill(true);
+
+    for (let i = 0; i < terms.length; i++) {
+        if (!keep[i]) continue;
+        const ti = terms[i];
+        if (!ti || ti.type !== 'and') continue;
+
+        const andParts = flattenAnd(ti);
+        let drop = false;
+
+        outer:
+        for (const part of andParts) {
+            for (let j = 0; j < terms.length; j++) {
+                if (j === i || !keep[j]) continue;
+                if (condEq(part, terms[j])) {
+                    drop = true;
+                    break outer;
+                }
+            }
+        }
+
+        if (drop) {
+            keep[i] = false;
+        }
+    }
+
+    return terms.filter((_, idx) => keep[idx]);
+}
+
 // === Упрощение условий ===
 function simplifyCond(c) {
     _depth++;
@@ -409,10 +475,12 @@ function simplifyCondCore(c) {
             }
 
             let uniqueAtoms = Array.from(atomMap.values());
-            // Убираем избыточные сравнения по одному и тому же сигналу
             uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'and');
 
-            const result = [...uniqueAtoms, ...otherTerms];
+            let result = [...uniqueAtoms, ...otherTerms];
+
+            // Поглощение: X AND (X OR Y) = X
+            result = applyAndAbsorption(result);
 
             if (result.length === 0) return TrueCond;
             if (result.length === 1) return result[0];
@@ -453,10 +521,12 @@ function simplifyCondCore(c) {
             }
 
             let uniqueAtoms = Array.from(atomMap.values());
-            // Убираем избыточные сравнения по одному и тому же сигналу
             uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'or');
 
-            const result = [...uniqueAtoms, ...otherTerms];
+            let result = [...uniqueAtoms, ...otherTerms];
+
+            // Поглощение: X OR (X AND Y) = X
+            result = applyOrAbsorption(result);
 
             if (result.length === 0) return FalseCond;
             if (result.length === 1) return result[0];

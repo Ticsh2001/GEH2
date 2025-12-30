@@ -87,7 +87,6 @@ const CodeGen = {
                 const leftZero = leftVal.type === 'const' && leftVal.n === 0;
                 const rightZero = rightVal.type === 'const' && rightVal.n === 0;
 
-                // Поддержка всех операторов
                 switch (op) {
                     case '=':
                         if (rightZero) {
@@ -157,6 +156,18 @@ const CodeGen = {
 
             default:
                 logic = null;
+        }
+
+        // ↓ новая часть: добавляем контекст с cond-порта для логических элементов
+        if (elem.type === 'if' || elem.type === 'and' || elem.type === 'or' || elem.type === 'not') {
+            const ctx = this.getConditionFromPort(id);
+            if (ctx) {
+                if (logic) {
+                    logic = Optimizer.And(ctx, logic);
+                } else {
+                    logic = ctx;
+                }
+            }
         }
 
         this._cache[cacheKey] = logic;
@@ -307,9 +318,8 @@ const CodeGen = {
         return result;
     },
 
-    // === Генерация ===
     generate() {
-        console.log('=== Генерация кода ===');
+        console.log('=== Генерация кода (граф) ===');
         this.reset();
 
         try {
@@ -325,38 +335,33 @@ const CodeGen = {
                 const conns = this.getConns(out.id, 'in-');
 
                 for (const conn of conns) {
-                    const node = this.resolve(conn.fromElement);
-                    if (!node || !node.isValue || !node.expr) continue;
+                    const graph = CodeGenGraph.buildDependencyGraph(conn.fromElement);
+                    const result = CodeGenGraph.evalGraphValue(graph);
 
-                    const cond = node.cond ? Optimizer.simplifyCond(node.cond) : null;
-                    const isZero = node.expr.type === 'const' && node.expr.n === 0;
+                    if (!result || !result.expr) continue;
+
+                    const cond = result.cond ? Optimizer.simplifyCond(result.cond) : null;
+                    const isZero = result.expr.type === 'const' && result.expr.n === 0;
 
                     if (isZero && !cond) continue;
 
                     allVariants.push({
-                        cond: cond,
-                        expr: node.expr,
-                        isZero: isZero,
-                        source: conn.fromElement
+                        cond,
+                        expr: result.expr,
+                        isZero
                     });
                 }
             }
 
             console.log('Варианты:', allVariants.map(v => ({
-                source: v.source,
                 cond: Optimizer.printCond(v.cond),
                 expr: Optimizer.printExpr(v.expr)
             })));
 
-            if (allVariants.length === 0) {
-                return '0';
-            }
+            if (allVariants.length === 0) return '0';
 
             const valueVariants = allVariants.filter(v => !v.isZero);
-
-            if (valueVariants.length === 0) {
-                return '0';
-            }
+            if (valueVariants.length === 0) return '0';
 
             let result = Optimizer.Const(0);
 
@@ -369,16 +374,11 @@ const CodeGen = {
                 }
             }
 
-            console.log('До оптимизации:', Optimizer.printExpr(result));
-
             const simplified = Optimizer.simplifyExpr(result);
-            
-            console.log('После оптимизации:', Optimizer.printExpr(simplified));
-            
             return Optimizer.printExpr(simplified);
 
         } catch (err) {
-            console.error('Ошибка генерации:', err);
+            console.error('Ошибка:', err);
             return `/* Ошибка: ${err.message} */`;
         }
     }
