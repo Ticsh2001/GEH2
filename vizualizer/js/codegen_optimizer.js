@@ -442,51 +442,128 @@ function simplifyCondCore(c) {
             return Not(x);
         }
 
-        case 'and': {
-            const a = simplifyCondCore(c.a);
-            const b = simplifyCondCore(c.b);
+case 'and': {
+    const a = simplifyCondCore(c.a);
+    const b = simplifyCondCore(c.b);
 
-            if (!a) return b;
-            if (!b) return a;
-            if (a.type === 'false' || b.type === 'false') return FalseCond;
-            if (a.type === 'true') return b;
-            if (b.type === 'true') return a;
+    if (!a) return b;
+    if (!b) return a;
+    if (a.type === 'false' || b.type === 'false') return FalseCond;
+    if (a.type === 'true') return b;
+    if (b.type === 'true') return a;
 
-            const allTerms = [...flattenAnd(a), ...flattenAnd(b)];
-            const atomMap = new Map();
-            const otherTerms = [];
-
-            for (const t of allTerms) {
-                if (t.type === 'true') continue;
-                if (t.type === 'false') return FalseCond;
-
-                const key = atomKey(t);
-                if (key) {
-                    const negKey = negateAtomKey(key);
-                    if (negKey && atomMap.has(negKey)) {
-                        return FalseCond;
-                    }
-                    if (!atomMap.has(key)) {
-                        atomMap.set(key, t);
-                    }
-                } else {
-                    otherTerms.push(t);
+    const allTerms = [...flattenAnd(a), ...flattenAnd(b)];
+    
+    // === НОВОЕ: Сразу собираем все eq0/ne0 для быстрой проверки ===
+    const eq0Vars = new Map(); // var -> term
+    const ne0Vars = new Map(); // var -> term
+    const cmpTerms = [];
+    const otherTerms = [];
+    
+    for (const t of allTerms) {
+        if (t.type === 'true') continue;
+        if (t.type === 'false') return FalseCond;
+        
+        if (t.type === 'eq0') {
+            // Проверка на противоречие сразу
+            if (ne0Vars.has(t.v)) {
+                console.log(`Противоречие найдено: ${t.v} = 0 AND ${t.v} != 0`);
+                return FalseCond;
+            }
+            eq0Vars.set(t.v, t);
+        } else if (t.type === 'ne0') {
+            // Проверка на противоречие сразу
+            if (eq0Vars.has(t.v)) {
+                console.log(`Противоречие найдено: ${t.v} != 0 AND ${t.v} = 0`);
+                return FalseCond;
+            }
+            ne0Vars.set(t.v, t);
+        } else if (t.type === 'cmp') {
+            cmpTerms.push(t);
+        } else if (t.type === 'or') {
+            // === НОВОЕ: Проверяем каждую ветку OR на противоречие с контекстом ===
+            const orTerms = flattenOr(t);
+            const validBranches = [];
+            
+            for (const branch of orTerms) {
+                let branchValid = true;
+                
+                if (branch.type === 'ne0' && eq0Vars.has(branch.v)) {
+                    console.log(`OR ветка ${branch.v} != 0 противоречит контексту ${branch.v} = 0`);
+                    branchValid = false;
+                } else if (branch.type === 'eq0' && ne0Vars.has(branch.v)) {
+                    console.log(`OR ветка ${branch.v} = 0 противоречит контексту ${branch.v} != 0`);
+                    branchValid = false;
+                }
+                
+                if (branchValid) {
+                    validBranches.push(branch);
                 }
             }
-
-            let uniqueAtoms = Array.from(atomMap.values());
-            uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'and');
-
-            let result = [...uniqueAtoms, ...otherTerms];
-
-            // Поглощение: X AND (X OR Y) = X
-            result = applyAndAbsorption(result);
-
-            if (result.length === 0) return TrueCond;
-            if (result.length === 1) return result[0];
-
-            return buildAnd(result);
+            
+            if (validBranches.length === 0) {
+                console.log(`Все ветки OR противоречат контексту → FALSE`);
+                return FalseCond;
+            } else if (validBranches.length === 1) {
+                // Если осталась только одна ветка OR, добавляем её напрямую
+                const singleBranch = validBranches[0];
+                if (singleBranch.type === 'eq0') {
+                    if (ne0Vars.has(singleBranch.v)) return FalseCond;
+                    eq0Vars.set(singleBranch.v, singleBranch);
+                } else if (singleBranch.type === 'ne0') {
+                    if (eq0Vars.has(singleBranch.v)) return FalseCond;
+                    ne0Vars.set(singleBranch.v, singleBranch);
+                } else {
+                    otherTerms.push(singleBranch);
+                }
+            } else {
+                // Перестраиваем OR только с валидными ветками
+                otherTerms.push(buildOr(validBranches));
+            }
+        } else {
+            otherTerms.push(t);
         }
+    }
+    
+    // Собираем уникальные атомы
+    const atomMap = new Map();
+    
+    for (const [v, term] of eq0Vars) {
+        const key = atomKey(term);
+        if (key) atomMap.set(key, term);
+    }
+    
+    for (const [v, term] of ne0Vars) {
+        const key = atomKey(term);
+        if (key) atomMap.set(key, term);
+    }
+    
+    for (const term of cmpTerms) {
+        const key = atomKey(term);
+        if (key) {
+            const negKey = negateAtomKey(key);
+            if (negKey && atomMap.has(negKey)) {
+                return FalseCond;
+            }
+            if (!atomMap.has(key)) {
+                atomMap.set(key, term);
+            }
+        }
+    }
+    
+    let uniqueAtoms = Array.from(atomMap.values());
+    uniqueAtoms = removeRedundantCmpAtoms(uniqueAtoms, 'and');
+    
+    let result = [...uniqueAtoms, ...otherTerms];
+    
+    // Поглощение: X AND (X OR Y) = X
+    result = applyAndAbsorption(result);
+    
+    if (result.length === 0) return TrueCond;
+    if (result.length === 1) return result[0];
+    
+    return buildAnd(result);
+}
 
         case 'or': {
             const a = simplifyCondCore(c.a);
