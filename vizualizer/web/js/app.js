@@ -7,6 +7,11 @@ const App = {
      * Инициализация приложения
      */
     init() {
+        //Settings.init().then(() => {
+        //    // если хочешь — можно обновить UI (например, статус “Сигналы загружены”)
+        //    console.log('Settings loaded, signals:', Settings.signals.length);
+        //    }).catch(err => console.error(err));
+        //console.log('signals loaded:', Settings.signals.slice(0, 5));
         this.setupPaletteDragDrop();
         this.setupGlobalMouseHandlers();
         this.setupContextMenu();

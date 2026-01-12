@@ -69,22 +69,39 @@ const Modal = {
 
         let contentHTML = '';
 
-        if (elemType === 'input-signal') {
-            const signalType = props.signalType || SIGNAL_TYPE.NUMBER;
-            contentHTML = `
-                <div class="modal-row">
-                    <label>Название сигнала:</label>
-                    <input type="text" id="prop-name" value="${props.name || 'Сигнал'}">
-                </div>
-                <div class="modal-row">
-                    <label>Тип сигнала:</label>
-                    <select id="prop-signal-type">
-                        <option value="${SIGNAL_TYPE.NUMBER}" ${signalType === SIGNAL_TYPE.NUMBER ? 'selected' : ''}>Числовой</option>
-                        <option value="${SIGNAL_TYPE.LOGIC}" ${signalType === SIGNAL_TYPE.LOGIC ? 'selected' : ''}>Логический</option>
-                    </select>
-                </div>
-            `;
-        } else if (elemType === 'if') {
+ if (elemType === 'input-signal') {
+  const signalType = props.signalType || SIGNAL_TYPE.NUMBER;
+
+  contentHTML = `
+    <div class="modal-row">
+      <label>Название сигнала:</label>
+      <input type="text" id="prop-name" value="${props.name || ''}" placeholder="Например: 10LBA..." />
+      <small style="color:#999;">
+        Поиск по маске через * (например: *MAA*CP*)
+      </small>
+      <div id="signal-filter-results"
+           style="max-height:160px; overflow-y:auto; background:#0f3460; border-radius:5px; margin-top:6px; display:none;">
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <label>Описание сигнала:</label>
+      <textarea id="prop-description" readonly>${props.description || ''}</textarea>
+    </div>
+
+    <div class="modal-row">
+      <label>Тип сигнала:</label>
+      <select id="prop-signal-type">
+        <option value="${SIGNAL_TYPE.NUMBER}" ${signalType === SIGNAL_TYPE.NUMBER ? 'selected' : ''}>Числовой</option>
+        <option value="${SIGNAL_TYPE.LOGIC}" ${signalType === SIGNAL_TYPE.LOGIC ? 'selected' : ''}>Логический</option>
+      </select>
+    </div>
+  `;
+
+  // ВАЖНО: обработчики можно навесить только после того, как модалка вставила HTML в DOM.
+  // Поэтому ниже мы добавим "хуки" после того, как modalContent.innerHTML применится.
+  // (Смотри пункт 2 — небольшая вставка в конце showPropertiesModal)
+} else if (elemType === 'if') {
             contentHTML = `
                 <div class="modal-row">
                     <label>Оператор сравнения:</label>
@@ -170,6 +187,76 @@ const Modal = {
         
 
         modalContent.innerHTML = contentHTML;
+        // --- post init handlers (когда DOM модалки уже существует) ---
+        if (elemType === 'input-signal') {
+        const input = document.getElementById('prop-name');
+        const results = document.getElementById('signal-filter-results');
+        const descField = document.getElementById('prop-description');
+
+        let timer = null;
+
+        const renderList = (items) => {
+            if (!items || items.length === 0) {
+            results.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
+            results.style.display = 'block';
+            return;
+            }
+
+            results.innerHTML = items.map(s => `
+            <div class="signal-result-item"
+                style="padding:6px 8px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div style="font-weight:600;">${s.Tagname}</div>
+                <div style="color:#aaa; font-size:11px;">${s.Description || ''}</div>
+            </div>
+            `).join('');
+
+            results.style.display = 'block';
+
+            results.querySelectorAll('.signal-result-item').forEach((div, i) => {
+            div.addEventListener('click', () => {
+                const chosen = items[i];
+                input.value = chosen.Tagname;
+                descField.value = chosen.Description || '';
+                results.style.display = 'none';
+            });
+            });
+        };
+
+        const search = async () => {
+            const mask = (input.value || '').trim();
+
+            // Показываем список только если пользователь реально использует маску
+            if (!mask.includes('*')) {
+            results.style.display = 'none';
+            return;
+            }
+
+            results.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
+            results.style.display = 'block';
+
+            try {
+            // В settings.js должен быть метод Settings.fetchSignals(mask, limit)
+            const data = await Settings.fetchSignals(mask, 50);
+            renderList(data.items || []);
+            } catch (e) {
+            results.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки сигналов</div>';
+            results.style.display = 'block';
+            console.error(e);
+            }
+        };
+
+        input.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(search, 200); // debounce
+        });
+
+        // опционально: закрывать список кликом вне
+        document.addEventListener('mousedown', (e) => {
+            if (!results.contains(e.target) && e.target !== input) {
+            results.style.display = 'none';
+            }
+        }, { once: true });
+        }
         modalOverlay.dataset.elementId = elemId;
         this.showModal('modal-overlay');
 
@@ -202,48 +289,32 @@ const Modal = {
 
             if (elemType === 'input-signal') {
                 const name = document.getElementById('prop-name').value || 'Сигнал';
+                const description = document.getElementById('prop-description').value || '';
                 const signalType = document.getElementById('prop-signal-type').value;
 
                 const oldSignalType = elemData.props.signalType;
                 elemData.props.name = name;
+                elemData.props.description = description;
                 elemData.props.signalType = signalType;
 
                 if (oldSignalType !== signalType) {
                     AppState.connections = AppState.connections.filter(conn => {
-                        if (conn.fromElement === elemId) {
-                            const toPortIndex = parseInt(conn.toPort.split('-')[1]);
-                            const inputType = getInputPortType(conn.toElement, toPortIndex);
-                            return areTypesCompatible(signalType, inputType);
-                        }
-                        return true;
+                    if (conn.fromElement === elemId) {
+                        const toPortIndex = parseInt(conn.toPort.split('-')[1]);
+                        const inputType = getInputPortType(conn.toElement, toPortIndex);
+                        return areTypesCompatible(signalType, inputType);
+                    }
+                    return true;
                     });
                 }
 
-                                // Перерисовываем элемент
-                // Перерисовываем элемент
                 const { html } = Elements.createElementHTML(
-                    elemType,
-                    elemId,
-                    elemData.x,
-                    elemData.y,
-                    elemData.props,
-                    elemData.width,
-                    elemData.height
+                    elemType, elemId, elemData.x, elemData.y, elemData.props, elemData.width, elemData.height
                 );
                 elem.outerHTML = html;
 
-                // Находим новый DOM-элемент
-                const newElem = document.getElementById(elemId);
-
-                // Заново навешиваем обработчики на новый элемент
                 Elements.setupElementHandlers(elemId);
-
-                if (AppState.selectedElement === elemId && newElem) {
-                    newElem.classList.add('selected');
-                }
-
                 Connections.drawConnections();
-                
             } else if (elemType === 'if') {
                 const operator = document.getElementById('prop-operator').value;
                 elemData.props.operator = operator;
