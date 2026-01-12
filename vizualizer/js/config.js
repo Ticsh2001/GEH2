@@ -166,7 +166,18 @@ const ELEMENT_TYPES = {
         resizable: true,
         minWidth: 150,
         minHeight: 60,
-    },
+    },  // ← важно, если предыдущий элемент не заканчивается запятой
+    'group': {
+        name: 'Группа',
+        inputs: 0,
+        outputs: 0,
+        color: '#6b7280',
+        resizable: true,
+        minWidth: 200,
+        minHeight: 120,
+        hasProperties: true,
+        defaultProps: { title: 'Группа' }
+    }
 };
 
 const VIEWPORT_CONFIG = {

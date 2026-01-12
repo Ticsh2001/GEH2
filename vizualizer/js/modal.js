@@ -118,7 +118,16 @@ const Modal = {
                     <input type="number" id="prop-value" value="${props.value ?? 0}" step="any">
                 </div>
             `;
-        } else if (elemType === 'formula') {
+        } 
+        else if (elemType === 'group') {
+            contentHTML = `
+            <div class="modal-row">
+                <label>Название группы:</label>
+                <input type="text" id="prop-title" value="${props.title || 'Группа'}">
+            </div>`;
+        }   
+        
+        else if (elemType === 'formula') {
             let signalsHTML = '';
             AppState.connections.forEach(conn => {
                 if (conn.toElement === elemId) {
@@ -283,6 +292,12 @@ const Modal = {
                 const symbol = elem.querySelector('.element-symbol');
                 if (symbol) symbol.textContent = label;
             }
+            else if (elemType === 'group') {
+                const title = document.getElementById('prop-title').value || 'Группа';
+                elemData.props.title = title;
+                const titleEl = elem.querySelector('.group-title');
+                if (titleEl) titleEl.textContent = title;
+                }
 
             this.hideModal('modal-overlay');
             

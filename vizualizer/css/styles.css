@@ -625,3 +625,34 @@ body {
     border-color: #e94560;
     box-shadow: 0 0 15px rgba(233, 69, 96, 0.5);
 }
+
+/* === Выделение рамкой === */
+#selection-rect {
+  position: absolute;
+  border: 1px dashed #e94560;
+  background: rgba(233, 69, 96, 0.1);
+  pointer-events: none;
+  display: none;
+  z-index: 200;
+}
+
+/* === Кастомный элемент “Группа” === */
+.element.group {
+  background: rgba(107, 114, 128, 0.15);
+  border: 2px dashed #6b7280;
+  border-radius: 8px;
+  pointer-events: none; /* не мешает клику по внутренним элементам */
+  position: absolute;
+}
+
+.group-title {
+  position: absolute;
+  top: -20px;
+  left: 5px;
+  font-size: 11px;
+  color: #ccc;
+  background: #16213e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: auto; /* можно кликнуть для выбора */
+}

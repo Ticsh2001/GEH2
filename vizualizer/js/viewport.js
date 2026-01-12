@@ -13,6 +13,11 @@ const Viewport = {
         this.setupMinimap();
         this.setupCursorPosition();
         this.updateTransform();
+        const container = document.getElementById('workspace-container');
+        const rect = container.getBoundingClientRect();
+        AppState.viewport.panX = 100; // немного отступить от левого края
+        AppState.viewport.panY = (rect.height / 2) - 2500 * 0.5 * AppState.viewport.zoom;
+        this.updateTransform();
     },
 
     /**

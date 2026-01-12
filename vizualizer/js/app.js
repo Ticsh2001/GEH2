@@ -12,6 +12,7 @@ const App = {
         this.setupContextMenu();
         this.setupWorkspaceClick();
         this.setupOutputCounter();
+        this.setupMultiSelection();
 
         // Инициализация модулей
         Viewport.init();
@@ -229,6 +230,66 @@ setupGlobalMouseHandlers() {
         workspace.addEventListener('click', (e) => {
             if (e.target === workspace) {
                 Elements.deselectAll();
+            }
+        });
+    },
+    /**
+ * --- Выделение рамкой и множественное перемещение ---
+ */
+    setupMultiSelection() {
+        const container = document.getElementById('workspace-container');
+        const rectEl = document.getElementById('selection-rect');
+
+        container.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target !== document.getElementById('workspace')) return;
+
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            AppState.multiSelecting = true;
+            AppState.selectionRect = { startX: pos.x, startY: pos.y, x: pos.x, y: pos.y, w: 0, h: 0 };
+
+            rectEl.style.left = e.clientX + 'px';
+            rectEl.style.top = e.clientY + 'px';
+            rectEl.style.width = '0px';
+            rectEl.style.height = '0px';
+            rectEl.style.display = 'block';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!AppState.multiSelecting) return;
+
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            const sx = AppState.selectionRect.startX;
+            const sy = AppState.selectionRect.startY;
+            const x = Math.min(sx, pos.x);
+            const y = Math.min(sy, pos.y);
+            const w = Math.abs(pos.x - sx);
+            const h = Math.abs(pos.y - sy);
+
+            rectEl.style.left = x * AppState.viewport.zoom + AppState.viewport.panX + 'px';
+            rectEl.style.top = y * AppState.viewport.zoom + AppState.viewport.panY + 'px';
+            rectEl.style.width = w * AppState.viewport.zoom + 'px';
+            rectEl.style.height = h * AppState.viewport.zoom + 'px';
+
+            const selected = [];
+            for (const [id, elData] of Object.entries(AppState.elements)) {
+            if (!elData || elData.type === 'output-frame') continue;
+            if (
+                elData.x >= x && elData.x + elData.width <= x + w &&
+                elData.y >= y && elData.y + elData.height <= y + h
+            ) selected.push(id);
+            }
+
+            AppState.selectedElements = selected;
+            document.querySelectorAll('.element').forEach(el => 
+            el.classList.toggle('selected', selected.includes(el.id))
+            );
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (AppState.multiSelecting) {
+            AppState.multiSelecting = false;
+            rectEl.style.display = 'none';
             }
         });
     }

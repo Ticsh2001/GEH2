@@ -172,7 +172,17 @@ const Elements = {
                         <div class="element-symbol">${safe(props.label, 'Выход')}</div>
                         <div class="ports-right"></div>
                     </div>`;
-            } else { // Для любых других (fallback)
+
+            } 
+            else if (elemType === 'group') {
+                const title = props.title || 'Группа';
+                innerHTML = `
+                    <div class="group-content">
+                    <div class="group-title">${title}</div>
+                    </div>`;
+            }
+            
+            else { // Для любых других (fallback)
                 innerHTML = `
                     <div class="element-header" style="background:${config.color};">${config.name}</div>
                     <div class="element-body">
@@ -515,18 +525,31 @@ const Elements = {
         if (!AppState.draggingElement) return;
 
         const canvasPos = screenToCanvas(e.clientX, e.clientY);
-        const x = canvasPos.x - AppState.dragOffset.x;
-        const y = canvasPos.y - AppState.dragOffset.y;
-
         const elemId = AppState.draggingElement;
-        const elem = document.getElementById(elemId);
         const elemData = AppState.elements[elemId];
+        if (!elemData) return;
 
-        elem.style.left = `${x}px`;
-        elem.style.top = `${y}px`;
+        const newX = canvasPos.x - AppState.dragOffset.x;
+        const newY = canvasPos.y - AppState.dragOffset.y;
+        const dx = newX - elemData.x;
+        const dy = newY - elemData.y;
 
-        elemData.x = x;
-        elemData.y = y;
+        // если выделено несколько
+        const group = AppState.selectedElements && AppState.selectedElements.length > 1
+            ? AppState.selectedElements
+            : [elemId];
+
+        for (const id of group) {
+            const elData = AppState.elements[id];
+            if (!elData) continue;
+            elData.x += dx;
+            elData.y += dy;
+            const el = document.getElementById(id);
+            if (el) {
+            el.style.left = elData.x + 'px';
+            el.style.top = elData.y + 'px';
+            }
+        }
 
         Connections.drawConnections();
     },
