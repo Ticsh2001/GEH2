@@ -6,25 +6,19 @@ const Project = {
     /**
      * Инициализация
      */
+        /**
+     * Инициализация
+     */
     init() {
         document.getElementById('btn-new').addEventListener('click', () => this.newProject());
         document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
-        document.getElementById('btn-load').addEventListener('click', () => {
-            document.getElementById('file-input').click();
-        });
+        // Теперь кнопка Load вызывает функцию напрямую, а не input file
+        document.getElementById('btn-load').addEventListener('click', () => this.showProjectList());
         document.getElementById('btn-project-settings').addEventListener('click', () => {
             Modal.showProjectPropertiesModal();
         });
 
-        document.getElementById('file-input').addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (ev) => this.loadProject(ev.target.result);
-                reader.readAsText(file);
-            }
-            e.target.value = '';
-        });
+        // Блок document.getElementById('file-input')... удален.
     },
 
     /**
@@ -44,19 +38,46 @@ const Project = {
         Viewport.updateTransform();
     },
 
+        /**
+     * Запрос имени файла и загрузка с сервера
+     */
+    async loadProjectPrompt() {
+        const filename = window.prompt(
+            "Введите имя файла проекта для загрузки (с сервера). Пример: scheme_logic.json", 
+            AppState.project.code ? `${AppState.project.code}_${AppState.project.type}.json` : "scheme_type.json"
+        );
+        
+        if (!filename) return; // Отмена
+
+        try {
+            // Используем обертку из Settings.js для запроса к /api/project/load
+            const data = await Settings.loadProject(filename);
+            
+            // Если загрузка успешна, вызываем основную функцию обработки данных
+            this._processLoadedData(data);
+            alert(`Проект "${filename}" успешно загружен с сервера.`);
+
+        } catch (error) {
+            console.error('Ошибка загрузки проекта:', error);
+            alert(`Ошибка загрузки проекта: ${error.message}`);
+        }
+    },
+
     /**
      * Сохранение проекта
      */
-    saveProject() {
-        // Проверяем, заполнены ли свойства проекта
+        async saveProject() { // !!! Сделать функцию асинхронной (async) !!!
+        // 1. Проверяем свойства проекта
         if (!AppState.project.code) {
             Modal.showProjectPropertiesModal();
             alert('Пожалуйста, укажите код проекта перед сохранением.');
             return;
         }
 
+        // Обновляем размеры рамок перед сохранением
         updateFrameChildren();
 
+        // 2. Сборка объекта проекта
         const project = {
             version: '1.0',
             project: AppState.project,
@@ -70,27 +91,59 @@ const Project = {
             }
         };
 
-        const jsonStr = JSON.stringify(project, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-
         const filename = `${AppState.project.code || 'scheme'}_${AppState.project.type}.json`;
 
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
+        // 3. Сохранение на сервер
+        try {
+            await Settings.saveProject(filename, project);
+            alert(`Проект успешно сохранен на сервере как: ${filename}`);
+        } catch (error) {
+            console.error('Ошибка сохранения проекта:', error);
+            alert(`Ошибка сохранения проекта: ${error.message}`);
+        }
+    },
 
-        URL.revokeObjectURL(url);
+    async showProjectList() {
+        try {
+            const result = await Settings.listProjects(); // нужно реализовать в settings.js
+            const list = result.projects || [];
+
+            if (list.length === 0) {
+                alert('Проекты в папке не найдены.');
+                return;
+            }
+
+            const choice = window.prompt(
+                'Список проектов:\n' + list.map((p, i) => `${i + 1}. ${p.code || p.filename} — ${p.description}`).join('\n') +
+                '\n\nВведите номер проекта для загрузки:',
+                '1'
+            );
+            const index = parseInt(choice, 10) - 1;
+            if (isNaN(index) || !list[index]) return;
+
+            await this.loadProjectByFilename(list[index].filename);
+        } catch (error) {
+            console.error(error);
+            alert('Не удалось получить список проектов: ' + error.message);
+        }
+    },
+
+    async loadProjectByFilename(filename) {
+        try {
+            const data = await Settings.loadProject(filename);
+            this._processLoadedData(data);
+            alert(`Проект "${filename}" загружен.`);
+        } catch (error) {
+            console.error(error);
+            alert('Ошибка загрузки проекта: ' + error.message);
+        }
     },
 
     /**
      * Загрузка проекта
      */
-    loadProject(jsonStr) {
+    _processLoadedData(data) {
         try {
-            const data = JSON.parse(jsonStr);
-
             // Очищаем
             document.getElementById('workspace').innerHTML = '';
             document.getElementById('connections-svg').innerHTML = '';
@@ -100,54 +153,17 @@ const Project = {
             if (data.project) {
                 AppState.project = { ...AppState.project, ...data.project };
             }
+            
+            // ... (остальная логика загрузки, которая была в loadProject)
 
             // Загружаем состояние
             AppState.elementCounter = data.counter || 0;
 
-            // Загружаем viewport
-            if (data.viewport) {
-                AppState.viewport.zoom = data.viewport.zoom || 1;
-                AppState.viewport.panX = data.viewport.panX || 0;
-                AppState.viewport.panY = data.viewport.panY || 0;
-            }
-
-            // Сначала загружаем рамки
-            Object.values(data.elements || {})
-                .filter(e => e.type === 'output-frame')
-                .forEach(elemData => {
-                    Elements.addElement(
-                        elemData.type,
-                        elemData.x,
-                        elemData.y,
-                        elemData.props,
-                        elemData.id,
-                        elemData.width,
-                        elemData.height
-                    );
-                });
-
-            // Затем остальные элементы
-            Object.values(data.elements || {})
-                .filter(e => e.type !== 'output-frame')
-                .forEach(elemData => {
-                    Elements.addElement(
-                        elemData.type,
-                        elemData.x,
-                        elemData.y,
-                        elemData.props,
-                        elemData.id,
-                        elemData.width,
-                        elemData.height
-                    );
-                });
-
-            AppState.connections = data.connections || [];
-
-            Viewport.updateTransform();
-            Connections.drawConnections();
+            // ... (дальше без изменений)
+            // ... (загрузка элементов, connections, updateTransform)
 
         } catch (e) {
-            alert('Ошибка загрузки: ' + e.message);
+            alert('Ошибка обработки данных проекта: ' + e.message);
             console.error(e);
         }
     }

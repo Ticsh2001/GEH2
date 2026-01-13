@@ -16,5 +16,44 @@ const Settings = {
     const r = await fetch(url);
     if (!r.ok) throw new Error('Failed to fetch signals');
     return await r.json(); // {items, total}
+  },
+  // ... в объекте Settings
+
+  async saveProject(filename, projectData) {
+    if (!filename.endsWith('.json')) {
+      filename += '.json';
+    }
+    const r = await fetch('/api/project/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: filename,
+        content: projectData
+      })
+    });
+    if (!r.ok) throw new Error('Failed to save project');
+    return r.json();
+  },
+  
+  async listProjects() {
+    const r = await fetch('/api/project/list');
+    if (!r.ok) throw new Error('Failed to list projects');
+    return r.json();
+  },
+
+  async loadProject(filename) {
+    if (!filename.endsWith('.json')) {
+      filename += '.json';
+    }
+    const r = await fetch(`/api/project/load/${encodeURIComponent(filename)}`);
+    if (!r.ok) {
+        if (r.status === 404) {
+             throw new Error(`Project "${filename}" not found (404)`);
+        }
+        throw new Error('Failed to load project');
+    }
+    return r.json();
   }
+
+// ...
 };
