@@ -213,5 +213,38 @@
     <script src="js/settings.js"></script>
    
     <script src="js/app.js"></script>
+
+    <div id="modal-project-list" class="modal hidden">
+        <div class="modal__content modal__content--wide">
+            <h2 class="modal__title">Выбор проекта</h2>
+
+            <div class="project-list__toolbar">
+            <input id="project-search" type="text" placeholder="Фильтр по имени или описанию…" />
+            <button id="project-refresh" class="btn btn-secondary">Обновить</button>
+            </div>
+
+            <div class="project-list__table-container">
+            <table class="project-list__table">
+                <thead>
+                <tr>
+                    <th>Файл</th>
+                    <th>Tagname</th>
+                    <th>Description</th>
+                    <th>Тип</th>
+                </tr>
+                </thead>
+                <tbody id="project-list-body">
+                <tr><td colspan="4" class="project-list__empty">Загрузка…</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="modal__actions">
+                <button id="project-cancel" class="btn btn-secondary">Отмена</button>
+                <button id="project-load" class="btn btn-primary" disabled>Загрузить</button>
+            </div>
+        </div>
+    </div>
+    
 </body>
 </html>

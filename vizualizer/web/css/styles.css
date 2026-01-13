@@ -656,3 +656,37 @@ body {
   border-radius: 4px;
   pointer-events: auto; /* можно кликнуть для выбора */
 }
+
+.modal.hidden { display: none; }
+.modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); z-index: 1000; }
+.modal__content { background: #fff; padding: 24px; border-radius: 8px; width: 640px; max-height: 80vh; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+.modal__content--wide { width: 800px; }
+.modal__title { margin: 0; }
+
+.project-list__toolbar { display: flex; gap: 12px; }
+.project-list__toolbar input { flex: 1; padding: 6px 10px; }
+.project-list__table-container { flex: 1; overflow: auto; border: 1px solid #ddd; border-radius: 6px; }
+.project-list__table { width: 100%; border-collapse: collapse; }
+.project-list__table th, .project-list__table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+.project-list__table tbody tr { cursor: pointer; transition: background 0.15s ease; }
+.project-list__table tbody tr:hover { background: #f0f6ff; }
+.project-list__empty { text-align: center; color: #888; padding: 16px; }
+.modal__actions { display: flex; justify-content: flex-end; gap: 12px; }
+.project-list__table th,
+.project-list__table td {
+  color: #111;          /* насыщённый чёрный текст */
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+}
+.modal__content--wide {
+  width: 860px;
+  max-height: 90vh;    /* занимает 90% экрана */
+}
+
+.project-list__table-container {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  max-height: 60vh;     /* много строк */
+}

@@ -9,17 +9,32 @@ const Project = {
         /**
      * Инициализация
      */
-    init() {
-        document.getElementById('btn-new').addEventListener('click', () => this.newProject());
-        document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
-        // Теперь кнопка Load вызывает функцию напрямую, а не input file
-        document.getElementById('btn-load').addEventListener('click', () => this.showProjectList());
-        document.getElementById('btn-project-settings').addEventListener('click', () => {
-            Modal.showProjectPropertiesModal();
-        });
+init() {
+    document.getElementById('btn-new').addEventListener('click', () => this.newProject());
+    document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
+    document.getElementById('btn-load').addEventListener('click', () => this.openProjectListModal());
+    document.getElementById('btn-project-settings').addEventListener('click', () => {
+        Modal.showProjectPropertiesModal();
+    });
 
-        // Блок document.getElementById('file-input')... удален.
-    },
+    // Работа с модалкой выбора проекта
+    this.projectList = [];
+    this.filteredProjectList = [];
+    this.selectedProjectFilename = null;
+
+    document.getElementById('project-cancel').addEventListener('click', () => this.closeProjectListModal());
+    document.getElementById('project-refresh').addEventListener('click', () => this.refreshProjectList());
+
+    document.getElementById('project-load').addEventListener('click', () => {
+        if (this.selectedProjectFilename) {
+            this.loadProjectFromList(this.selectedProjectFilename);
+        }
+    });
+
+    document.getElementById('project-search').addEventListener('input', (event) => {
+        this.filterProjectList(event.target.value);
+    });
+},
 
     /**
      * Новый проект
@@ -139,32 +154,170 @@ const Project = {
         }
     },
 
+    openProjectListModal() {
+  const modal = document.getElementById('modal-project-list');
+  modal.classList.remove('hidden');
+  document.body.classList.add('modal-open'); // если есть такой класс для блокировки скролла
+  this.refreshProjectList();
+},
+
+closeProjectListModal() {
+  const modal = document.getElementById('modal-project-list');
+  modal.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+},
+
+async refreshProjectList() {
+  const tbody = document.getElementById('project-list-body');
+  tbody.innerHTML = `<tr><td colspan="4" class="project-list__empty">Загрузка…</td></tr>`;
+  try {
+    const result = await Settings.listProjects();
+    this.projectList = result.projects || [];
+    this.filteredProjectList = [...this.projectList];
+    this.renderProjectList();
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="4" class="project-list__empty">Ошибка: ${err.message}</td></tr>`;
+  }
+},
+
+renderProjectList() {
+  const tbody = document.getElementById('project-list-body');
+  const loadBtn = document.getElementById('project-load');
+  loadBtn.disabled = true;
+  this.selectedProjectFilename = null;
+
+  if (!this.filteredProjectList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="project-list__empty">Ничего не найдено</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  this.filteredProjectList.forEach((item) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${item.filename}</td>
+      <td>${item.code || ''}</td>
+      <td>${item.description || ''}</td>
+      <td>${item.type || ''}</td>
+    `;
+    tr.addEventListener('click', () => {
+      this.highlightRow(tr);
+      this.selectedProjectFilename = item.filename;
+      loadBtn.disabled = false;
+    });
+    tr.addEventListener('dblclick', () => {
+      this.highlightRow(tr);
+      this.selectedProjectFilename = item.filename;
+      loadBtn.disabled = false;
+      this.loadProjectFromList(item.filename);
+    });
+    tbody.appendChild(tr);
+  });
+},
+
+highlightRow(row) {
+  const tbody = row.parentElement;
+  [...tbody.children].forEach((tr) => tr.classList.remove('selected'));
+  row.classList.add('selected');
+},
+
+
+// Фильтр по поисковой строке
+filterProjectList(query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) {
+    this.filteredProjectList = [...this.projectList];
+  } else {
+    this.filteredProjectList = this.projectList.filter((item) => {
+      return [
+        item.filename,
+        item.code,
+        item.description,
+        item.type
+      ].some((field) => (field || '').toLowerCase().includes(q));
+    });
+  }
+  this.renderProjectList();
+},
+
+async loadProjectFromList(filename) {
+  try {
+    const data = await Settings.loadProject(filename);
+    this._processLoadedData(data);
+    this.closeProjectListModal();
+    alert(`Проект "${filename}" успешно загружен.`);
+  } catch (error) {
+    console.error(error);
+    alert('Ошибка загрузки проекта: ' + error.message);
+  }
+},
+
+
+
+
     /**
      * Загрузка проекта
      */
     _processLoadedData(data) {
-        try {
-            // Очищаем
-            document.getElementById('workspace').innerHTML = '';
-            document.getElementById('connections-svg').innerHTML = '';
-            resetState();
+  try {
+    document.getElementById('workspace').innerHTML = '';
+    document.getElementById('connections-svg').innerHTML = '';
+    resetState();
 
-            // Загружаем свойства проекта
-            if (data.project) {
-                AppState.project = { ...AppState.project, ...data.project };
-            }
-            
-            // ... (остальная логика загрузки, которая была в loadProject)
-
-            // Загружаем состояние
-            AppState.elementCounter = data.counter || 0;
-
-            // ... (дальше без изменений)
-            // ... (загрузка элементов, connections, updateTransform)
-
-        } catch (e) {
-            alert('Ошибка обработки данных проекта: ' + e.message);
-            console.error(e);
-        }
+    if (data.project) {
+      AppState.project = { ...AppState.project, ...data.project };
     }
+
+    AppState.elementCounter = data.counter || 0;
+
+    if (data.viewport) {
+      AppState.viewport.zoom = data.viewport.zoom || 1;
+      AppState.viewport.panX = data.viewport.panX || 0;
+      AppState.viewport.panY = data.viewport.panY || 0;
+    }
+
+    const elements = data.elements || {};
+    Object.values(elements)
+      .filter(e => e.type === 'output-frame')
+      .forEach(elemData => {
+        Elements.addElement(
+          elemData.type,
+          elemData.x,
+          elemData.y,
+          elemData.props,
+          elemData.id,
+          elemData.width,
+          elemData.height
+        );
+      });
+
+    Object.values(elements)
+      .filter(e => e.type !== 'output-frame')
+      .forEach(elemData => {
+        Elements.addElement(
+          elemData.type,
+          elemData.x,
+          elemData.y,
+          elemData.props,
+          elemData.id,
+          elemData.width,
+          elemData.height
+        );
+      });
+
+    AppState.connections = data.connections || [];
+    AppState.elementCounter = Math.max(
+      AppState.elementCounter,
+      ...Object.values(elements).map(e => e.id || 0)
+    );
+
+    Viewport.updateTransform();
+    Connections.drawConnections();
+    updateFrameChildren();
+  } catch (e) {
+    alert('Ошибка обработки данных проекта: ' + e.message);
+    console.error(e);
+  }
+}
 };
