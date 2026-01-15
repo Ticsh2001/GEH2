@@ -193,12 +193,14 @@ const Elements = {
                         </div>
                     </div>`;
             }
+            const commentHtml = `<div class="element-comment">${safe(props.comment, '')}</div>`;
 
 
             const html = `
                 <div class="element ${elemType}" id="${elemId}" 
                     style="left:${x}px; top:${y}px; width:${w}px; height:${h}px;" data-type="${elemType}">
                     ${innerHTML}
+                    ${commentHtml}
                     ${resizeHandles}
                 </div>`;
 

@@ -638,11 +638,15 @@ body {
 
 /* === Кастомный элемент “Группа” === */
 .element.group {
-  background: rgba(107, 114, 128, 0.15);
+  background: rgba(107, 114, 128, 0.12);
   border: 2px dashed #6b7280;
   border-radius: 8px;
-  pointer-events: none; /* не мешает клику по внутренним элементам */
   position: absolute;
+  z-index: 1;              /* ниже обычных элементов (у них z-index: 10) */
+}
+
+.element.group .group-title {
+  pointer-events: auto;
 }
 
 .group-title {
@@ -690,3 +694,15 @@ body {
   border-radius: 6px;
   max-height: 60vh;     /* много строк */
 }
+
+.element-comment {
+  padding: 6px 10px 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+  opacity: 0.9;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.element-comment:empty { display: none; }

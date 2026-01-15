@@ -8,6 +8,13 @@ from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
+TEMPLATES_PATH = os.path.join(BASE_DIR, "formula_templates.json")
+
+def load_templates() -> Dict:
+    if not os.path.exists(TEMPLATES_PATH):
+        return {"templates": []}
+    with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 def load_settings() -> Dict:
     with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -59,7 +66,9 @@ def startup():
     if not folder:
         raise RuntimeError("settings.json: signalDataFolder is required")
     STATE["signals"] = load_signals_from_folder(folder)
+    STATE["templates"] = load_templates()
     print(f"[OK] loaded signals: {len(STATE['signals'])}")
+    print(f"[OK] loaded templates: {len(STATE['templates'].get('templates', []))}")
 
 @app.get("/api/settings")
 def api_settings():
@@ -144,6 +153,10 @@ def load_project(filename: str):
     except Exception as e:
         print(f"Error loading project: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during load")
+    
+@app.get("/api/formula-templates")
+def api_formula_templates():
+    return STATE.get("templates") or {"templates": []}
     
 @app.get("/api/project/list")
 def list_projects():

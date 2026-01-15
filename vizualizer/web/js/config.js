@@ -79,7 +79,7 @@ const ELEMENT_TYPES = {
         outputLabels: ['¬A'],
         outputTypes: [SIGNAL_TYPE.LOGIC],
         color: '#a855f7',
-        hasProperties: false,
+        hasProperties: true,
         resizable: true,
         minWidth: 100,
         minHeight: 60,
@@ -112,7 +112,7 @@ const ELEMENT_TYPES = {
         outputLabels: ['ИСТИНА', 'ЛОЖЬ'],
         outputTypes: [SIGNAL_TYPE.TRUE, SIGNAL_TYPE.FALSE],  // ← TRUE и FALSE
         color: '#f59e0b',
-        hasProperties: false,
+        hasProperties: true,
         resizable: true,
         minWidth: 120,
         minHeight: 80,

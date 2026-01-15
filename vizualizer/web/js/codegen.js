@@ -56,6 +56,11 @@ const CodeGen = {
                 result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
+        const map = (typeof Settings !== 'undefined' && Settings.getTemplatesMap)
+        ? Settings.getTemplatesMap()
+        : null;
+
+        result = expandFormulaTemplates(result, map);
 
         return result;
     },

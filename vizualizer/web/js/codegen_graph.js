@@ -49,14 +49,19 @@ const CodeGenGraph = {
 
         if (!graph.elem) return null;
 
-        const inConns = AppState.connections.filter(c => 
-            c.toElement === elementId && c.toPort.startsWith('in-')
-        );
+        const inConns = AppState.connections
+        .filter(c => c.toElement === elementId && c.toPort.startsWith('in-'))
+        .sort((a, b) => {
+            const ai = parseInt(a.toPort.split('-')[1] || '0', 10);
+            const bi = parseInt(b.toPort.split('-')[1] || '0', 10);
+            return ai - bi;
+        });
+
         inConns.forEach(conn => {
-            graph.inputs.push({
-                conn,
-                fromGraph: this.buildDependencyGraph(conn.fromElement)
-            });
+        graph.inputs.push({
+            conn,
+            fromGraph: this.buildDependencyGraph(conn.fromElement)
+        });
         });
 
         const condConn = AppState.connections.find(c =>
@@ -312,6 +317,11 @@ const CodeGenGraph = {
                 result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
+        const map = (typeof Settings !== 'undefined' && Settings.getTemplatesMap)
+        ? Settings.getTemplatesMap()
+        : null;
+
+        result = expandFormulaTemplates(result, map);
 
         return result;
     }

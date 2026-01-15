@@ -7,6 +7,7 @@ const App = {
      * Инициализация приложения
      */
     init() {
+        Settings.init().catch(console.error);
         //Settings.init().then(() => {
         //    // если хочешь — можно обновить UI (например, статус “Сигналы загружены”)
         //    console.log('Settings loaded, signals:', Settings.signals.length);

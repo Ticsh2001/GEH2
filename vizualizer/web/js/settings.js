@@ -1,5 +1,6 @@
 const Settings = {
   config: null,
+  templates: null,
 
   async init() {
     // тянем настройки (не обязательно, но полезно)
@@ -9,6 +10,18 @@ const Settings = {
     } catch (e) {
       console.warn('Settings load failed:', e);
     }
+    try {
+      const t = await this.fetchFormulaTemplates();
+      this.templates = t.templates || [];
+    } catch (e) {
+      this.templates = [];
+    }
+  },
+
+  getTemplatesMap() {
+    const map = {};
+    (this.templates || []).forEach(t => { if (t?.name) map[t.name] = t; });
+    return map;
   },
 
   async fetchSignals(mask, limit = 50) {
@@ -39,6 +52,12 @@ const Settings = {
     const r = await fetch('/api/project/list');
     if (!r.ok) throw new Error('Failed to list projects');
     return r.json();
+  },
+
+  async fetchFormulaTemplates() {
+      const r = await fetch('/api/formula-templates');
+      if (!r.ok) throw new Error('Failed to fetch formula templates');
+      return await r.json(); // {templates:[...]}
   },
 
   async loadProject(filename) {

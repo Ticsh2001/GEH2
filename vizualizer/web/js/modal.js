@@ -157,20 +157,35 @@ const Modal = {
             });
 
             contentHTML = `
-                <div class="modal-row">
-                    <label>Количество входов:</label>
-                    <input type="number" id="prop-input-count" value="${props.inputCount || 2}" min="1" max="10">
-                </div>
-                <div class="modal-row">
-                    <label>Входные сигналы (двойной клик для вставки):</label>
-                    <div class="signal-list" id="signal-list">
-                        ${signalsHTML || '<div style="color:#888;padding:5px;">Нет подключённых сигналов</div>'}
+                <div style="display:flex; gap:12px;">
+                    <div style="flex: 1;">
+                        <div class="modal-row">
+                            <label>Количество входов:</label>
+                            <input type="number" id="prop-input-count" value="${props.inputCount || 2}" min="1" max="10">
+                        </div>
+                        <div class="modal-row">
+                            <label>Входные сигналы (двойной клик для вставки):</label>
+                            <div class="signal-list" id="signal-list">
+                                ${signalsHTML || '<div style="color:#888;padding:5px;">Нет подключённых сигналов</div>'}
+                            </div>
+                        </div>
+                        <div class="modal-row">
+                            <label>Выражение:</label>
+                            <textarea id="prop-expression">${props.expression || ''}</textarea>
+                        </div>
+                    </div>
+
+                    <div style="width: 260px;">
+                        <div class="modal-row">
+                            <label>Шаблоны:</label>
+                            <div class="signal-list" id="template-list">
+                                <div style="color:#888;padding:5px;">Загрузка…</div>
+                            </div>
+                            <small style="color:#999;">Двойной клик — вставить вызов шаблона</small>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-row">
-                    <label>Выражение:</label>
-                    <textarea id="prop-expression">${props.expression || ''}</textarea>
-                </div>
+
             `;
         } else if (elemType === 'output') {
             contentHTML = `
@@ -184,78 +199,119 @@ const Modal = {
                 </div>
             `;
         }
+        if (!contentHTML) {
+            contentHTML = `<div style="color:#aaa; font-size:12px;">Нет специальных свойств.</div>`;
+            }
+        contentHTML += `
+            <div class="modal-row">
+                <label>Комментарий:</label>
+                <textarea id="prop-comment" placeholder="Комментарий к элементу...">${props.comment || ''}</textarea>
+            </div>
+            `;
         
 
         modalContent.innerHTML = contentHTML;
+        if (elemType === 'formula') {
+            const listEl = document.getElementById('template-list');
+            (async () => {
+                try {
+                const data = await Settings.fetchFormulaTemplates();
+                const items = data.templates || [];
+                if (!items.length) {
+                    listEl.innerHTML = '<div style="color:#888;padding:5px;">Нет шаблонов</div>';
+                    return;
+                }
+                listEl.innerHTML = items.map(t => {
+                    const sig = `${t.name}(${(t.args || []).join(', ')})`;
+                    return `<div class="signal-item template-item" data-insert="${sig}">${sig}</div>`;
+                }).join('');
+
+                listEl.querySelectorAll('.template-item').forEach(div => {
+                    div.addEventListener('dblclick', () => {
+                    const insert = div.dataset.insert;
+                    const textarea = document.getElementById('prop-expression');
+                    textarea.value += (textarea.value && !textarea.value.endsWith(' ') ? ' ' : '') + insert;
+                    textarea.focus();
+                    });
+                });
+                } catch (e) {
+                console.error(e);
+                listEl.innerHTML = '<div style="color:#888;padding:5px;">Ошибка загрузки</div>';
+                }
+            })();
+        }
+
+
+
         // --- post init handlers (когда DOM модалки уже существует) ---
         if (elemType === 'input-signal') {
-        const input = document.getElementById('prop-name');
-        const results = document.getElementById('signal-filter-results');
-        const descField = document.getElementById('prop-description');
+            const input = document.getElementById('prop-name');
+            const results = document.getElementById('signal-filter-results');
+            const descField = document.getElementById('prop-description');
 
-        let timer = null;
+            let timer = null;
 
-        const renderList = (items) => {
-            if (!items || items.length === 0) {
-            results.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
-            results.style.display = 'block';
-            return;
-            }
+            const renderList = (items) => {
+                if (!items || items.length === 0) {
+                results.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
+                results.style.display = 'block';
+                return;
+                }
 
-            results.innerHTML = items.map(s => `
-            <div class="signal-result-item"
-                style="padding:6px 8px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.08);">
-                <div style="font-weight:600;">${s.Tagname}</div>
-                <div style="color:#aaa; font-size:11px;">${s.Description || ''}</div>
-            </div>
-            `).join('');
+                results.innerHTML = items.map(s => `
+                <div class="signal-result-item"
+                    style="padding:6px 8px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <div style="font-weight:600;">${s.Tagname}</div>
+                    <div style="color:#aaa; font-size:11px;">${s.Description || ''}</div>
+                </div>
+                `).join('');
 
-            results.style.display = 'block';
+                results.style.display = 'block';
 
-            results.querySelectorAll('.signal-result-item').forEach((div, i) => {
-            div.addEventListener('click', () => {
-                const chosen = items[i];
-                input.value = chosen.Tagname;
-                descField.value = chosen.Description || '';
+                results.querySelectorAll('.signal-result-item').forEach((div, i) => {
+                div.addEventListener('click', () => {
+                    const chosen = items[i];
+                    input.value = chosen.Tagname;
+                    descField.value = chosen.Description || '';
+                    results.style.display = 'none';
+                });
+                });
+            };
+
+            const search = async () => {
+                const mask = (input.value || '').trim();
+
+                // Показываем список только если пользователь реально использует маску
+                if (!mask.includes('*')) {
                 results.style.display = 'none';
+                return;
+                }
+
+                results.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
+                results.style.display = 'block';
+
+                try {
+                // В settings.js должен быть метод Settings.fetchSignals(mask, limit)
+                const data = await Settings.fetchSignals(mask, 50);
+                renderList(data.items || []);
+                } catch (e) {
+                results.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки сигналов</div>';
+                results.style.display = 'block';
+                console.error(e);
+                }
+            };
+
+            input.addEventListener('input', () => {
+                clearTimeout(timer);
+                timer = setTimeout(search, 200); // debounce
             });
-            });
-        };
 
-        const search = async () => {
-            const mask = (input.value || '').trim();
-
-            // Показываем список только если пользователь реально использует маску
-            if (!mask.includes('*')) {
-            results.style.display = 'none';
-            return;
-            }
-
-            results.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
-            results.style.display = 'block';
-
-            try {
-            // В settings.js должен быть метод Settings.fetchSignals(mask, limit)
-            const data = await Settings.fetchSignals(mask, 50);
-            renderList(data.items || []);
-            } catch (e) {
-            results.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки сигналов</div>';
-            results.style.display = 'block';
-            console.error(e);
-            }
-        };
-
-        input.addEventListener('input', () => {
-            clearTimeout(timer);
-            timer = setTimeout(search, 200); // debounce
-        });
-
-        // опционально: закрывать список кликом вне
-        document.addEventListener('mousedown', (e) => {
-            if (!results.contains(e.target) && e.target !== input) {
-            results.style.display = 'none';
-            }
-        }, { once: true });
+            // опционально: закрывать список кликом вне
+            document.addEventListener('mousedown', (e) => {
+                if (!results.contains(e.target) && e.target !== input) {
+                results.style.display = 'none';
+                }
+            }, { once: true });
         }
         modalOverlay.dataset.elementId = elemId;
         this.showModal('modal-overlay');
@@ -369,6 +425,8 @@ const Modal = {
                 const titleEl = elem.querySelector('.group-title');
                 if (titleEl) titleEl.textContent = title;
                 }
+            const commentEl = document.getElementById('prop-comment');
+            if (commentEl) elemData.props.comment = commentEl.value || '';
 
             this.hideModal('modal-overlay');
             

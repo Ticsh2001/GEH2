@@ -229,3 +229,61 @@ function getOutputPortInfo(elemId, portIndex) {
         displayName: `${config.name} → ${config.outputLabels?.[portIndex] || `out${portIndex}`}`
     };
 }
+
+function splitArgsTopLevel(argStr) {
+  const out = [];
+  let cur = '';
+  let depth = 0;
+  for (let i = 0; i < argStr.length; i++) {
+    const ch = argStr[i];
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+function expandFormulaTemplates(expr, templatesMap) {
+  if (!expr) return expr;
+  if (!templatesMap) return expr;
+
+  // несколько проходов на случай вложенных шаблонов
+  for (let pass = 0; pass < 10; pass++) {
+    let changed = false;
+
+    expr = expr.replace(/([A-Za-z_]\w*)\s*\(([^()]|\([^()]*\))*\)/g, (match, name) => {
+      const tpl = templatesMap[name];
+      if (!tpl) return match;
+
+      // вытащим аргументы вручную: name(....)
+      const open = match.indexOf('(');
+      const close = match.lastIndexOf(')');
+      const inside = match.slice(open + 1, close);
+
+      const args = splitArgsTopLevel(inside);
+      const formal = tpl.args || [];
+      let body = String(tpl.body || '0');
+
+      // если количество аргументов не совпало — не трогаем (лучше так, чем сломать)
+      if (args.length !== formal.length) return match;
+
+      formal.forEach((f, i) => {
+        const re = new RegExp(`\\b${f}\\b`, 'g');
+        body = body.replace(re, `(${args[i]})`);
+      });
+
+      changed = true;
+      return `(${body})`;
+    });
+
+    if (!changed) break;
+  }
+
+  return expr;
+}
