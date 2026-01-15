@@ -91,6 +91,15 @@ init() {
 
         // Обновляем размеры рамок перед сохранением
         updateFrameChildren();
+        // ✅ 1. Генерируем код заранее
+        let generatedCode = '';
+        if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
+            try {
+                generatedCode = CodeGen.generate() || '';
+            } catch (err) {
+                console.error('Code generation failed:', err);
+            }
+        }
 
         // 2. Сборка объекта проекта
         const project = {
@@ -103,7 +112,8 @@ init() {
                 zoom: AppState.viewport.zoom,
                 panX: AppState.viewport.panX,
                 panY: AppState.viewport.panY
-            }
+            },
+            code: generatedCode
         };
 
         const filename = `${AppState.project.code || 'scheme'}_${AppState.project.type}.json`;

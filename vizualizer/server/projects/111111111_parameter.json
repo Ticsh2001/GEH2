@@ -1,0 +1,92 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "111111111",
+    "type": "parameter",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": ""
+  },
+  "elements": {
+    "input-signal-1": {
+      "id": "input-signal-1",
+      "type": "input-signal",
+      "x": 59,
+      "y": 990,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "\u0421\u0438\u0433\u043d\u0430\u043b",
+        "signalType": "numeric"
+      }
+    },
+    "input-signal-2": {
+      "id": "input-signal-2",
+      "type": "input-signal",
+      "x": 116,
+      "y": 1104,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "\u0421\u0438\u0433\u043d\u0430\u043b",
+        "signalType": "numeric"
+      }
+    },
+    "input-signal-3": {
+      "id": "input-signal-3",
+      "type": "input-signal",
+      "x": 185,
+      "y": 1228,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "\u0421\u0438\u0433\u043d\u0430\u043b",
+        "signalType": "numeric"
+      }
+    },
+    "input-signal-4": {
+      "id": "input-signal-4",
+      "type": "input-signal",
+      "x": 216,
+      "y": 1323,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "\u0421\u0438\u0433\u043d\u0430\u043b",
+        "signalType": "numeric"
+      }
+    },
+    "formula-5": {
+      "id": "formula-5",
+      "type": "formula",
+      "x": 559,
+      "y": 1163,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "",
+        "inputCount": 2
+      }
+    },
+    "formula-6": {
+      "id": "formula-6",
+      "type": "formula",
+      "x": 580,
+      "y": 1002,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "",
+        "inputCount": 2
+      }
+    }
+  },
+  "connections": [],
+  "counter": 6,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "/* \u041d\u0435\u0442 \u0432\u044b\u0445\u043e\u0434\u043e\u0432 */"
+}

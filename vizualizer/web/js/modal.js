@@ -156,46 +156,42 @@ const Modal = {
                 }
             });
 
+            // ... (где-то выше код сбора signalsHTML) ...
+
             contentHTML = `
-                <div style="display:flex; gap:12px;">
-                    <div style="flex: 1;">
-                        <div class="modal-row">
-                            <label>Количество входов:</label>
-                            <input type="number" id="prop-input-count" value="${props.inputCount || 2}" min="1" max="10">
-                        </div>
-                        <div class="modal-row">
-                            <label>Входные сигналы (двойной клик для вставки):</label>
-                            <div class="signal-list" id="signal-list">
-                                ${signalsHTML || '<div style="color:#888;padding:5px;">Нет подключённых сигналов</div>'}
-                            </div>
-                        </div>
-                        <div class="modal-row">
-                            <label>Выражение:</label>
-                            <textarea id="prop-expression">${props.expression || ''}</textarea>
+                <div class="modal-row">
+                    <label>Количество входов:</label>
+                    <input type="number" id="prop-input-count" value="${props.inputCount || 2}" min="1" max="10">
+                </div>
+
+                <!-- Верхний блок: Две колонки (Сигналы и Шаблоны) -->
+                <div style="display: flex; gap: 15px; margin-bottom: 15px; height: 140px;">
+                    <!-- Левая колонка: Сигналы -->
+                    <div style="flex: 1; display: flex; flex-direction: column;">
+                        <label style="margin-bottom: 5px; display:block;">Входные сигналы:</label>
+                        <div class="signal-list" id="signal-list" style="flex: 1; overflow-y: auto; background: #0f3460; padding: 5px; border-radius: 4px; border: 1px solid #4a90d9;">
+                            ${signalsHTML || '<div style="color:#888;padding:5px;">Нет сигналов</div>'}
                         </div>
                     </div>
 
-                    <div style="width: 260px;">
-                        <div class="modal-row">
-                            <label>Шаблоны:</label>
-                            <div class="signal-list" id="template-list">
-                                <div style="color:#888;padding:5px;">Загрузка…</div>
-                            </div>
-                            <small style="color:#999;">Двойной клик — вставить вызов шаблона</small>
+                    <!-- Правая колонка: Шаблоны -->
+                    <div style="flex: 1; display: flex; flex-direction: column;">
+                        <label style="margin-bottom: 5px; display:block;">Шаблоны:</label>
+                        <div class="signal-list" id="template-list" style="flex: 1; overflow-y: auto; background: #0f3460; padding: 5px; border-radius: 4px; border: 1px solid #4a90d9;">
+                            <div style="color:#888;padding:5px;">Загрузка…</div>
                         </div>
                     </div>
                 </div>
 
-            `;
-        } else if (elemType === 'output') {
-            contentHTML = `
+                <!-- Нижний блок: Поле формулы (во всю ширину) -->
                 <div class="modal-row">
-                    <label>Название выхода:</label>
-                    <input type="text" id="prop-label" value="${props.label || 'Выход'}">
-                </div>
-                <div class="modal-row">
-                    <label>Группировка (опционально):</label>
-                    <input type="text" id="prop-output-group" value="${props.outputGroup || ''}" placeholder="для логической группировки выходов">
+                    <label>Выражение формулы:</label>
+                    <textarea id="prop-expression" 
+                            style="width: 100%; min-height: 80px; font-family: monospace; font-size: 14px; line-height: 1.4;"
+                            spellcheck="false">${props.expression || ''}</textarea>
+                    <small style="color:#999; display:block; margin-top:4px;">
+                        Двойной клик по сигналу или шаблону вставит его в позицию курсора (или заменит выделенный текст).
+                    </small>
                 </div>
             `;
         }
@@ -228,10 +224,12 @@ const Modal = {
 
                 listEl.querySelectorAll('.template-item').forEach(div => {
                     div.addEventListener('dblclick', () => {
-                    const insert = div.dataset.insert;
-                    const textarea = document.getElementById('prop-expression');
-                    textarea.value += (textarea.value && !textarea.value.endsWith(' ') ? ' ' : '') + insert;
-                    textarea.focus();
+                        const insert = div.dataset.insert;
+                        const textarea = document.getElementById('prop-expression');
+                        
+                        // БЫЛО: textarea.value += ...;
+                        // СТАЛО:
+                        insertAtCursor(textarea, insert);
                     });
                 });
                 } catch (e) {
@@ -316,14 +314,36 @@ const Modal = {
         modalOverlay.dataset.elementId = elemId;
         this.showModal('modal-overlay');
 
+        // Функция для умной вставки текста в позицию курсора
+        const insertAtCursor = (field, text) => {
+            if (!field) return;
+            
+            // Получаем позиции выделения
+            const startPos = field.selectionStart;
+            const endPos = field.selectionEnd;
+            const currentValue = field.value;
+
+            // Вставляем текст: (текст до) + (новый текст) + (текст после)
+            field.value = currentValue.substring(0, startPos) + 
+                        text + 
+                        currentValue.substring(endPos, currentValue.length);
+
+            // Возвращаем фокус и ставим курсор сразу после вставленного текста
+            field.focus();
+            const newCursorPos = startPos + text.length;
+            field.setSelectionRange(newCursorPos, newCursorPos);
+        };
+
         // Обработчик вставки сигналов для формулы
         if (elemType === 'formula') {
             document.querySelectorAll('.signal-item').forEach(item => {
-                item.addEventListener('dblclick', () => {
-                    const signal = item.dataset.signal;
-                    const textarea = document.getElementById('prop-expression');
-                    textarea.value += signal;
-                    textarea.focus();
+            item.addEventListener('dblclick', () => {
+                const signal = item.dataset.signal;
+                const textarea = document.getElementById('prop-expression');
+                
+                // БЫЛО: textarea.value += signal;
+                // СТАЛО:
+                insertAtCursor(textarea, signal);
                 });
             });
         }
