@@ -278,6 +278,32 @@ function isNegation(a, b) {
     return false;
 }
 
+function isAtomCond(t) {
+    return t && (t.type === 'eq0' || t.type === 'ne0' || t.type === 'cmp');
+}
+
+function pruneOrByContext(orTerm, contextAtoms) {
+    const branches = flattenOr(orTerm);
+    const kept = [];
+
+    for (const br of branches) {
+        let contradicts = false;
+
+        for (const ctx of contextAtoms) {
+            if (isNegation(br, ctx)) {
+                contradicts = true;
+                break;
+            }
+        }
+
+        if (!contradicts) kept.push(br);
+    }
+
+    if (kept.length === 0) return FalseCond;
+    if (kept.length === 1) return kept[0];
+    return buildOr(kept);
+}
+
 function condEq(a, b) {
     if (a === b) return true;
     if (!a || !b) return false;
@@ -557,6 +583,13 @@ case 'and': {
     let result = [...uniqueAtoms, ...otherTerms];
     
     // Поглощение: X AND (X OR Y) = X
+    // === НОВОЕ: выбрасываем из OR ветки, противоречащие контексту AND ===
+    const contextAtoms = result.filter(t => isAtomCond(t));
+    result = result.map(t => {
+        if (t.type !== 'or') return t;
+        return pruneOrByContext(t, contextAtoms);
+    }).filter(t => t.type !== 'true'); // на всякий случай
+    
     result = applyAndAbsorption(result);
     
     if (result.length === 0) return TrueCond;
