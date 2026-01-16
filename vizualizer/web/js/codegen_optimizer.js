@@ -304,6 +304,13 @@ function pruneOrByContext(orTerm, contextAtoms) {
     return buildOr(kept);
 }
 
+function condNegationEq(a, b) {
+    if (!a || !b) return false;
+    return condEq(a, Not(b)) || condEq(b, Not(a));
+}
+
+
+
 function condEq(a, b) {
     if (a === b) return true;
     if (!a || !b) return false;
@@ -589,7 +596,7 @@ case 'and': {
         if (t.type !== 'or') return t;
         return pruneOrByContext(t, contextAtoms);
     }).filter(t => t.type !== 'true'); // на всякий случай
-    
+
     result = applyAndAbsorption(result);
     
     if (result.length === 0) return TrueCond;
@@ -713,6 +720,16 @@ function simplifyExprCore(expr) {
             if (c?.type === 'true') return t;
             if (c?.type === 'false') return e;
             if (exprEq(t, e)) return t;
+            // ✅ НОВОЕ: WHEN(C, T, WHEN(NOT C, X, 0)) => WHEN(C, T, X)
+            if (e && e.type === 'when') {
+                const c2 = simplifyCond(e.c);
+                const t2 = simplifyExprCore(e.t);
+                const e2 = simplifyExprCore(e.e);
+
+                if (e2?.type === 'const' && e2.n === 0 && condNegationEq(c, c2)) {
+                    return When(c, t, t2);
+                }
+            }
 
             return When(c, t, e);
         }
