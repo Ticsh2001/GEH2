@@ -42,6 +42,31 @@ function atomKey(c) {
     }
 }
 
+function splitAndCond(c) {
+    if (!c || c.type !== 'and') return null;
+    return [c.a, c.b];
+}
+
+function findSharedAndComplement(c1, c2) {
+    const p1 = splitAndCond(c1);
+    const p2 = splitAndCond(c2);
+    if (!p1 || !p2) return null;
+
+    const combos = [
+        [p1[0], p1[1], p2[0], p2[1]],
+        [p1[0], p1[1], p2[1], p2[0]],
+        [p1[1], p1[0], p2[0], p2[1]],
+        [p1[1], p1[0], p2[1], p2[0]],
+    ];
+
+    for (const [s1, x1, s2, x2] of combos) {
+        if (condEq(s1, s2) && condNegationEq(x1, x2)) {
+            return { shared: s1 };
+        }
+    }
+    return null;
+}
+
 function negateOp(op) {
     switch (op) {
         case '=': return '!=';
@@ -753,6 +778,19 @@ function simplifyExprCore(expr) {
 
                 if (e2?.type === 'const' && e2.n === 0 && condNegationEq(c, c2)) {
                     return When(c, t, t2);
+                }
+            }
+            // Узкое правило: WHEN(A∧B, t1, WHEN(A∧¬B, t2, WHEN(¬A, t3, e3))) -> ... t3
+            if (e && e.type === 'when') {
+                const c2 = e.c, t2 = e.t, e2 = e.e;
+
+                if (e2 && e2.type === 'when') {
+                    const c3 = e2.c, t3 = e2.t;
+
+                    const shared = findSharedAndComplement(c, c2);
+                    if (shared && condNegationEq(c3, shared.shared)) {
+                        return When(c, t, When(c2, t2, t3));
+                    }
                 }
             }
 
