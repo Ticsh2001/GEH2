@@ -45,10 +45,16 @@ const CodeGen = {
     },
 
     buildFormulaExpr(elem) {
-        const expression = elem.props.expression || '0';
-        let result = expression;
-        const formulaRefs = result.match(/formula[-_]\d+/g) || [];
-        
+        let result = elem.props.expression || '0';
+
+        // 1) Сначала раскрываем шаблоны (h и др.)
+        const map = (typeof Settings !== 'undefined' && Settings.getTemplatesMap)
+            ? Settings.getTemplatesMap()
+            : null;
+        result = expandFormulaTemplates(result, map);
+
+        // 2) Потом раскрываем ссылки на формулы
+        const formulaRefs = result.match(/formula[_-]\d+/g) || [];
         for (const ref of formulaRefs) {
             const refElem = AppState.elements[ref];
             if (refElem && refElem.type === 'formula') {
@@ -56,11 +62,6 @@ const CodeGen = {
                 result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
-        const map = (typeof Settings !== 'undefined' && Settings.getTemplatesMap)
-        ? Settings.getTemplatesMap()
-        : null;
-
-        result = expandFormulaTemplates(result, map);
 
         return result;
     },
