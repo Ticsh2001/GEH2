@@ -367,7 +367,7 @@ const CodeGen = {
 
             if (allVariants.length === 0) return '0';
 
-            const valueVariants = allVariants.filter(v => !v.isZero);
+            const valueVariants = allVariants.filter(v => !v.isZero || v.cond);
             if (valueVariants.length === 0) return '0';
 
             let result = Optimizer.Const(0);

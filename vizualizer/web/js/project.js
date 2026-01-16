@@ -317,10 +317,19 @@ async loadProjectFromList(filename) {
       });
 
     AppState.connections = data.connections || [];
-    AppState.elementCounter = Math.max(
-      AppState.elementCounter,
-      ...Object.values(elements).map(e => e.id || 0)
-    );
+
+    // корректно восстанавливаем счётчик
+    const counterFromFile = Number(data.counter);
+    AppState.elementCounter = Number.isFinite(counterFromFile) ? counterFromFile : 0;
+
+    const maxIdSuffix = Object.values(AppState.elements).reduce((max, el) => {
+        if (!el?.id) return max;
+        const match = String(el.id).match(/-(\d+)$/);   // ищем хвост -123
+        const num = match ? parseInt(match[1], 10) : NaN;
+        return Number.isFinite(num) ? Math.max(max, num) : max;
+    }, 0);
+
+    AppState.elementCounter = Math.max(AppState.elementCounter, maxIdSuffix);
 
     Viewport.updateTransform();
     Connections.drawConnections();
