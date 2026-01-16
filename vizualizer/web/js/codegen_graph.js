@@ -1,5 +1,6 @@
 // js/codegen_graph.js
 
+
 const CodeGenGraph = {
         /**
      * Собрать все условия вверх по цепочке cond‑портов (до корня).
@@ -305,10 +306,11 @@ const CodeGenGraph = {
                 return Optimizer.TrueCond;
         }
     },
+    
 
     buildFormulaExpr(elem) {
         let result = elem.props.expression || '0';
-        const formulaRefs = result.match(/formula-\d+/g) || [];
+        const formulaRefs = result.match(/formula[_-]\d+/g) || [];
 
         for (const ref of formulaRefs) {
             const refElem = AppState.elements[ref];

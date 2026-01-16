@@ -47,8 +47,8 @@ const CodeGen = {
     buildFormulaExpr(elem) {
         const expression = elem.props.expression || '0';
         let result = expression;
-        const formulaRefs = result.match(/formula-\d+/g) || [];
-
+        const formulaRefs = result.match(/formula[-_]\d+/g) || [];
+        
         for (const ref of formulaRefs) {
             const refElem = AppState.elements[ref];
             if (refElem && refElem.type === 'formula') {

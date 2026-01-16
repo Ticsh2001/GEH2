@@ -360,8 +360,15 @@ const Modal = {
             const modalOverlay = document.getElementById('modal-overlay');
             const elemId = modalOverlay.dataset.elementId;
             const elemData = AppState.elements[elemId];
-            const elemType = elemData.type;
             const elem = document.getElementById(elemId);
+            if (!elemData) {
+                alert('⚠ Элемент не найден — возможно, он был удалён или переименован.');
+                console.warn(`saveElementProperties: элемент ${elemId} не найден.`);
+                this.hideModal('modal-overlay');
+                return;
+            }
+
+            const elemType = elemData.type;
 
             if (elemType === 'input-signal') {
                 const name = document.getElementById('prop-name').value || 'Сигнал';

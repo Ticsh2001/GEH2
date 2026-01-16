@@ -2,6 +2,65 @@
  * Модуль управления проектом (сохранение, загрузка)
  */
 
+// --- миграция id: '-' -> '_' с обновлением всех ссылок ---
+function migrateIdsDashToUnderscore() {
+  const map = {};
+
+  // 1) собрать map старых id → новых
+  Object.values(AppState.elements).forEach(el => {
+    if (typeof el.id === 'string' && el.id.includes('-')) {
+      map[el.id] = el.id.replace(/-/g, '_');
+    }
+  });
+
+  if (!Object.keys(map).length) return;
+
+  // 2) DOM id + data-element
+  Object.entries(map).forEach(([oldId, newId]) => {
+    const dom = document.getElementById(oldId);
+    if (dom) dom.id = newId;
+
+    if (dom) {
+      dom.querySelectorAll('[data-element]').forEach(p => {
+        if (p.dataset.element === oldId) p.dataset.element = newId;
+      });
+    }
+  });
+
+  // 3) AppState.elements ключи
+  Object.entries(map).forEach(([oldId, newId]) => {
+    const el = AppState.elements[oldId];
+    if (!el) return;
+    el.id = newId;
+    AppState.elements[newId] = el;
+    delete AppState.elements[oldId];
+  });
+
+  // 4) connections
+  AppState.connections.forEach(c => {
+    if (map[c.fromElement]) c.fromElement = map[c.fromElement];
+    if (map[c.toElement]) c.toElement = map[c.toElement];
+  });
+
+  // 5) формулы
+  const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  Object.values(AppState.elements).forEach(el => {
+    if (el.type === 'formula' && el.props?.expression) {
+      let expr = el.props.expression;
+      Object.entries(map).forEach(([oldId, newId]) => {
+        const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegex(oldId)}(?![A-Za-z0-9_])`, 'g');
+        expr = expr.replace(re, (m, p1) => `${p1}${newId}`);
+      });
+      el.props.expression = expr;
+    }
+  });
+
+  // 6) selected + modal
+  if (map[AppState.selectedElement]) AppState.selectedElement = map[AppState.selectedElement];
+  const modal = document.getElementById('modal-overlay');
+  if (modal && map[modal.dataset.elementId]) modal.dataset.elementId = map[modal.dataset.elementId];
+}
+
 const Project = {
     /**
      * Инициализация
@@ -91,6 +150,24 @@ init() {
 
         // Обновляем размеры рамок перед сохранением
         updateFrameChildren();
+        // ✅ нормализуем, даже если проект был открыт до фикса
+        migrateIdsDashToUnderscore();
+
+        // ✅ подчистим связи прямо перед сохранением
+        const exists = (id) => !!AppState.elements[id];
+        AppState.connections = (AppState.connections || [])
+          .map(c => ({
+            ...c,
+            fromElement: exists(c.fromElement) ? c.fromElement : c.fromElement.replace(/-/g, '_'),
+            toElement: exists(c.toElement) ? c.toElement : c.toElement.replace(/-/g, '_')
+          }))
+          .filter(c => exists(c.fromElement) && exists(c.toElement))
+          .filter((c, idx, arr) => {
+            const key = `${c.fromElement}|${c.fromPort}|${c.toElement}|${c.toPort}`;
+            return arr.findIndex(x =>
+              `${x.fromElement}|${x.fromPort}|${x.toElement}|${x.toPort}` === key
+            ) === idx;
+          });
         // ✅ 1. Генерируем код заранее
         let generatedCode = '';
         if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
@@ -266,10 +343,12 @@ async loadProjectFromList(filename) {
 
 
 
+
+
     /**
      * Загрузка проекта
      */
-    _processLoadedData(data) {
+ _processLoadedData(data) {
   try {
     document.getElementById('workspace').innerHTML = '';
     document.getElementById('connections-svg').innerHTML = '';
@@ -318,13 +397,40 @@ async loadProjectFromList(filename) {
 
     AppState.connections = data.connections || [];
 
+    // ✅ ВСТАВЬ ЭТОТ БЛОК СРАЗУ ЗДЕСЬ (до вычисления счётчика)
+    //Object.values(AppState.elements).forEach(e => {
+    //  if (typeof e.id === 'string') {
+    //    e.id = e.id.replace(/-/g, '_');
+    //  }
+    //  if (e.props?.name) {
+    //    e.props.name = e.props.name.replace(/-/g, '_');
+    //  }
+    //});
+    // ✅ конец добавленной секции
+    // ✅ Миграция id: '-' -> '_'
+    migrateIdsDashToUnderscore();
+    // ✅ очистка соединений: удалить битые и дубликаты
+    const exists = (id) => !!AppState.elements[id];
+
+    AppState.connections = (AppState.connections || [])
+      // оставить только те, где оба конца реально существуют
+      .filter(c => exists(c.fromElement) && exists(c.toElement))
+      // убрать дубликаты
+      .filter((c, idx, arr) => {
+        const key = `${c.fromElement}|${c.fromPort}|${c.toElement}|${c.toPort}`;
+        return arr.findIndex(x =>
+          `${x.fromElement}|${x.fromPort}|${x.toElement}|${x.toPort}` === key
+        ) === idx;
+      });
+    
+
     // корректно восстанавливаем счётчик
     const counterFromFile = Number(data.counter);
     AppState.elementCounter = Number.isFinite(counterFromFile) ? counterFromFile : 0;
 
     const maxIdSuffix = Object.values(AppState.elements).reduce((max, el) => {
         if (!el?.id) return max;
-        const match = String(el.id).match(/-(\d+)$/);   // ищем хвост -123
+        const match = String(el.id).match(/_(\d+)$/);   // теперь хвост по подчёркиванию
         const num = match ? parseInt(match[1], 10) : NaN;
         return Number.isFinite(num) ? Math.max(max, num) : max;
     }, 0);
@@ -334,6 +440,7 @@ async loadProjectFromList(filename) {
     Viewport.updateTransform();
     Connections.drawConnections();
     updateFrameChildren();
+
   } catch (e) {
     alert('Ошибка обработки данных проекта: ' + e.message);
     console.error(e);

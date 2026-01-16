@@ -218,7 +218,7 @@ const Elements = {
             }
 
             if (!elemId) {
-                elemId = `${elemType}-${++AppState.elementCounter}`;
+                elemId = `${elemType}_${++AppState.elementCounter}`;
             }
 
             let width = customWidth;
