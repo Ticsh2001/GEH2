@@ -306,7 +306,32 @@ function pruneOrByContext(orTerm, contextAtoms) {
 
 function condNegationEq(a, b) {
     if (!a || !b) return false;
-    return condEq(a, Not(b)) || condEq(b, Not(a));
+
+    // Простая проверка: a == NOT(b)
+    if (condEq(a, Not(b)) || condEq(b, Not(a))) return true;
+
+    // Де Морган: NOT(A OR B) == (NOT A AND NOT B)
+    // Проверяем: если a = (A OR B), то b должно быть (NOT A AND NOT B)
+    if (a.type === 'or' && b.type === 'and') {
+        return condNegationEq(a.a, b.a) && condNegationEq(a.b, b.b) ||
+               condNegationEq(a.a, b.b) && condNegationEq(a.b, b.a);
+    }
+    // Симметрично
+    if (a.type === 'and' && b.type === 'or') {
+        return condNegationEq(a.a, b.a) && condNegationEq(a.b, b.b) ||
+               condNegationEq(a.a, b.b) && condNegationEq(a.b, b.a);
+    }
+
+    // Проверка атомов: (X = 0) vs (X != 0)
+    if (a.type === 'eq0' && b.type === 'ne0' && a.v === b.v) return true;
+    if (a.type === 'ne0' && b.type === 'eq0' && a.v === b.v) return true;
+    
+    // Проверка сравнений: (X > Y) vs (X <= Y) и т.д.
+    if (a.type === 'cmp' && b.type === 'cmp' && a.l === b.l && a.r === b.r) {
+        return a.op === negateOp(b.op);
+    }
+
+    return false;
 }
 
 
