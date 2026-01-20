@@ -18,7 +18,6 @@ if isinstance(signal_codes, str):
     signal_codes = [signal_codes]
 
 CODE = ""
-
 if session_token:
     try:
         resp = requests.get(f"{api_url}/api/visualize/session/{session_token}")
@@ -39,18 +38,15 @@ if "selected_signals" not in st.session_state:
 if "plot_areas" not in st.session_state:
     st.session_state.plot_areas = []
 if "derived_signals" not in st.session_state:
-    st.session_state.derived_signals = {}  # виртуальные обрезанные сигналы
-
+    st.session_state.derived_signals = {}  # временные обрезанные сигналы
 
 # --------------------
-# Функции
+# Утилиты
 # --------------------
 def load_signals(signal_codes):
-    """Загрузить данные сигналов с бэкенда"""
     if not signal_codes:
         st.info("Список сигналов пуст — ничего загружать.")
         return None, [], []
-
     try:
         response = requests.post(
             f"{api_url}/api/signal-data",
@@ -58,7 +54,6 @@ def load_signals(signal_codes):
         )
         response.raise_for_status()
         result = response.json()
-
         found = result.get("found", [])
         not_found = result.get("not_found", [])
         data_dict = result.get("data", {})
@@ -90,44 +85,40 @@ def load_signals(signal_codes):
 
 
 def get_all_signals_df():
-    """Объединить исходные и обрезанные сигналы"""
     base = st.session_state.signals_data
     derived = st.session_state.derived_signals
     if base is None and not derived:
         return None
-
     dfs = []
     if base is not None:
         dfs.append(base)
-
     for _, ddf in derived.items():
         dfs.append(ddf)
-
     if not dfs:
         return None
-
+    # outer join по индексу времени
     return pd.concat(dfs, axis=1).sort_index()
 
-def to_numeric_selective(df: pd.DataFrame) -> pd.DataFrame:
-    """Пытается привести только явно числовые столбцы, остальные оставляет как есть."""
-    converted = pd.DataFrame(index=df.index)
-    for col in df.columns:
-        s = pd.to_numeric(df[col], errors="coerce")
-        # если после преобразования осталась хотя бы 1 ненулевая точка, считаем колонку числовой
-        if s.notna().sum() > 0:
-            converted[col] = s
-        else:
-            # оставляем оригинальные значения (возможно строки)
-            converted[col] = df[col]
-    return converted
+
+def sanitize_numeric_column(series: pd.Series) -> pd.Series:
+    # Попытка корректно привести к числу: поддержка запятой как десятичного
+    if series.dtype.kind in ("i", "u", "f"):
+        return series  # уже число
+    s = series.astype(str).str.replace(",", ".", regex=False)
+    return pd.to_numeric(s, errors="coerce")
 
 
 def compute_stats_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Рассчитывает основные статистики только для числовых данных."""
+    """Статистика только по тем колонкам, где после конверсии есть числа."""
     if df is None or df.empty:
         return pd.DataFrame()
 
-    num = df.apply(pd.to_numeric, errors="coerce")
+    num = df.apply(sanitize_numeric_column)
+    valid_cols = [c for c in num.columns if num[c].count() > 0]
+    if not valid_cols:
+        return pd.DataFrame()
+
+    num = num[valid_cols]
 
     out = pd.DataFrame(index=num.columns)
     out["count"] = num.count()
@@ -137,36 +128,27 @@ def compute_stats_numeric(df: pd.DataFrame) -> pd.DataFrame:
     out["std"] = num.std()
     out["median"] = num.median()
 
-    # диапазон времени
     starts, ends = [], []
     for col in num.columns:
         s = num[col].dropna()
-        if s.empty:
-            starts.append(pd.NaT)
-            ends.append(pd.NaT)
-        else:
-            starts.append(s.index.min())
-            ends.append(s.index.max())
+        starts.append(s.index.min() if not s.empty else pd.NaT)
+        ends.append(s.index.max() if not s.empty else pd.NaT)
     out["start"] = starts
     out["end"] = ends
     return out
 
 
 def make_unique_name(base_name: str) -> str:
-    """Если имя занято, добавляем суффикс _2, _3 и т.д."""
     existing = set()
     if st.session_state.signals_data is not None:
         existing |= set(st.session_state.signals_data.columns)
     existing |= set(st.session_state.derived_signals.keys())
-
     if base_name not in existing:
         return base_name
-
     k = 2
     while f"{base_name}_{k}" in existing:
         k += 1
     return f"{base_name}_{k}"
-
 
 # --------------------
 # Загрузка исходных сигналов
@@ -189,7 +171,6 @@ with st.sidebar:
     if df_all_signals is not None:
         available_signals = df_all_signals.columns.tolist()
 
-        # выбор сигналов для построения
         for signal in available_signals:
             checked = st.checkbox(signal, value=(signal in st.session_state.selected_signals))
             if checked:
@@ -219,7 +200,7 @@ with st.sidebar:
 
                 col3, col4 = st.columns(2)
                 if col3.button("Создать"):
-                    name_unique = make_unique_name(new_name)
+                    name_unique = make_unique_name(new_name.strip())
                     cut_ser = s[(s.index >= start_ts) & (s.index <= end_ts)]
                     if cut_ser.empty:
                         st.warning("В выбранном диапазоне нет точек.")
@@ -287,8 +268,8 @@ if df_all_signals is not None and st.session_state.selected_signals:
             st.session_state.plot_areas[i]["signals"] = selected
 
             if selected:
+                # График строим на исходных данных (не трогаем значения)
                 df_plot = df_all_signals[selected].copy()
-                df_plot = to_numeric_selective(df_plot)
 
                 fig = px.line(df_plot, x=df_plot.index, y=selected, title=f"График #{plot_area['id']}")
                 fig.update_layout(
@@ -300,11 +281,11 @@ if df_all_signals is not None and st.session_state.selected_signals:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # ---- Статистика под графиком ----
+                # ---- Статистика под графиком (по числовым данным, с поддержкой запятой) ----
                 st.markdown("**📊 Статистика (по всему сигналу):**")
-                stats_df = compute_stats_numeric(df_plot.select_dtypes(include=['number']))
+                stats_df = compute_stats_numeric(df_plot)
 
-                if stats_df.empty or stats_df["count"].fillna(0).sum() == 0:
+                if stats_df.empty:
                     st.info("Нет числовых данных для расчёта статистики.")
                 else:
                     show_df = stats_df.copy()
@@ -326,7 +307,6 @@ if df_all_signals is not None and st.session_state.selected_signals:
                     )
             else:
                 st.info("Выберите сигналы для отображения.")
-
         st.divider()
 
 elif df_all_signals is None:
