@@ -89,6 +89,12 @@ const Modal = {
       <textarea id="prop-description" readonly>${props.description || ''}</textarea>
     </div>
 
+    // modal.js в блоке input-signal
+    <div class="modal-row">
+        <label>Размерность:</label>
+        <input type="text" id="prop-dimension" value="${props.dimension || ''}" />
+    </div>
+
     <div class="modal-row">
       <label>Тип сигнала:</label>
       <select id="prop-signal-type">
@@ -271,6 +277,8 @@ const Modal = {
                     const chosen = items[i];
                     input.value = chosen.Tagname;
                     descField.value = chosen.Description || '';
+                    const dimField = document.getElementById('prop-dimension');
+                    if (dimField) dimField.value = chosen.EngineeringUnit || chosen.Dimension || '';
                     results.style.display = 'none';
                 });
                 });
@@ -374,6 +382,8 @@ const Modal = {
                 const name = document.getElementById('prop-name').value || 'Сигнал';
                 const description = document.getElementById('prop-description').value || '';
                 const signalType = document.getElementById('prop-signal-type').value;
+                const dimension = document.getElementById('prop-dimension').value || '';
+                elemData.props.dimension = dimension;
 
                 const oldSignalType = elemData.props.signalType;
                 elemData.props.name = name;
@@ -556,6 +566,10 @@ const Modal = {
             
             <div id="parameter-fields" class="conditional-fields ${project.type === PROJECT_TYPE.PARAMETER ? 'visible' : ''}">
                 <div class="modal-row">
+                    <label>Описание:</label>
+                    <textarea id="project-description" placeholder="Описание сигнала">${project.description || ''}</textarea>
+                </div>
+                <div class="modal-row">
                     <label>Размерность:</label>
                     <input type="text" id="project-dimension" value="${project.dimension || ''}" placeholder="Например: м/с, кг, °C">
                 </div>
@@ -602,10 +616,12 @@ const Modal = {
 
         if (type === PROJECT_TYPE.PARAMETER) {
             AppState.project.dimension = document.getElementById('project-dimension').value;
+            AppState.project.description = document.getElementById('project-description').value || '';            
             AppState.project.possibleCause = '';
             AppState.project.guidelines = '';
         } else {
             AppState.project.dimension = '';
+            AppState.project.description = '';
             AppState.project.possibleCause = document.getElementById('project-possible-cause').value;
             AppState.project.guidelines = document.getElementById('project-guidelines').value;
         }

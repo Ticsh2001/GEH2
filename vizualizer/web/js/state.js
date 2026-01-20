@@ -79,6 +79,7 @@ function resetState() {
     AppState.project = {
         code: '',
         type: PROJECT_TYPE.PARAMETER,
+        description: '',
         dimension: '',
         possibleCause: '',
         guidelines: ''

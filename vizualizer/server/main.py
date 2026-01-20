@@ -33,14 +33,71 @@ def load_templates() -> Dict:
 def load_settings() -> Dict:
     with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+    
+
+def load_project_signals(folder: str) -> List[Dict]:
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    if not os.path.isdir(folder_abs):
+        return []
+
+    out = []
+    for name in os.listdir(folder_abs):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder_abs, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            proj = payload.get("project", {}) or {}
+            code = (proj.get("code") or "").strip()   # ← КРИТИЧНО: берем code
+
+            if not code:
+                continue
+
+            desc = (proj.get("description") or "").strip()
+            dim = (proj.get("dimension") or "").strip()
+
+            out.append({
+                "Tagname": code,               # ← именно code
+                "Description": desc,
+                "EngineeringUnit": dim,
+                "Type": proj.get("type", "")
+            })
+        except Exception as e:
+            print(f"[WARN] failed to read project {path}: {e}")
+            continue
+
+    out.sort(key=lambda x: x["Tagname"])
+    return out
+
+
+def refresh_signals_cache():
+    settings = STATE["settings"] or {}
+    base_folder = settings.get("signalDataFolder")
+    proj_folder = settings.get("projectDataFolder")
+
+    base = load_signals_from_folder(base_folder) if base_folder else []
+    proj = load_project_signals(proj_folder) if proj_folder else []
+
+    merged = {}
+    for s in base:
+        merged[s["Tagname"]] = s
+    for s in proj:
+        merged[s["Tagname"]] = s  # проекты перекрывают CSV
+
+    out = list(merged.values())
+    out.sort(key=lambda x: x["Tagname"])
+    STATE["signals"] = out
+
+
 
 def load_signals_from_folder(folder: str) -> List[Dict]:
-    # folder может быть относительным
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
     if not os.path.isdir(folder_abs):
         raise FileNotFoundError(f"signalDataFolder not found: {folder_abs}")
 
-    signals_map = {}  # Tagname -> Description (последний wins)
+    signals_map = {}  # Tagname -> dict
     for name in os.listdir(folder_abs):
         if not name.lower().endswith(".csv"):
             continue
@@ -52,16 +109,19 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
                 tag = str(row['Tagname']).strip()
                 desc = "" if pd.isna(row['Description']) else str(row['Description']).strip()
                 unit = "" if pd.isna(row['Engineering Unit']) else str(row['Engineering Unit']).strip()
-                desc = ", ".join([desc, unit])
+                desc_full = ", ".join([x for x in [desc, unit] if x])
+
                 if tag:
-                    signals_map[tag] = desc
+                    signals_map[tag] = {
+                        "Tagname": tag,
+                        "Description": desc_full,
+                        "EngineeringUnit": unit
+                    }
         except Exception as e:
-            # пропускаем "плохие" csv, но можно логировать
             print(f"[WARN] failed to read {path}: {e}")
 
-    # в список
-    out = [{'Tagname': k, 'Description': v} for k, v in signals_map.items()]
-    out.sort(key=lambda x: x['Tagname'])
+    out = list(signals_map.values())
+    out.sort(key=lambda x: x["Tagname"])
     return out
 
 
@@ -231,7 +291,7 @@ def startup():
     folder = settings.get("signalDataFolder")
     if not folder:
         raise RuntimeError("settings.json: signalDataFolder is required")
-    STATE["signals"] = load_signals_from_folder(folder)
+    refresh_signals_cache()
     STATE["templates"] = load_templates()
     STATE["signal_index"] = load_signal_index(settings.get("signalArchiveFolder"))
 
@@ -295,6 +355,7 @@ async def save_project(request: Request):
         # Сохраняем как JSON
         with open(path, "w", encoding="utf-8") as f:
             json.dump(content, f, indent=2)
+            refresh_signals_cache()
             
         return {"status": "ok", "message": f"Project saved to {filename}"}
         

@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "TVACP100",
+    "type": "parameter",
+    "dimension": "dd",
+    "possibleCause": "",
+    "guidelines": "",
+    "description": "dsddhf"
+  },
+  "elements": {
+    "formula_2": {
+      "id": "formula_2",
+      "type": "formula",
+      "x": 605,
+      "y": 958,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "10MAA50CP001\u00a7\u00a7XQ01*10",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "output_3": {
+      "id": "output_3",
+      "type": "output",
+      "x": 876,
+      "y": 1004,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 93,
+      "y": 1010,
+      "width": 335,
+      "height": 50,
+      "props": {
+        "name": "10MAA50CP001\u00a7\u00a7XQ01",
+        "signalType": "undefined",
+        "dimension": "bar",
+        "description": "\u0422\u0412\u0414 \u041b\u041f\u0422 \u043f\u0435\u0440\u0435\u0434 P $ HPT BLD U/STR P, bar",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_2",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_2",
+      "fromPort": "out-0",
+      "toElement": "output_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 3,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "10MAA50CP001\u00a7\u00a7XQ01*10"
+}
