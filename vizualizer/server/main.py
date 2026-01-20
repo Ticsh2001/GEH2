@@ -46,11 +46,13 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
             continue
         path = os.path.join(folder_abs, name)
         try:
-            df = pd.read_csv(path, sep=';')[['Tagname', 'Description']]
+            df = pd.read_csv(path, sep=';')[['Tagname', 'Description', 'Engineering Unit']]
             df = df.dropna(subset=['Tagname'])
             for _, row in df.iterrows():
                 tag = str(row['Tagname']).strip()
                 desc = "" if pd.isna(row['Description']) else str(row['Description']).strip()
+                unit = "" if pd.isna(row['Engineering Unit']) else str(row['Engineering Unit']).strip()
+                desc = ", ".join([desc, unit])
                 if tag:
                     signals_map[tag] = desc
         except Exception as e:

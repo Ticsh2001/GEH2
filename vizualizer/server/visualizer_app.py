@@ -2,13 +2,14 @@ import pandas as pd
 import requests
 import streamlit as st
 import plotly.express as px
+import numpy as np
+import plotly.graph_objects as go
+
+from code_signal import compute_code_signal, sanitize_numeric_column
 
 st.set_page_config(page_title="Signal Visualizer", layout="wide")
 st.title("📊 Визуализация сигналов")
 
-# --------------------
-# Чтение query params и загрузка сессии
-# --------------------
 query_params = st.query_params
 session_token = query_params.get("session", None)
 api_url = query_params.get("api_url", "http://localhost:8000")
@@ -28,9 +29,6 @@ if session_token:
     except Exception as e:
         st.error(f"Не удалось получить данные сессии: {e}")
 
-# --------------------
-# Состояние
-# --------------------
 if "signals_data" not in st.session_state:
     st.session_state.signals_data = None
 if "selected_signals" not in st.session_state:
@@ -38,19 +36,19 @@ if "selected_signals" not in st.session_state:
 if "plot_areas" not in st.session_state:
     st.session_state.plot_areas = []
 if "derived_signals" not in st.session_state:
-    st.session_state.derived_signals = {}  # временные обрезанные сигналы
+    st.session_state.derived_signals = {}
+if "code_signal_name" not in st.session_state:
+    st.session_state.code_signal_name = None
 
-# --------------------
-# Утилиты
-# --------------------
-def load_signals(signal_codes):
-    if not signal_codes:
+
+def load_signals(signal_codes_list):
+    if not signal_codes_list:
         st.info("Список сигналов пуст — ничего загружать.")
         return None, [], []
     try:
         response = requests.post(
             f"{api_url}/api/signal-data",
-            json={"signal_names": signal_codes, "format": "json"},
+            json={"signal_names": signal_codes_list, "format": "json"},
         )
         response.raise_for_status()
         result = response.json()
@@ -62,80 +60,73 @@ def load_signals(signal_codes):
             st.warning("Нет данных по запрошенным сигналам.")
             return None, found, not_found
 
-        dfs = []
+        frames = []
         for sig, records in data_dict.items():
             if not records:
                 continue
             df = pd.DataFrame(records)
-            if "datetime" not in df.columns or "value" not in df.columns:
+            if "datetime" not in df or "value" not in df:
                 continue
             df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
             df = df.dropna(subset=["datetime"])
             df = df.set_index("datetime").sort_index()
             df = df.rename(columns={"value": sig})
-            dfs.append(df[[sig]])
+            frames.append(df[[sig]])
 
-        if not dfs:
+        if not frames:
             return None, found, not_found
-        return pd.concat(dfs, axis=1).sort_index(), found, not_found
+        return pd.concat(frames, axis=1).sort_index(), found, not_found
 
-    except Exception as e:
-        st.error(f"❌ Ошибка загрузки данных: {e}")
+    except Exception as exc:
+        st.error(f"❌ Ошибка загрузки данных: {exc}")
         return None, [], []
 
 
-def get_all_signals_df():
+def get_all_signals_df(exclude: set[str] | None = None):
+    exclude = exclude or set()
     base = st.session_state.signals_data
     derived = st.session_state.derived_signals
-    if base is None and not derived:
-        return None
+
     dfs = []
     if base is not None:
         dfs.append(base)
-    for _, ddf in derived.items():
+    for name, ddf in derived.items():
+        if name in exclude:
+            continue
         dfs.append(ddf)
+
     if not dfs:
         return None
-    # outer join по индексу времени
     return pd.concat(dfs, axis=1).sort_index()
 
 
-def sanitize_numeric_column(series: pd.Series) -> pd.Series:
-    # Попытка корректно привести к числу: поддержка запятой как десятичного
-    if series.dtype.kind in ("i", "u", "f"):
-        return series  # уже число
-    s = series.astype(str).str.replace(",", ".", regex=False)
-    return pd.to_numeric(s, errors="coerce")
-
-
 def compute_stats_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Статистика только по тем колонкам, где после конверсии есть числа."""
     if df is None or df.empty:
         return pd.DataFrame()
 
-    num = df.apply(sanitize_numeric_column)
-    valid_cols = [c for c in num.columns if num[c].count() > 0]
+    numeric = df.apply(sanitize_numeric_column)
+    valid_cols = [col for col in numeric.columns if numeric[col].count() > 0]
     if not valid_cols:
         return pd.DataFrame()
 
-    num = num[valid_cols]
-
-    out = pd.DataFrame(index=num.columns)
-    out["count"] = num.count()
-    out["min"] = num.min()
-    out["max"] = num.max()
-    out["mean"] = num.mean()
-    out["std"] = num.std()
-    out["median"] = num.median()
+    numeric = numeric[valid_cols]
+    stats = pd.DataFrame(index=numeric.columns)
+    stats["count"] = numeric.count()
+    stats["min"] = numeric.min()
+    stats["max"] = numeric.max()
+    stats["mean"] = numeric.mean()
+    stats["std"] = numeric.std()
+    stats["median"] = numeric.median()
 
     starts, ends = [], []
-    for col in num.columns:
-        s = num[col].dropna()
-        starts.append(s.index.min() if not s.empty else pd.NaT)
-        ends.append(s.index.max() if not s.empty else pd.NaT)
-    out["start"] = starts
-    out["end"] = ends
-    return out
+    for col in numeric.columns:
+        series = numeric[col].dropna()
+        starts.append(series.index.min() if not series.empty else pd.NaT)
+        ends.append(series.index.max() if not series.empty else pd.NaT)
+
+    stats["start"] = starts
+    stats["end"] = ends
+    return stats
 
 
 def make_unique_name(base_name: str) -> str:
@@ -145,34 +136,61 @@ def make_unique_name(base_name: str) -> str:
     existing |= set(st.session_state.derived_signals.keys())
     if base_name not in existing:
         return base_name
-    k = 2
-    while f"{base_name}_{k}" in existing:
-        k += 1
-    return f"{base_name}_{k}"
+    idx = 2
+    while f"{base_name}_{idx}" in existing:
+        idx += 1
+    return f"{base_name}_{idx}"
 
-# --------------------
-# Загрузка исходных сигналов
-# --------------------
+
 if signal_codes and st.session_state.signals_data is None:
     with st.spinner("Загружаем данные сигналов..."):
-        df_all, found, not_found = load_signals(signal_codes)
-        st.session_state.signals_data = df_all
-        st.success(f"✅ Загружено сигналов: {len(found)}")
-        if not_found:
-            st.warning(f"⚠️ Не найдены: {', '.join(not_found)}")
+        df_base, found_codes, not_found_codes = load_signals(signal_codes)
+        st.session_state.signals_data = df_base
+        st.success(f"✅ Загружено сигналов: {len(found_codes)}")
+        if not_found_codes:
+            st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
 
-# --------------------
-# Боковая панель
-# --------------------
+# --- синтетический сигнал из CODE ---
+code_signal_name = st.session_state.code_signal_name
+df_for_code = get_all_signals_df(
+    exclude={code_signal_name} if code_signal_name else None
+)
+
+if CODE and df_for_code is not None:
+    try:
+        synthetic_series = compute_code_signal(
+            CODE,
+            df_for_code,
+            warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
+        )
+        target_name = code_signal_name or make_unique_name("CODE_RESULT")
+        synthetic_series.name = target_name
+        st.session_state.derived_signals[target_name] = pd.DataFrame(
+            {target_name: synthetic_series}
+        )
+        st.session_state.code_signal_name = target_name
+        st.session_state.selected_signals.add(target_name)
+        st.success(f"Синтетический сигнал обновлён: {target_name}")
+    except Exception as exc:
+        st.warning(f"Не удалось вычислить CODE: {exc}")
+elif not CODE and code_signal_name:
+    st.session_state.derived_signals.pop(code_signal_name, None)
+    st.session_state.selected_signals.discard(code_signal_name)
+    st.session_state.code_signal_name = None
+
+# --- итоговый DataFrame со всеми сигналами ---
+df_all_signals = get_all_signals_df()
+
 with st.sidebar:
     st.header("Выбор сигналов")
 
-    df_all_signals = get_all_signals_df()
     if df_all_signals is not None:
         available_signals = df_all_signals.columns.tolist()
-
         for signal in available_signals:
-            checked = st.checkbox(signal, value=(signal in st.session_state.selected_signals))
+            checked = st.checkbox(
+                signal,
+                value=(signal in st.session_state.selected_signals),
+            )
             if checked:
                 st.session_state.selected_signals.add(signal)
             else:
@@ -182,18 +200,26 @@ with st.sidebar:
         st.subheader("Создать обрезанный сигнал")
 
         base_df = st.session_state.signals_data
-        if base_df is not None:
+        if base_df is not None and not base_df.empty:
             base_choice = st.selectbox("Исходный сигнал", base_df.columns)
-            s = base_df[base_choice].dropna()
-            if not s.empty:
+            series = base_df[base_choice].dropna()
+            if not series.empty:
                 col1, col2 = st.columns(2)
                 with col1:
-                    start_date = st.date_input("Начало", value=s.index.min().date())
+                    start_date = st.date_input(
+                        "Начало",
+                        value=series.index.min().date(),
+                    )
                 with col2:
-                    end_date = st.date_input("Конец", value=s.index.max().date())
+                    end_date = st.date_input(
+                        "Конец",
+                        value=series.index.max().date(),
+                    )
 
                 start_ts = pd.Timestamp(start_date)
-                end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+                end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(
+                    microseconds=1
+                )
 
                 default_name = f"{base_choice}__{start_ts.date()}_{end_ts.date()}"
                 new_name = st.text_input("Имя нового сигнала", value=default_name)
@@ -201,53 +227,59 @@ with st.sidebar:
                 col3, col4 = st.columns(2)
                 if col3.button("Создать"):
                     name_unique = make_unique_name(new_name.strip())
-                    cut_ser = s[(s.index >= start_ts) & (s.index <= end_ts)]
-                    if cut_ser.empty:
+                    cut_series = series[(series.index >= start_ts) & (series.index <= end_ts)]
+                    if cut_series.empty:
                         st.warning("В выбранном диапазоне нет точек.")
                     else:
-                        st.session_state.derived_signals[name_unique] = pd.DataFrame({name_unique: cut_ser})
+                        st.session_state.derived_signals[name_unique] = pd.DataFrame(
+                            {name_unique: cut_series}
+                        )
                         st.success(f"Создан обрезанный сигнал: {name_unique}")
                         st.rerun()
                 if col4.button("Очистить все обрезанные"):
-                    st.session_state.derived_signals.clear()
-                    st.session_state.selected_signals = {
-                        sig for sig in st.session_state.selected_signals
-                        if (st.session_state.signals_data is not None and sig in st.session_state.signals_data.columns)
+                    st.session_state.derived_signals = {
+                        k: v
+                        for k, v in st.session_state.derived_signals.items()
+                        if k == st.session_state.code_signal_name
                     }
-                    st.experimental_rerun()
+                    st.session_state.selected_signals = {
+                        sig
+                        for sig in st.session_state.selected_signals
+                        if (st.session_state.signals_data is not None and sig in st.session_state.signals_data.columns)
+                        or sig == st.session_state.code_signal_name
+                    }
+                    st.rerun()
 
         if st.session_state.derived_signals:
-            st.subheader("Удалить обрезанный сигнал")
-            derived_names = list(st.session_state.derived_signals.keys())
-            del_name = st.selectbox("Выберите", ["—"] + derived_names)
-            if st.button("Удалить выбранный") and del_name != "—":
-                st.session_state.derived_signals.pop(del_name, None)
-                st.session_state.selected_signals.discard(del_name)
+            st.subheader("Удалить обрезанный/синтетический сигнал")
+            derived_names = [name for name in st.session_state.derived_signals.keys()]
+            delete_candidate = st.selectbox("Выберите", ["—"] + derived_names)
+            if st.button("Удалить выбранный") and delete_candidate != "—":
+                st.session_state.derived_signals.pop(delete_candidate, None)
+                st.session_state.selected_signals.discard(delete_candidate)
+                if delete_candidate == st.session_state.code_signal_name:
+                    st.session_state.code_signal_name = None
                 st.rerun()
 
         st.divider()
         st.subheader("Области построения")
-        c1, c2 = st.columns(2)
-        if c1.button("➕ Добавить график"):
-            new_id = max([a.get("id", 0) for a in st.session_state.plot_areas] + [0]) + 1
+        col_a, col_b = st.columns(2)
+        if col_a.button("➕ Добавить график"):
+            new_id = max([area.get("id", 0) for area in st.session_state.plot_areas] + [0]) + 1
             st.session_state.plot_areas.append({"id": new_id, "signals": []})
-            st.experimental_rerun()
-        if c2.button("❌ Очистить все"):
+            st.rerun()
+        if col_b.button("❌ Очистить все"):
             st.session_state.plot_areas = []
             st.session_state.selected_signals = set()
-            st.experimental_rerun()
-
+            st.rerun()
     else:
         st.info("📥 Данные сигналов еще не загружены.")
 
-# --------------------
-# Основная область
-# --------------------
-df_all_signals = get_all_signals_df()
-
 if df_all_signals is not None and st.session_state.selected_signals:
     if not st.session_state.plot_areas:
-        st.session_state.plot_areas.append({"id": 1, "signals": list(st.session_state.selected_signals)})
+        st.session_state.plot_areas.append(
+            {"id": 1, "signals": list(st.session_state.selected_signals)}
+        )
 
     for i, plot_area in enumerate(st.session_state.plot_areas):
         with st.container():
@@ -268,10 +300,18 @@ if df_all_signals is not None and st.session_state.selected_signals:
             st.session_state.plot_areas[i]["signals"] = selected
 
             if selected:
-                # График строим на исходных данных (не трогаем значения)
                 df_plot = df_all_signals[selected].copy()
 
-                fig = px.line(df_plot, x=df_plot.index, y=selected, title=f"График #{plot_area['id']}")
+                # Для графика приводим к числам (поддержка запятых)
+                df_plot_num = df_plot.apply(sanitize_numeric_column)
+
+                # Если какой-то сигнал полностью нечисловой — он станет NaN, Plotly его просто не нарисует
+                fig = px.line(
+                    df_plot_num,
+                    x=df_plot_num.index,
+                    y=selected,
+                    title=f"График #{plot_area['id']}",
+                )
                 fig.update_layout(
                     height=350,
                     legend_title_text="Сигналы",
@@ -281,18 +321,22 @@ if df_all_signals is not None and st.session_state.selected_signals:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # ---- Статистика под графиком (по числовым данным, с поддержкой запятой) ----
                 st.markdown("**📊 Статистика (по всему сигналу):**")
                 stats_df = compute_stats_numeric(df_plot)
-
                 if stats_df.empty:
                     st.info("Нет числовых данных для расчёта статистики.")
                 else:
-                    show_df = stats_df.copy()
-                    show_df["start"] = pd.to_datetime(show_df["start"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
-                    show_df["end"] = pd.to_datetime(show_df["end"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+                    stats_view = stats_df.copy()
+                    stats_view["start"] = (
+                        pd.to_datetime(stats_view["start"], errors="coerce")
+                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+                    )
+                    stats_view["end"] = (
+                        pd.to_datetime(stats_view["end"], errors="coerce")
+                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+                    )
                     st.dataframe(
-                        show_df.style.format(
+                        stats_view.style.format(
                             {
                                 "count": "{:.0f}",
                                 "min": "{:.6g}",
@@ -314,14 +358,11 @@ elif df_all_signals is None:
 else:
     st.info("👈 Выберите сигналы слева для визуализации.")
 
-# --------------------
-# Инфо панель
-# --------------------
 if df_all_signals is not None:
     with st.expander("ℹ️ Информация о данных"):
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Всего сигналов (вкл. обрезанные)", len(df_all_signals.columns))
+            st.metric("Всего сигналов (вкл. обрезанные/синтет.)", len(df_all_signals.columns))
         with col2:
             st.metric("Количество записей", len(df_all_signals))
         with col3:
@@ -332,5 +373,5 @@ if df_all_signals is not None:
                 st.metric("Диапазон времени", "—")
 
 if CODE:
-    with st.expander("🧩 Сгенерированный код"):
+    with st.expander("🧩 Сгенерированный код (оригинал)"):
         st.code(CODE, language="text")
