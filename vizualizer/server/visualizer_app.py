@@ -150,33 +150,47 @@ if signal_codes and st.session_state.signals_data is None:
         if not_found_codes:
             st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
 
-# --- синтетический сигнал из CODE ---
+# --- синтетический сигнал из CODE (считаем один раз, потом не пересчитываем) ---
 code_signal_name = st.session_state.code_signal_name
-df_for_code = get_all_signals_df(
-    exclude={code_signal_name} if code_signal_name else None
+df_for_code = get_all_signals_df(exclude={code_signal_name} if code_signal_name else None)
+
+# Ключ "какой CODE мы уже считали" (можно оставить просто CODE; session_token добавил на всякий)
+code_key = (session_token, CODE)
+
+already_have_series = (
+    st.session_state.code_signal_name is not None
+    and st.session_state.code_signal_name in st.session_state.derived_signals
 )
 
 if CODE and df_for_code is not None:
-    try:
-        synthetic_series = compute_code_signal(
-            CODE,
-            df_for_code,
-            warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
-        )
-        target_name = code_signal_name or make_unique_name("CODE_RESULT")
-        synthetic_series.name = target_name
-        st.session_state.derived_signals[target_name] = pd.DataFrame(
-            {target_name: synthetic_series}
-        )
-        st.session_state.code_signal_name = target_name
-        st.session_state.selected_signals.add(target_name)
-        st.success(f"Синтетический сигнал обновлён: {target_name}")
-    except Exception as exc:
-        st.warning(f"Не удалось вычислить CODE: {exc}")
-elif not CODE and code_signal_name:
-    st.session_state.derived_signals.pop(code_signal_name, None)
-    st.session_state.selected_signals.discard(code_signal_name)
-    st.session_state.code_signal_name = None
+    need_recalc = (st.session_state.get("code_key") != code_key) or (not already_have_series)
+
+    if need_recalc:
+        try:
+            synthetic_series = compute_code_signal(
+                CODE,
+                df_for_code,
+                warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
+            )
+            target_name = code_signal_name or make_unique_name("CODE_RESULT")
+            synthetic_series.name = target_name
+
+            st.session_state.derived_signals[target_name] = pd.DataFrame({target_name: synthetic_series})
+            st.session_state.code_signal_name = target_name
+            st.session_state.selected_signals.add(target_name)
+
+            st.session_state.code_key = code_key
+            st.success(f"Синтетический сигнал обновлён: {target_name}")
+        except Exception as exc:
+            st.warning(f"Не удалось вычислить CODE: {exc}")
+
+elif not CODE:
+    # если CODE исчез — удаляем синтетический сигнал и сбрасываем ключ
+    if code_signal_name:
+        st.session_state.derived_signals.pop(code_signal_name, None)
+        st.session_state.selected_signals.discard(code_signal_name)
+        st.session_state.code_signal_name = None
+    st.session_state.code_key = None
 
 # --- итоговый DataFrame со всеми сигналами ---
 df_all_signals = get_all_signals_df()
@@ -305,50 +319,73 @@ if df_all_signals is not None and st.session_state.selected_signals:
                 # Для графика приводим к числам (поддержка запятых)
                 df_plot_num = df_plot.apply(sanitize_numeric_column)
 
-                # Если какой-то сигнал полностью нечисловой — он станет NaN, Plotly его просто не нарисует
-                fig = px.line(
-                    df_plot_num,
-                    x=df_plot_num.index,
-                    y=selected,
-                    title=f"График #{plot_area['id']}",
-                )
-                fig.update_layout(
-                    height=350,
-                    legend_title_text="Сигналы",
-                    xaxis_title="Время",
-                    yaxis_title="Значение",
-                    margin=dict(l=20, r=20, t=40, b=20),
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-                st.markdown("**📊 Статистика (по всему сигналу):**")
-                stats_df = compute_stats_numeric(df_plot)
-                if stats_df.empty:
-                    st.info("Нет числовых данных для расчёта статистики.")
+                valid_index = df_plot_num.dropna(how="all").index
+                if len(valid_index) == 0:
+                    st.warning("Нет числовых данных для выбранных сигналов.")
                 else:
-                    stats_view = stats_df.copy()
-                    stats_view["start"] = (
-                        pd.to_datetime(stats_view["start"], errors="coerce")
-                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+                    ts_idx = st.slider(
+                        "Вертикальная линия (время)",
+                        min_value=0,
+                        max_value=len(valid_index) - 1,
+                        value=len(valid_index) - 1,
+                        key=f"vline_{i}",
                     )
-                    stats_view["end"] = (
-                        pd.to_datetime(stats_view["end"], errors="coerce")
-                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+                    ts = valid_index[ts_idx]
+
+                    # график с вертикальной линией
+                    fig = px.line(
+                        df_plot_num,
+                        x=df_plot_num.index,
+                        y=selected,
+                        title=f"График #{plot_area['id']}",
+                        render_mode="webgl"
                     )
-                    st.dataframe(
-                        stats_view.style.format(
-                            {
-                                "count": "{:.0f}",
-                                "min": "{:.6g}",
-                                "max": "{:.6g}",
-                                "mean": "{:.6g}",
-                                "std": "{:.6g}",
-                                "median": "{:.6g}",
-                            },
-                            na_rep="",
-                        ),
-                        use_container_width=True,
+                    fig.add_vline(x=ts, line_width=2, line_dash="dash", line_color="red")
+                    fig.update_layout(
+                        uirevision=f"plot_area_{plot_area['id']}",
+                        height=650,
+                        legend_title_text="Сигналы",
+                        xaxis_title="Время",
+                        yaxis_title="Значение",
+                        margin=dict(l=20, r=20, t=40, b=20),
                     )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # значения на линии
+                    nearest = df_plot_num.reindex(df_plot_num.index.union([ts])).sort_index()
+                    nearest = nearest.ffill().loc[ts]
+
+                    # статистика + колонка значений на линии
+                    st.markdown("**📊 Статистика (по всему сигналу):**")
+                    stats_df = compute_stats_numeric(df_plot)
+                    if stats_df.empty:
+                        st.info("Нет числовых данных для расчёта статистики.")
+                    else:
+                        stats_view = stats_df.copy()
+                        stats_view["value"] = nearest.reindex(stats_view.index)
+                        stats_view["start"] = (
+                            pd.to_datetime(stats_view["start"], errors="coerce")
+                            .dt.strftime("%Y-%m-%d %H:%M:%S")
+                        )
+                        stats_view["end"] = (
+                            pd.to_datetime(stats_view["end"], errors="coerce")
+                            .dt.strftime("%Y-%m-%d %H:%M:%S")
+                        )
+                        st.dataframe(
+                            stats_view.style.format(
+                                {
+                                    "count": "{:.0f}",
+                                    "min": "{:.6g}",
+                                    "max": "{:.6g}",
+                                    "mean": "{:.6g}",
+                                    "std": "{:.6g}",
+                                    "median": "{:.6g}",
+                                    "value_at_line": "{:.6g}",
+                                },
+                                na_rep="",
+                            ),
+                            use_container_width=True,
+                        )
             else:
                 st.info("Выберите сигналы для отображения.")
         st.divider()
