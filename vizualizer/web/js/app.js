@@ -39,7 +39,59 @@ const App = {
 
         document.getElementById('code-modal-close').addEventListener('click', () => {
             document.getElementById('code-modal-overlay').style.display = 'none';
-        });        
+        });
+        document.getElementById('btn-visualize').addEventListener('click', () => {
+            App.openSignalVisualizer();
+});        
+    },
+
+    openSignalVisualizer() {
+        try {
+            // 1) Собираем входные сигналы
+            const signals = Object.values(AppState.elements)
+            .filter(e => e && e.type === 'input-signal')
+            .map(e => e.props?.name || e.id);
+            const uniqSignals = [...new Set(signals)];
+            if (uniqSignals.length === 0) {
+            alert('Нет входных сигналов в схеме.');
+            return;
+            }
+
+            // 2) Генерируем код (может быть длинным)
+            let codeStr = '';
+            if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
+            codeStr = CodeGen.generate() || '';
+            }
+
+            // 3) Создаём сессию на backend, чтобы не тащить код в URL
+            fetch('/api/visualize/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signals: uniqSignals, code: codeStr })
+            })
+            .then(r => {
+            if (!r.ok) throw new Error('Failed to create visualize session');
+            return r.json();
+            })
+            .then(data => {
+            const token = data.token;
+            const apiUrl = window.location.origin; // http://localhost:8000
+            const params = new URLSearchParams();
+            params.set('session', token);
+            params.set('api_url', apiUrl);
+            // signals можно не передавать — визуализатор возьмет их из session
+            const visualizerUrl = `http://localhost:8501?${params.toString()}`;
+            window.open(visualizerUrl, '_blank');
+            })
+            .catch(err => {
+            console.error(err);
+            alert('Не удалось открыть визуализатор: ' + err.message);
+            });
+
+        } catch (e) {
+            console.error(e);
+            alert('Ошибка при подготовке визуализации: ' + e.message);
+        }
     },
 
     /**

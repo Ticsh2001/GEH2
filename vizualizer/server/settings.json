@@ -1,4 +1,5 @@
 {
   "signalDataFolder": "signals",
-  "projectDataFolder": "projects"
+  "projectDataFolder": "projects",
+  "signalArchiveFolder": "archive"
 }
