@@ -1,0 +1,174 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "dfdf",
+    "type": "parameter",
+    "description": "sdsd",
+    "dimension": "sdds",
+    "possibleCause": "",
+    "guidelines": ""
+  },
+  "elements": {
+    "separator_2": {
+      "id": "separator_2",
+      "type": "separator",
+      "x": 1013,
+      "y": 1060,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "const_3": {
+      "id": "const_3",
+      "type": "const",
+      "x": 190,
+      "y": 1182,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 100,
+        "comment": ""
+      }
+    },
+    "if_4": {
+      "id": "if_4",
+      "type": "if",
+      "x": 777,
+      "y": 1058,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "formula_5": {
+      "id": "formula_5",
+      "type": "formula",
+      "x": 1320.2857142857142,
+      "y": 938,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "10MAA50CP001\u00a7\u00a7XQ01",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "const_6": {
+      "id": "const_6",
+      "type": "const",
+      "x": 1252,
+      "y": 1212,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "output_7": {
+      "id": "output_7",
+      "type": "output",
+      "x": 1653.142857142857,
+      "y": 979.0000000000001,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "output_8": {
+      "id": "output_8",
+      "type": "output",
+      "x": 1430,
+      "y": 1251,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 152,
+      "y": 1000,
+      "width": 441,
+      "height": 50,
+      "props": {
+        "name": "10MAA50CP001\u00a7\u00a7XQ01",
+        "signalType": "undefined",
+        "dimension": "bar",
+        "description": "\u0422\u0412\u0414 \u041b\u041f\u0422 \u043f\u0435\u0440\u0435\u0434 P $ HPT BLD U/STR P, bar",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "if_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_3",
+      "fromPort": "out-0",
+      "toElement": "if_4",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_4",
+      "fromPort": "out-0",
+      "toElement": "separator_2",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_5",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "separator_2",
+      "fromPort": "out-0",
+      "toElement": "formula_5",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "separator_2",
+      "fromPort": "out-1",
+      "toElement": "const_6",
+      "toPort": "cond-0",
+      "signalType": "false"
+    },
+    {
+      "fromElement": "formula_5",
+      "fromPort": "out-0",
+      "toElement": "output_7",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_6",
+      "fromPort": "out-0",
+      "toElement": "output_8",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 8,
+  "viewport": {
+    "zoom": 0.7000000000000001,
+    "panX": 190.0999999999999,
+    "panY": -374.60000000000014
+  },
+  "code": "WHEN(10MAA50CP001\u00a7\u00a7XQ01 > 100, 10MAA50CP001\u00a7\u00a7XQ01, 0)"
+}

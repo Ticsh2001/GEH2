@@ -124,6 +124,154 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
     out.sort(key=lambda x: x["Tagname"])
     return out
 
+# main.py — добавь после существующих функций
+
+def extract_input_signals_from_project(project_data: Dict) -> List[str]:
+    """Извлекает имена входных сигналов из данных проекта"""
+    elements = project_data.get("elements", {})
+    input_signals = []
+    
+    for elem_id, elem_data in elements.items():
+        if elem_data.get("type") == "input-signal":
+            props = elem_data.get("props", {})
+            signal_name = props.get("name")
+            if signal_name:
+                input_signals.append(signal_name)
+    
+    return input_signals
+
+
+def load_project_by_code(code: str) -> Dict | None:
+    """Загружает проект по его коду (Tagname)"""
+    folder = STATE["settings"].get("projectDataFolder")
+    if not folder:
+        return None
+    
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    if not os.path.isdir(folder_abs):
+        return None
+    
+    for name in os.listdir(folder_abs):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder_abs, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            proj = payload.get("project", {})
+            if proj.get("code") == code:
+                return {
+                    "project": proj,
+                    "formula": payload.get("code", ""),  # сгенерированная формула
+                    "elements": payload.get("elements", {})
+                }
+        except Exception as e:
+            print(f"[WARN] Error reading project {path}: {e}")
+            continue
+    
+    return None
+
+
+def is_base_signal(signal_name: str) -> bool:
+    """Проверяет, есть ли сигнал в архиве (базовый сигнал с данными)"""
+    signal_index = STATE.get("signal_index", {})
+    return signal_name in signal_index
+
+
+def resolve_signal_dependencies(
+    signal_names: List[str],
+    visited: set = None,
+    resolved: Dict[str, Dict] = None
+) -> tuple[set, Dict[str, Dict]]:
+    """
+    Рекурсивно разворачивает зависимости сигналов.
+    
+    Returns:
+        base_signals: множество базовых сигналов (с данными в архиве)
+        synthetic_signals: словарь {code: {formula, dependencies}}
+    """
+    if visited is None:
+        visited = set()
+    if resolved is None:
+        resolved = {}
+    
+    base_signals = set()
+    
+    for signal_name in signal_names:
+        if not signal_name or signal_name in visited:
+            continue
+        visited.add(signal_name)
+        
+        # Сначала проверяем, есть ли в архиве (базовый сигнал)
+        if is_base_signal(signal_name):
+            base_signals.add(signal_name)
+            continue
+        
+        # Пробуем загрузить как проект (синтетический сигнал)
+        project = load_project_by_code(signal_name)
+        if project is None:
+            # Сигнал не найден ни в архиве, ни в проектах
+            # Добавляем в базовые — загрузчик потом вернёт "not found"
+            base_signals.add(signal_name)
+            print(f"[WARN] Signal '{signal_name}' not found in archive or projects")
+            continue
+        
+        # Это синтетический сигнал!
+        formula = project.get("formula", "")
+        dependencies = extract_input_signals_from_project(project)
+        
+        print(f"[INFO] Synthetic signal '{signal_name}' depends on: {dependencies}")
+        
+        resolved[signal_name] = {
+            "formula": formula,
+            "dependencies": dependencies
+        }
+        
+        # Рекурсивно обрабатываем зависимости
+        sub_base, _ = resolve_signal_dependencies(dependencies, visited, resolved)
+        base_signals.update(sub_base)
+    
+    return base_signals, resolved
+
+
+def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
+    """
+    Топологическая сортировка синтетических сигналов.
+    Возвращает порядок вычисления (сначала те, от которых зависят другие).
+    """
+    if not synthetic_signals:
+        return []
+    
+    # Строим граф зависимостей (только между синтетическими сигналами)
+    in_degree = {name: 0 for name in synthetic_signals}
+    graph = {name: [] for name in synthetic_signals}
+    
+    for name, data in synthetic_signals.items():
+        for dep in data.get("dependencies", []):
+            if dep in synthetic_signals:
+                graph[dep].append(name)
+                in_degree[name] += 1
+    
+    # Алгоритм Кана для топологической сортировки
+    queue = [name for name, degree in in_degree.items() if degree == 0]
+    result = []
+    
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        
+        for neighbor in graph[node]:
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                queue.append(neighbor)
+    
+    # Проверка на циклы
+    if len(result) != len(synthetic_signals):
+        cyclic = [name for name in synthetic_signals if name not in result]
+        raise ValueError(f"Обнаружена циклическая зависимость между сигналами: {cyclic}")
+    
+    return result
+
 
 
 app = FastAPI()
@@ -559,6 +707,55 @@ def get_visualize_session(token: str):
     if not data:
         raise HTTPException(status_code=404, detail="session not found")
     return data
+
+@app.post("/api/resolve-signals")
+async def api_resolve_signals(request: Request):
+    """
+    Разворачивает зависимости сигналов (матрёшку).
+    
+    Request body:
+    {
+        "signals": ["SIGNAL1", "SIGNAL2", ...]
+    }
+    
+    Response:
+    {
+        "base_signals": ["BASE1", "BASE2", ...],
+        "synthetic_signals": {
+            "SYN1": {"formula": "...", "dependencies": [...]},
+            ...
+        },
+        "computation_order": ["SYN1", "SYN2", ...]
+    }
+    """
+    try:
+        data = await request.json()
+        signal_names = data.get("signals", [])
+        
+        print(f"[INFO] Resolving dependencies for signals: {signal_names}")
+        
+        # Разворачиваем зависимости
+        base_signals, synthetic_signals = resolve_signal_dependencies(signal_names)
+        
+        # Топологическая сортировка для правильного порядка вычисления
+        computation_order = topological_sort_signals(synthetic_signals)
+        
+        print(f"[INFO] Base signals: {base_signals}")
+        print(f"[INFO] Synthetic signals: {list(synthetic_signals.keys())}")
+        print(f"[INFO] Computation order: {computation_order}")
+        
+        return {
+            "base_signals": list(base_signals),
+            "synthetic_signals": synthetic_signals,
+            "computation_order": computation_order
+        }
+    
+    except ValueError as ve:
+        # Циклическая зависимость
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        print(f"[ERROR] resolve-signals failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Раздаём фронтенд

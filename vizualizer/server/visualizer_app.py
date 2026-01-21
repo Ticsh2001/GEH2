@@ -1,9 +1,12 @@
+# visualizer_app.py — замени/обнови
+
 import pandas as pd
 import requests
 import streamlit as st
 import plotly.express as px
 import numpy as np
 import plotly.graph_objects as go
+from typing import List  # добавь в начало файла если нет
 
 from code_signal import compute_code_signal, sanitize_numeric_column
 
@@ -39,27 +42,33 @@ if "derived_signals" not in st.session_state:
     st.session_state.derived_signals = {}
 if "code_signal_name" not in st.session_state:
     st.session_state.code_signal_name = None
+if "synthetic_computed" not in st.session_state:
+    st.session_state.synthetic_computed = {}  # уже вычисленные синтетические сигналы
 
 
-def load_signals(signal_codes_list):
-    if not signal_codes_list:
-        st.info("Список сигналов пуст — ничего загружать.")
-        return None, [], []
+def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
+    """Загружает данные базовых сигналов из архива"""
+    if not signal_names:
+        return None
+    
     try:
         response = requests.post(
             f"{api_url}/api/signal-data",
-            json={"signal_names": signal_codes_list, "format": "json"},
+            json={"signal_names": signal_names, "format": "json"},
         )
         response.raise_for_status()
         result = response.json()
+        
         found = result.get("found", [])
         not_found = result.get("not_found", [])
         data_dict = result.get("data", {})
-
+        
+        if not_found:
+            st.warning(f"⚠️ Базовые сигналы не найдены в архиве: {', '.join(not_found)}")
+        
         if not data_dict:
-            st.warning("Нет данных по запрошенным сигналам.")
-            return None, found, not_found
-
+            return None
+        
         frames = []
         for sig, records in data_dict.items():
             if not records:
@@ -72,15 +81,131 @@ def load_signals(signal_codes_list):
             df = df.set_index("datetime").sort_index()
             df = df.rename(columns={"value": sig})
             frames.append(df[[sig]])
-
+        
         if not frames:
-            return None, found, not_found
-        return pd.concat(frames, axis=1).sort_index(), found, not_found
+            return None
+        
+        return pd.concat(frames, axis=1).sort_index()
+    
+    except Exception as exc:
+        st.error(f"❌ Ошибка загрузки базовых сигналов: {exc}")
+        return None
 
+
+def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame | None, List[str], List[str]]:
+    """
+    Разворачивает зависимости и загружает все сигналы (базовые + синтетические).
+    
+    Returns:
+        df_all: DataFrame со всеми сигналами
+        found: список найденных сигналов
+        not_found: список ненайденных сигналов
+    """
+    if not input_signals:
+        return None, [], []
+    
+    try:
+        # 1. Разворачиваем зависимости через API
+        with st.spinner("🔍 Разворачиваем зависимости сигналов..."):
+            resolve_resp = requests.post(
+                f"{api_url}/api/resolve-signals",
+                json={"signals": input_signals}
+            )
+            resolve_resp.raise_for_status()
+            resolve_data = resolve_resp.json()
+        
+        base_signals = resolve_data.get("base_signals", [])
+        synthetic_signals = resolve_data.get("synthetic_signals", {})
+        computation_order = resolve_data.get("computation_order", [])
+        
+        st.info(f"📊 Базовых сигналов: {len(base_signals)} | Синтетических: {len(synthetic_signals)}")
+        
+        if synthetic_signals:
+            with st.expander("🔗 Граф зависимостей синтетических сигналов"):
+                for syn_name in computation_order:
+                    deps = synthetic_signals[syn_name].get("dependencies", [])
+                    st.text(f"  {syn_name} ← {deps}")
+        
+        # 2. Загружаем базовые сигналы
+        df_all = None
+        found_signals = []
+        not_found_signals = []
+        
+        if base_signals:
+            with st.spinner(f"📥 Загружаем {len(base_signals)} базовых сигналов..."):
+                df_all = load_base_signals_data(base_signals)
+                if df_all is not None:
+                    found_signals = list(df_all.columns)
+                    not_found_signals = [s for s in base_signals if s not in df_all.columns]
+        
+        if df_all is None:
+            df_all = pd.DataFrame()
+        
+        # 3. Вычисляем синтетические сигналы в правильном порядке
+        if computation_order:
+            with st.spinner(f"⚙️ Вычисляем {len(computation_order)} синтетических сигналов..."):
+                progress_bar = st.progress(0)
+                
+                for idx, syn_name in enumerate(computation_order):
+                    syn_data = synthetic_signals[syn_name]
+                    formula = syn_data.get("formula", "")
+                    
+                    if not formula:
+                        st.warning(f"⚠️ Синтетический сигнал '{syn_name}' не имеет формулы")
+                        continue
+                    
+                    if df_all.empty:
+                        st.warning(f"⚠️ Нет данных для вычисления '{syn_name}'")
+                        continue
+                    
+                    try:
+                        syn_series = compute_code_signal(
+                            formula,
+                            df_all,
+                            warn_callback=lambda msg, name=syn_name: st.warning(f"[{name}] {msg}", icon="⚠️")
+                        )
+                        syn_series.name = syn_name
+                        df_all[syn_name] = syn_series
+                        found_signals.append(syn_name)
+                        st.session_state.synthetic_computed[syn_name] = formula
+                        
+                    except Exception as e:
+                        st.error(f"❌ Ошибка вычисления '{syn_name}': {e}")
+                        not_found_signals.append(syn_name)
+                    
+                    progress_bar.progress((idx + 1) / len(computation_order))
+                
+                progress_bar.empty()
+        
+        return df_all if not df_all.empty else None, found_signals, not_found_signals
+    
+    except requests.exceptions.HTTPError as http_err:
+        error_detail = ""
+        try:
+            error_detail = http_err.response.json().get("detail", "")
+        except:
+            pass
+        st.error(f"❌ Ошибка API: {error_detail or http_err}")
+        return None, [], []
     except Exception as exc:
         st.error(f"❌ Ошибка загрузки данных: {exc}")
+        import traceback
+        st.code(traceback.format_exc())
         return None, [], []
 
+
+# ========== ЗАГРУЗКА ДАННЫХ ==========
+if signal_codes and st.session_state.signals_data is None:
+    df_base, found_codes, not_found_codes = resolve_and_load_all_signals(signal_codes)
+    st.session_state.signals_data = df_base
+    
+    if found_codes:
+        st.success(f"✅ Загружено сигналов: {len(found_codes)}")
+    if not_found_codes:
+        st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
+
+
+# --- остальной код без изменений, начиная с get_all_signals_df ---
 
 def get_all_signals_df(exclude: set[str] | None = None):
     exclude = exclude or set()

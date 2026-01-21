@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "mydfdf",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": ""
+  },
+  "elements": {
+    "formula_3": {
+      "id": "formula_3",
+      "type": "formula",
+      "x": 676,
+      "y": 154,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "dfdf+100",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "output_4": {
+      "id": "output_4",
+      "type": "output",
+      "x": 926,
+      "y": 205,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 424,
+      "y": 206,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "dfdf",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_3",
+      "fromPort": "out-0",
+      "toElement": "output_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 4,
+  "viewport": {
+    "zoom": 1,
+    "panX": 0,
+    "panY": 0
+  },
+  "code": "dfdf+100"
+}
