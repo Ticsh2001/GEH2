@@ -556,6 +556,30 @@ const Elements = {
         console.log(`Скопировано ${newIds.length} элементов`);
     },
 
+        // elements.js — добавь в объект Elements
+    deleteSelectedElements() {
+        const ids = (AppState.selectedElements && AppState.selectedElements.length > 0)
+            ? [...AppState.selectedElements]
+            : (AppState.selectedElement ? [AppState.selectedElement] : []);
+
+        if (ids.length === 0) {
+            console.log('Нечего удалять');
+            return;
+        }
+
+        // Удаляем каждый элемент
+        ids.forEach(id => {
+            this.deleteElement(id);
+        });
+
+        // Сбрасываем выделение
+        AppState.selectedElement = null;
+        AppState.selectedElements = [];
+        document.getElementById('selection-info').textContent = '';
+
+        console.log(`Удалено ${ids.length} элементов`);
+    },
+
     /**
      * Обработка resize
      */

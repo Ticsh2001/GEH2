@@ -706,3 +706,45 @@ body {
 }
 
 .element-comment:empty { display: none; }
+
+/* Tooltip для шаблонов формул */
+.template-item {
+    position: relative;
+}
+
+.template-tooltip {
+    position: fixed;
+    background: #1a1a2e;
+    border: 1px solid #4a90d9;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #e0e0e0;
+    font-size: 12px;
+    max-width: 280px;
+    line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 10000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.template-tooltip.visible {
+    opacity: 1;
+}
+
+.template-tooltip::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 20px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 6px solid #4a90d9;
+}
+
+.template-tooltip-title {
+    font-weight: 600;
+    color: #4a90d9;
+    margin-bottom: 4px;
+}

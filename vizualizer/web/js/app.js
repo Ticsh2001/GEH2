@@ -269,10 +269,11 @@ setupGlobalMouseHandlers() {
         });
 
         document.getElementById('ctx-delete').addEventListener('click', () => {
-            const elemId = document.getElementById('context-menu').dataset.elementId;
             document.getElementById('context-menu').style.display = 'none';
-            Elements.deleteElement(elemId);
-            // Обновляем выходы только если модуль загружен
+            
+            // Используем новую функцию для удаления всех выделенных
+            Elements.deleteSelectedElements();
+            
             if (typeof Outputs !== 'undefined' && Outputs.updateOutputStatus) {
                 Outputs.updateOutputStatus();
             }
