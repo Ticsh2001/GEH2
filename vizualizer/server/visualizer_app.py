@@ -44,6 +44,8 @@ if "code_signal_name" not in st.session_state:
     st.session_state.code_signal_name = None
 if "synthetic_computed" not in st.session_state:
     st.session_state.synthetic_computed = {}  # уже вычисленные синтетические сигналы
+if "signal_groups" not in st.session_state:
+    st.session_state.signal_groups = {"project": set(), "dependencies": set()}
 
 
 def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
@@ -92,6 +94,8 @@ def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
         return None
 
 
+# visualizer_app.py — замени функцию resolve_and_load_all_signals
+
 def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame | None, List[str], List[str]]:
     """
     Разворачивает зависимости и загружает все сигналы (базовые + синтетические).
@@ -118,13 +122,38 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
         synthetic_signals = resolve_data.get("synthetic_signals", {})
         computation_order = resolve_data.get("computation_order", [])
         
-        st.info(f"📊 Базовых сигналов: {len(base_signals)} | Синтетических: {len(synthetic_signals)}")
+        # === СОХРАНЯЕМ ГРУППИРОВКУ СИГНАЛОВ ===
+        # Сигналы из текущего проекта (исходные входные)
+        project_signals = set(input_signals)
+        
+        # Сигналы из зависимостей (все остальные)
+        dependency_signals = set()
+        for syn_name, syn_data in synthetic_signals.items():
+            if syn_name not in project_signals:
+                dependency_signals.add(syn_name)
+            for dep in syn_data.get("dependencies", []):
+                if dep not in project_signals:
+                    dependency_signals.add(dep)
+        
+        # Также добавляем базовые сигналы, которые не из проекта
+        for bs in base_signals:
+            if bs not in project_signals:
+                dependency_signals.add(bs)
+        
+        # Сохраняем в session_state для использования в сайдбаре
+        st.session_state.signal_groups = {
+            "project": project_signals,       # входные сигналы текущего проекта
+            "dependencies": dependency_signals # сигналы из развёрнутых зависимостей
+        }
+        
+        st.info(f"📊 Сигналов проекта: {len(project_signals)} | Из зависимостей: {len(dependency_signals)}")
         
         if synthetic_signals:
             with st.expander("🔗 Граф зависимостей синтетических сигналов"):
                 for syn_name in computation_order:
                     deps = synthetic_signals[syn_name].get("dependencies", [])
-                    st.text(f"  {syn_name} ← {deps}")
+                    marker = "📌" if syn_name in project_signals else "🔗"
+                    st.text(f"  {marker} {syn_name} ← {deps}")
         
         # 2. Загружаем базовые сигналы
         df_all = None
@@ -325,15 +354,63 @@ with st.sidebar:
 
     if df_all_signals is not None:
         available_signals = df_all_signals.columns.tolist()
-        for signal in available_signals:
-            checked = st.checkbox(
-                signal,
-                value=(signal in st.session_state.selected_signals),
-            )
-            if checked:
-                st.session_state.selected_signals.add(signal)
-            else:
-                st.session_state.selected_signals.discard(signal)
+        
+        # Получаем группы сигналов
+        signal_groups = st.session_state.get("signal_groups", {
+            "project": set(available_signals),
+            "dependencies": set()
+        })
+        
+        project_signals = [s for s in available_signals if s in signal_groups.get("project", set())]
+        dependency_signals = [s for s in available_signals if s in signal_groups.get("dependencies", set())]
+        
+        # === СИГНАЛЫ ПРОЕКТА ===
+        if project_signals:
+            st.subheader("📌 Сигналы проекта")
+            for signal in project_signals:
+                # Помечаем синтетические сигналы
+                is_synthetic = signal in st.session_state.get("synthetic_computed", {})
+                label = f"⚙️ {signal}" if is_synthetic else signal
+                
+                checked = st.checkbox(
+                    label,
+                    value=(signal in st.session_state.selected_signals),
+                    key=f"proj_{signal}"
+                )
+                if checked:
+                    st.session_state.selected_signals.add(signal)
+                else:
+                    st.session_state.selected_signals.discard(signal)
+        
+        # === СИГНАЛЫ ИЗ ЗАВИСИМОСТЕЙ ===
+        if dependency_signals:
+            st.divider()
+            with st.expander(f"🔗 Из зависимостей ({len(dependency_signals)})", expanded=False):
+                for signal in dependency_signals:
+                    is_synthetic = signal in st.session_state.get("synthetic_computed", {})
+                    label = f"⚙️ {signal}" if is_synthetic else signal
+                    
+                    checked = st.checkbox(
+                        label,
+                        value=(signal in st.session_state.selected_signals),
+                        key=f"dep_{signal}"
+                    )
+                    if checked:
+                        st.session_state.selected_signals.add(signal)
+                    else:
+                        st.session_state.selected_signals.discard(signal)
+        
+        # === Быстрые действия ===
+        st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Все проекта"):
+                st.session_state.selected_signals.update(project_signals)
+                st.rerun()
+        with col2:
+            if st.button("❌ Снять все"):
+                st.session_state.selected_signals.clear()
+                st.rerun()
 
         st.divider()
         st.subheader("Создать обрезанный сигнал")
