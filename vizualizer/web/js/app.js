@@ -277,6 +277,10 @@ setupGlobalMouseHandlers() {
                 Outputs.updateOutputStatus();
             }
         });
+        document.getElementById('ctx-copy').addEventListener('click', () => {
+            document.getElementById('context-menu').style.display = 'none';
+            Elements.copySelectedElements();
+        });
     },
 
     /**

@@ -477,6 +477,84 @@ const Elements = {
             };
         });
     },
+// elements.js — ЗАМЕНИ функцию copySelectedElements
+    copySelectedElements() {
+        const ids = (AppState.selectedElements && AppState.selectedElements.length > 0)
+            ? [...AppState.selectedElements]
+            : (AppState.selectedElement ? [AppState.selectedElement] : []);
+
+        if (ids.length === 0) {
+            console.log('Нечего копировать');
+            return;
+        }
+
+        const originals = ids
+            .map(id => AppState.elements[id])
+            .filter(Boolean);
+
+        if (originals.length === 0) return;
+
+        const offsetX = 50;
+        const offsetY = 50;
+
+        const idMap = {};
+        const newIds = [];
+
+        originals.forEach(el => {
+            // Копируем свойства элемента (глубокое копирование props)
+            const newProps = JSON.parse(JSON.stringify(el.props || {}));
+
+            // Используем существующую функцию addElement
+            // Она сама сгенерирует ID и создаст DOM
+            const createdId = this.addElement(
+                el.type,                    // тип элемента
+                el.x + offsetX,             // новая позиция X
+                el.y + offsetY,             // новая позиция Y
+                newProps,                   // скопированные свойства
+                null,                       // ID = null, чтобы addElement сгенерировал сам
+                el.width,                   // ширина
+                el.height                   // высота
+            );
+
+            if (createdId) {
+                idMap[el.id] = createdId;
+                newIds.push(createdId);
+            }
+        });
+
+        // Копируем связи ТОЛЬКО между скопированными элементами
+        const newConnections = [];
+        AppState.connections.forEach(conn => {
+            if (idMap[conn.fromElement] && idMap[conn.toElement]) {
+                newConnections.push({
+                    fromElement: idMap[conn.fromElement],
+                    fromPort: conn.fromPort,
+                    toElement: idMap[conn.toElement],
+                    toPort: conn.toPort,
+                    signalType: conn.signalType || 'Boolean'
+                });
+            }
+        });
+
+        AppState.connections.push(...newConnections);
+        Connections.drawConnections();
+
+        // Выделяем новые элементы
+        this.deselectAll();
+        AppState.selectedElements = newIds;
+        AppState.selectedElement = newIds[newIds.length - 1];
+
+        newIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('selected');
+        });
+
+        document.getElementById('selection-info').textContent = 
+            `Скопировано: ${newIds.length} элемент(ов)`;
+
+        Viewport.updateMinimap();
+        console.log(`Скопировано ${newIds.length} элементов`);
+    },
 
     /**
      * Обработка resize
