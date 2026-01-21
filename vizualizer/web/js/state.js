@@ -10,6 +10,7 @@ const AppState = {
     
     // Выделение
     selectedElement: null,
+    selectedElements: [],    // ← ДОБАВЬ ЭТУ СТРОКУ (для группы)
     
     // Перетаскивание
     draggingElement: null,

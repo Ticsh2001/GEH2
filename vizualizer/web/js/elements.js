@@ -362,35 +362,34 @@ const Elements = {
     /**
      * Выделение элемента
      */
+// elements.js
     selectElement(elemId) {
-        if (AppState.selectedElement) {
-            const oldElem = document.getElementById(AppState.selectedElement);
-            if (oldElem) oldElem.classList.remove('selected');
-        }
+        // Снимаем старое выделение со всех
+        this.deselectAll();
 
         AppState.selectedElement = elemId;
+        AppState.selectedElements = [elemId]; 
+        
         const elem = document.getElementById(elemId);
         if (elem) elem.classList.add('selected');
 
         const elemData = AppState.elements[elemId];
         if (elemData) {
-            document.getElementById('selection-info').textContent =
+            document.getElementById('selection-info').textContent = 
                 `Выбрано: ${ELEMENT_TYPES[elemData.type]?.name || elemData.type}`;
         }
     },
 
-    /**
-     * Снять выделение
-     */
     deselectAll() {
-        if (AppState.selectedElement) {
-            const elem = document.getElementById(AppState.selectedElement);
-            if (elem) elem.classList.remove('selected');
-            AppState.selectedElement = null;
+        // Снимаем класс со всех элементов на странице
+        document.querySelectorAll('.element.selected').forEach(el => el.classList.remove('selected'));
+        
+        AppState.selectedElement = null;
+        AppState.selectedElements = [];
+        if (document.getElementById('selection-info')) {
+            document.getElementById('selection-info').textContent = '';
         }
-        document.getElementById('selection-info').textContent = '';
     },
-
     /**
      * Настройка обработчиков элемента
      */
@@ -399,6 +398,7 @@ const Elements = {
             const elem = document.getElementById(elemId);
             if (!elem) return;
 
+            // elements.js -> setupElementHandlers
             elem.addEventListener('mousedown', (e) => {
                 if (e.target.classList.contains('port')) return;
                 if (e.target.classList.contains('resize-handle')) return;
@@ -406,7 +406,12 @@ const Elements = {
                 e.preventDefault();
                 e.stopPropagation();
 
-                this.selectElement(elemId);
+                // ПРАВКА ТУТ:
+                // Если элемент НЕ в группе — выделяем только его.
+                // Если элемент УЖЕ в группе — не трогаем группу, чтобы можно было тянуть всех.
+                if (!AppState.selectedElements.includes(elemId)) {
+                    this.selectElement(elemId);
+                }
 
                 AppState.draggingElement = elemId;
                 const canvasPos = screenToCanvas(e.clientX, e.clientY);

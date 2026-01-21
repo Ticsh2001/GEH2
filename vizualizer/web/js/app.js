@@ -282,11 +282,17 @@ setupGlobalMouseHandlers() {
     /**
      * Клик по рабочей области
      */
+    // app.js
+    // app.js
     setupWorkspaceClick() {
-        const workspace = document.getElementById('workspace');
+        const container = document.getElementById('workspace-container');
 
-        workspace.addEventListener('click', (e) => {
-            if (e.target === workspace) {
+        container.addEventListener('click', (e) => {
+            // Если мы только что закончили тянуть РАМКУ (реальное выделение), не сбрасываем
+            if (AppState.marqueeJustEnded) return;
+
+            // Если кликнули ЛЕВОЙ кнопкой мыши НЕ по элементу и НЕ по порту
+            if (e.button === 0 && !e.target.closest('.element') && !e.target.closest('.port')) {
                 Elements.deselectAll();
             }
         });
@@ -294,13 +300,14 @@ setupGlobalMouseHandlers() {
     /**
  * --- Выделение рамкой и множественное перемещение ---
  */
+    // app.js
     setupMultiSelection() {
         const container = document.getElementById('workspace-container');
         const rectEl = document.getElementById('selection-rect');
 
         container.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            if (e.target !== document.getElementById('workspace')) return;
+            // РАМКА: только ЛЕВАЯ кнопка (0) и клик НЕ по элементу
+            if (e.button !== 0 || e.target.closest('.element') || e.target.closest('#minimap')) return;
 
             const pos = screenToCanvas(e.clientX, e.clientY);
             AppState.multiSelecting = true;
@@ -319,38 +326,52 @@ setupGlobalMouseHandlers() {
             const pos = screenToCanvas(e.clientX, e.clientY);
             const sx = AppState.selectionRect.startX;
             const sy = AppState.selectionRect.startY;
+            
             const x = Math.min(sx, pos.x);
             const y = Math.min(sy, pos.y);
             const w = Math.abs(pos.x - sx);
             const h = Math.abs(pos.y - sy);
 
-            rectEl.style.left = x * AppState.viewport.zoom + AppState.viewport.panX + 'px';
-            rectEl.style.top = y * AppState.viewport.zoom + AppState.viewport.panY + 'px';
-            rectEl.style.width = w * AppState.viewport.zoom + 'px';
-            rectEl.style.height = h * AppState.viewport.zoom + 'px';
+            // Обновляем визуальную рамку
+            rectEl.style.left = (x * AppState.viewport.zoom + AppState.viewport.panX) + 'px';
+            rectEl.style.top = (y * AppState.viewport.zoom + AppState.viewport.panY) + 'px';
+            rectEl.style.width = (w * AppState.viewport.zoom) + 'px';
+            rectEl.style.height = (h * AppState.viewport.zoom) + 'px';
 
+            // Ищем элементы внутри
             const selected = [];
             for (const [id, elData] of Object.entries(AppState.elements)) {
-            if (!elData || elData.type === 'output-frame') continue;
-            if (
-                elData.x >= x && elData.x + elData.width <= x + w &&
-                elData.y >= y && elData.y + elData.height <= y + h
-            ) selected.push(id);
+                if (!elData || elData.type === 'output-frame') continue;
+                if (elData.x >= x && elData.x + elData.width <= x + w &&
+                    elData.y >= y && elData.y + elData.height <= y + h) {
+                    selected.push(id);
+                }
             }
 
             AppState.selectedElements = selected;
-            document.querySelectorAll('.element').forEach(el => 
-            el.classList.toggle('selected', selected.includes(el.id))
-            );
+            AppState.selectedElement = selected.length > 0 ? selected[selected.length - 1] : null;
+
+            document.querySelectorAll('.element').forEach(el => {
+                el.classList.toggle('selected', selected.includes(el.id));
+            });
         });
 
         document.addEventListener('mouseup', () => {
             if (AppState.multiSelecting) {
-            AppState.multiSelecting = false;
-            rectEl.style.display = 'none';
+                AppState.multiSelecting = false;
+                const rectEl = document.getElementById('selection-rect');
+                const w = parseInt(rectEl.style.width) || 0;
+                const h = parseInt(rectEl.style.height) || 0;
+                rectEl.style.display = 'none';
+                
+                // Флаг, чтобы setupWorkspaceClick не сбросил выделение сразу
+                if (w > 2 || h > 2) {
+                    AppState.marqueeJustEnded = true;
+                    setTimeout(() => { AppState.marqueeJustEnded = false; }, 50);
+                }
             }
         });
-    }
+    },
 };
 
 // Запуск приложения при загрузке страницы
