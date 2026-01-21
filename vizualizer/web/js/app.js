@@ -1,5 +1,6 @@
 /**
  * Главный модуль приложения
+ * app.js
  */
 
 const App = {
@@ -45,54 +46,66 @@ const App = {
 });        
     },
 
-    openSignalVisualizer() {
-        try {
-            // 1) Собираем входные сигналы
-            const signals = Object.values(AppState.elements)
+openSignalVisualizer() {
+    try {
+        // 1) Собираем входные сигналы
+        const signals = Object.values(AppState.elements)
             .filter(e => e && e.type === 'input-signal')
             .map(e => e.props?.name || e.id);
-            const uniqSignals = [...new Set(signals)];
-            if (uniqSignals.length === 0) {
+        const uniqSignals = [...new Set(signals)];
+        
+        if (uniqSignals.length === 0) {
             alert('Нет входных сигналов в схеме.');
             return;
-            }
+        }
 
-            // 2) Генерируем код (может быть длинным)
-            let codeStr = '';
-            if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
+        // 2) Генерируем код
+        let codeStr = '';
+        if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
             codeStr = CodeGen.generate() || '';
-            }
+        }
 
-            // 3) Создаём сессию на backend, чтобы не тащить код в URL
-            fetch('/api/visualize/session', {
+        // 3) Определяем URL-ы динамически
+        const currentHost = window.location.hostname; // IP или домен сервера
+        const apiPort = window.location.port || 8000;
+        const visualizerPort = Settings.config?.visualizerPort || 8501;
+        
+        const apiUrl = `http://${currentHost}:${apiPort}`;
+        const visualizerBase = `http://${currentHost}:${visualizerPort}`;
+
+        console.log('API URL:', apiUrl);
+        console.log('Visualizer URL:', visualizerBase);
+
+        // 4) Создаём сессию на backend
+        fetch('/api/visualize/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ signals: uniqSignals, code: codeStr })
-            })
-            .then(r => {
+        })
+        .then(r => {
             if (!r.ok) throw new Error('Failed to create visualize session');
             return r.json();
-            })
-            .then(data => {
+        })
+        .then(data => {
             const token = data.token;
-            const apiUrl = window.location.origin; // http://localhost:8000
             const params = new URLSearchParams();
             params.set('session', token);
             params.set('api_url', apiUrl);
-            // signals можно не передавать — визуализатор возьмет их из session
-            const visualizerUrl = `http://localhost:8501?${params.toString()}`;
+            
+            const visualizerUrl = `${visualizerBase}/?${params.toString()}`;
+            console.log('Opening visualizer:', visualizerUrl);
             window.open(visualizerUrl, '_blank');
-            })
-            .catch(err => {
+        })
+        .catch(err => {
             console.error(err);
             alert('Не удалось открыть визуализатор: ' + err.message);
-            });
+        });
 
-        } catch (e) {
-            console.error(e);
-            alert('Ошибка при подготовке визуализации: ' + e.message);
-        }
-    },
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка при подготовке визуализации: ' + e.message);
+    }
+},
 
     /**
      * Отмена состояния drag из палитры (helper)

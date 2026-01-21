@@ -103,12 +103,18 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
             continue
         path = os.path.join(folder_abs, name)
         try:
-            df = pd.read_csv(path, sep=';')[['Tagname', 'Description', 'Engineering Unit']]
+            try:
+                df = pd.read_csv(path, sep=';')[['Tagname', 'Description', 'Engineering Unit']]
+            except KeyError:
+                df = pd.read_csv(path, sep=';')[['Tagname', 'Description']]
             df = df.dropna(subset=['Tagname'])
             for _, row in df.iterrows():
                 tag = str(row['Tagname']).strip()
                 desc = "" if pd.isna(row['Description']) else str(row['Description']).strip()
-                unit = "" if pd.isna(row['Engineering Unit']) else str(row['Engineering Unit']).strip()
+                try:
+                    unit = "" if pd.isna(row['Engineering Unit']) else str(row['Engineering Unit']).strip()
+                except KeyError:
+                    unit = ""
                 desc_full = ", ".join([x for x in [desc, unit] if x])
 
                 if tag:

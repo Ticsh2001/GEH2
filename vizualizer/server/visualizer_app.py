@@ -298,8 +298,7 @@ def make_unique_name(base_name: str) -> str:
 
 if signal_codes and st.session_state.signals_data is None:
     with st.spinner("Загружаем данные сигналов..."):
-        df_base, found_codes, not_found_codes = load_signals(signal_codes)
-        st.session_state.signals_data = df_base
+        df_all, found_codes, not_found_codes = resolve_and_load_all_signals(signal_codes)
         st.success(f"✅ Загружено сигналов: {len(found_codes)}")
         if not_found_codes:
             st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
