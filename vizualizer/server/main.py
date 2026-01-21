@@ -299,7 +299,7 @@ STATE = {
 
 def build_signal_index(folder: str) -> Dict[str, List[str]]:
     """
-    При запуске: проходим по всем CSV файлам и создаем индекс
+    Проходим по всем CSV файлам и создаём индекс
     signal_name -> list of files where it's present
     """
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(
@@ -320,17 +320,14 @@ def build_signal_index(folder: str) -> Dict[str, List[str]]:
         filepath = os.path.join(folder_abs, filename)
         
         try:
-            # Читаем только первую строку (заголовок)
             df_header = pd.read_csv(
                 filepath,
-                nrows=0,  # Читаем только заголовок
+                nrows=0,
                 encoding="ISO-8859-2",
                 sep=";"
             )
             
             columns = df_header.columns.tolist()
-            
-            # Удаляем служебные столбцы из индекса
             signal_columns = [c for c in columns if c not in ["DATE", "TIME", "datetime"]]
             
             for signal_name in signal_columns:
@@ -346,32 +343,74 @@ def build_signal_index(folder: str) -> Dict[str, List[str]]:
     
     print(f"[OK] Total unique signals indexed: {len(signal_index)}")
     
-    # Сохраняем индекс в pickle для быстрого восстановления
-    try:
-        with open(SIGNAL_INDEX_PATH, "wb") as f:
-            pickle.dump(signal_index, f)
-        print(f"[OK] Signal index cached to {SIGNAL_INDEX_PATH}")
-    except Exception as e:
-        print(f"[WARN] Failed to cache signal index: {e}")
-    
+    # НЕ сохраняем здесь — это делает load_signal_index
     return signal_index
 
 
 def load_signal_index(folder: str) -> Dict[str, List[str]]:
     """
-    Загружает индекс либо из кэша, либо перестраивает его
+    Загружает индекс из кэша, но проверяет актуальность.
+    Перестраивает если:
+      - кэша нет
+      - папка изменилась (добавлены/удалены файлы)
     """
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(
+        os.path.join(BASE_DIR, folder)
+    )
+    
+    # Получаем список CSV файлов и их время модификации
+    def get_folder_state(path: str) -> dict:
+        if not os.path.isdir(path):
+            return {}
+        state = {}
+        for name in os.listdir(path):
+            if name.lower().endswith(".csv"):
+                filepath = os.path.join(path, name)
+                state[name] = os.path.getmtime(filepath)
+        return state
+    
+    current_state = get_folder_state(folder_abs)
+    
+    # Пробуем загрузить кэш
     if os.path.exists(SIGNAL_INDEX_PATH):
         try:
             with open(SIGNAL_INDEX_PATH, "rb") as f:
-                index = pickle.load(f)
-            print(f"[OK] Signal index loaded from cache")
-            return index
+                cached_data = pickle.load(f)
+            
+            # Проверяем, есть ли метаданные о состоянии папки
+            if isinstance(cached_data, dict) and "_folder_state" in cached_data:
+                cached_state = cached_data["_folder_state"]
+                cached_index = cached_data["index"]
+                
+                # Сравниваем состояния
+                if cached_state == current_state:
+                    print(f"[OK] Signal index loaded from cache ({len(cached_index)} signals)")
+                    return cached_index
+                else:
+                    print(f"[INFO] CSV files changed, rebuilding index...")
+            else:
+                # Старый формат кэша — перестраиваем
+                print(f"[INFO] Old cache format, rebuilding index...")
+        
         except Exception as e:
             print(f"[WARN] Failed to load cached index: {e}")
     
-    # Если кэша нет, перестраиваем
-    return build_signal_index(folder)
+    # Перестраиваем индекс
+    index = build_signal_index(folder)
+    
+    # Сохраняем с метаданными
+    try:
+        cache_data = {
+            "index": index,
+            "_folder_state": current_state
+        }
+        with open(SIGNAL_INDEX_PATH, "wb") as f:
+            pickle.dump(cache_data, f)
+        print(f"[OK] Signal index cached with folder state")
+    except Exception as e:
+        print(f"[WARN] Failed to cache signal index: {e}")
+    
+    return index
 
 def load_signal_data_optimized(signal_names: List[str], folder: str) -> Dict[str, pd.DataFrame]:
     """
