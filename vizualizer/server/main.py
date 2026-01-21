@@ -458,15 +458,23 @@ def api_signals(q: str = "", limit: int = 50):
     """
     signals = STATE["signals"] or []
     if not q:
-        return {"items": signals[:limit], "total": len(signals)}
-
-    # маска * -> regex
-    import re
-    escaped = re.escape(q).replace(r"\*", ".*")
-    rx = re.compile("^" + escaped + "$", re.IGNORECASE)
-
-    items = [s for s in signals if rx.match(s["Tagname"])]
-    return {"items": items[:max(1, min(limit, 500))], "total": len(items)}
+        result = {"items": signals[:limit], "total": len(signals)}
+    else:
+        import re
+        escaped = re.escape(q).replace(r"\*", ".*")
+        rx = re.compile("^" + escaped + "$", re.IGNORECASE)
+        items = [s for s in signals if rx.match(s["Tagname"])]
+        result = {"items": items[:max(1, min(limit, 500))], "total": len(items)}
+    
+    # Возвращаем с заголовками против кэширования
+    return JSONResponse(
+        content=result,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 # Helper: возвращает абсолютный путь к файлу проекта
 def get_project_path(filename: str):
@@ -488,6 +496,8 @@ def get_project_path(filename: str):
          
     return path
 
+# main.py — исправь endpoint save_project
+
 @app.post("/api/project/save")
 async def save_project(request: Request):
     try:
@@ -503,7 +513,11 @@ async def save_project(request: Request):
         # Сохраняем как JSON
         with open(path, "w", encoding="utf-8") as f:
             json.dump(content, f, indent=2)
-            refresh_signals_cache()
+        
+        # ВАЖНО: обновляем кэш ПОСЛЕ закрытия файла!
+        refresh_signals_cache()
+        
+        print(f"[OK] Project saved: {filename}, signals cache refreshed: {len(STATE['signals'])} signals")
             
         return {"status": "ok", "message": f"Project saved to {filename}"}
         

@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "buba",
+    "type": "parameter",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "description": ""
+  },
+  "elements": {
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 268,
+      "y": 964,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "siga",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [],
+  "counter": 1,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "/* \u041d\u0435\u0442 \u0432\u044b\u0445\u043e\u0434\u043e\u0432 */"
+}
