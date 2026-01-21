@@ -50,6 +50,11 @@ const Modal = {
      */
     hideModal(modalId) {
         document.getElementById(modalId).style.display = 'none';
+        // Скрываем tooltip если он есть
+        const tooltip = document.getElementById('template-tooltip');
+        if (tooltip) {
+            tooltip.classList.remove('visible');
+        }
     },
 
     /**
@@ -213,34 +218,76 @@ const Modal = {
         
 
         modalContent.innerHTML = contentHTML;
+        // modal.js — внутри showPropertiesModal, блок if (elemType === 'formula')
         if (elemType === 'formula') {
             const listEl = document.getElementById('template-list');
+            
+            // Создаём tooltip элемент (один на всю страницу)
+            let tooltip = document.getElementById('template-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'template-tooltip';
+                tooltip.className = 'template-tooltip';
+                document.body.appendChild(tooltip);
+            }
+
             (async () => {
                 try {
-                const data = await Settings.fetchFormulaTemplates();
-                const items = data.templates || [];
-                if (!items.length) {
-                    listEl.innerHTML = '<div style="color:#888;padding:5px;">Нет шаблонов</div>';
-                    return;
-                }
-                listEl.innerHTML = items.map(t => {
-                    const sig = `${t.name}(${(t.args || []).join(', ')})`;
-                    return `<div class="signal-item template-item" data-insert="${sig}">${sig}</div>`;
-                }).join('');
+                    const data = await Settings.fetchFormulaTemplates();
+                    const items = data.templates || [];
+                    
+                    if (!items.length) {
+                        listEl.innerHTML = '<div style="color:#888;padding:5px;">Нет шаблонов</div>';
+                        return;
+                    }
+                    
+                    listEl.innerHTML = items.map(t => {
+                        const sig = `${t.name}(${(t.args || []).join(', ')})`;
+                        // Сохраняем description в data-атрибут
+                        const desc = (t.description || '').replace(/"/g, '&quot;');
+                        return `<div class="signal-item template-item" 
+                                    data-insert="${sig}" 
+                                    data-name="${t.name}"
+                                    data-description="${desc}">${sig}</div>`;
+                    }).join('');
 
-                listEl.querySelectorAll('.template-item').forEach(div => {
-                    div.addEventListener('dblclick', () => {
-                        const insert = div.dataset.insert;
-                        const textarea = document.getElementById('prop-expression');
-                        
-                        // БЫЛО: textarea.value += ...;
-                        // СТАЛО:
-                        insertAtCursor(textarea, insert);
+                    // Обработчики для каждого шаблона
+                    listEl.querySelectorAll('.template-item').forEach(div => {
+                        // Двойной клик — вставка
+                        div.addEventListener('dblclick', () => {
+                            const insert = div.dataset.insert;
+                            const textarea = document.getElementById('prop-expression');
+                            insertAtCursor(textarea, insert);
+                        });
+
+                        // Наведение — показать tooltip
+                        div.addEventListener('mouseenter', (e) => {
+                            const description = div.dataset.description;
+                            const name = div.dataset.name;
+                            
+                            if (!description) return;
+                            
+                            tooltip.innerHTML = `
+                                <div class="template-tooltip-title">${name}</div>
+                                <div>${description}</div>
+                            `;
+                            
+                            // Позиционируем tooltip
+                            const rect = div.getBoundingClientRect();
+                            tooltip.style.left = rect.left + 'px';
+                            tooltip.style.top = (rect.bottom + 8) + 'px';
+                            tooltip.classList.add('visible');
+                        });
+
+                        // Уход мыши — скрыть tooltip
+                        div.addEventListener('mouseleave', () => {
+                            tooltip.classList.remove('visible');
+                        });
                     });
-                });
+                    
                 } catch (e) {
-                console.error(e);
-                listEl.innerHTML = '<div style="color:#888;padding:5px;">Ошибка загрузки</div>';
+                    console.error(e);
+                    listEl.innerHTML = '<div style="color:#888;padding:5px;">Ошибка загрузки</div>';
                 }
             })();
         }
