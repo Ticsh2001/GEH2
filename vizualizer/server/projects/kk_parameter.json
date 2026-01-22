@@ -7,27 +7,28 @@
     "dimension": "",
     "possibleCause": "",
     "guidelines": "",
-    "visualizer_state": null
+    "visualizer_state": {
+      "version": 1,
+      "selected_signals": [
+        "CODE_RESULT"
+      ],
+      "plot_areas": [
+        {
+          "id": 1,
+          "signals": [
+            "CODE_RESULT"
+          ],
+          "shapes": []
+        }
+      ]
+    }
   },
   "elements": {
-    "formula_3": {
-      "id": "formula_3",
-      "type": "formula",
-      "x": 457,
-      "y": 1031.5,
-      "width": 140,
-      "height": 108,
-      "props": {
-        "expression": "h(10MAA50CP001\u00a7\u00a7XQ01, 10MAA11CT021A\u00a7\u00a7XQ01)",
-        "inputCount": 2,
-        "comment": ""
-      }
-    },
     "output_4": {
       "id": "output_4",
       "type": "output",
-      "x": 722,
-      "y": 1091.5,
+      "x": 707,
+      "y": 1044.5,
       "width": 150,
       "height": 60,
       "props": {
@@ -50,18 +51,16 @@
         "comment": ""
       }
     },
-    "input_signal_2": {
-      "id": "input_signal_2",
-      "type": "input-signal",
-      "x": 83,
-      "y": 1111.5,
-      "width": 150,
-      "height": 50,
+    "formula_5": {
+      "id": "formula_5",
+      "type": "formula",
+      "x": 419,
+      "y": 941.5,
+      "width": 140,
+      "height": 80,
       "props": {
-        "name": "10MAA11CT021A\u00a7\u00a7XQ01",
-        "signalType": "undefined",
-        "dimension": "\u00b0C",
-        "description": "\u0422\u0415\u041c\u041f \u0413\u041f \u041f\u0417\u041a 100% $ TEMP MS ESV 100%, \u00b0C",
+        "expression": "ps(10MAA50CP001\u00a7\u00a7XQ01)",
+        "inputCount": 1,
         "comment": ""
       }
     }
@@ -70,36 +69,29 @@
     {
       "fromElement": "input_signal_1",
       "fromPort": "out-0",
-      "toElement": "formula_3",
+      "toElement": "formula_5",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
-      "fromElement": "input_signal_2",
-      "fromPort": "out-0",
-      "toElement": "formula_3",
-      "toPort": "in-1",
-      "signalType": "numeric"
-    },
-    {
-      "fromElement": "formula_3",
+      "fromElement": "formula_5",
       "fromPort": "out-0",
       "toElement": "output_4",
       "toPort": "in-0",
       "signalType": "numeric"
     }
   ],
-  "counter": 4,
+  "counter": 5,
   "viewport": {
     "zoom": 1,
     "panX": 100,
     "panY": -804.5
   },
-  "code": "WHEN((10MAA50CP001\u00a7\u00a7XQ01 >= 0.1) AND (10MAA50CP001\u00a7\u00a7XQ01 <= 100) AND (10MAA11CT021A\u00a7\u00a7XQ01 >= 100) AND (10MAA11CT021A\u00a7\u00a7XQ01 <= 800), 249224.04*(10.0345645150427467+0.02804395564151*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),-6)-0.28581095232582*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),-5)+1.22131494671784*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),-4)-2.8481638342888*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),-3)+4.383951131945*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),-2)-0.56817264921544*(540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15))+0.063805391259921*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)),2)-0.035669724584716*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),1)-0.137988041089095*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),2)-0.345487554500592*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),5)-0.000033032641670203*POW(((10MAA50CP001\u00a7\u00a7XQ01)),1)+0.0003789797503263*POW(((10MAA50CP001\u00a7\u00a7XQ01)),1)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),1)+0.00064959155481004*POW(((10MAA50CP001\u00a7\u00a7XQ01)),1)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)-0.000107390146129749*POW(((10MAA50CP001\u00a7\u00a7XQ01)),1)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)-0.000038079214570483*POW(((10MAA50CP001\u00a7\u00a7XQ01)),2)-0.000131416713028728*POW(((10MAA50CP001\u00a7\u00a7XQ01)),2)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),1)-0.000203760598930965*POW(((10MAA50CP001\u00a7\u00a7XQ01)),2)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),2)-0.000071533435854167*POW(((10MAA50CP001\u00a7\u00a7XQ01)),2)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)+0.000018942414343547*POW(((10MAA50CP001\u00a7\u00a7XQ01)),3)-0.000110182940335131*POW(((10MAA50CP001\u00a7\u00a7XQ01)),3)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),2)+0.000498973685185598*POW(((10MAA50CP001\u00a7\u00a7XQ01)),3)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)+0.000027667582829898*POW(((10MAA50CP001\u00a7\u00a7XQ01)),4)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),1)-0.000192576711692874*POW(((10MAA50CP001\u00a7\u00a7XQ01)),4)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),5)+0.000530636787716735*POW(((10MAA50CP001\u00a7\u00a7XQ01)),4)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)+0.0000056870401371009*POW(((10MAA50CP001\u00a7\u00a7XQ01)),5)-0.000017543006560078*POW(((10MAA50CP001\u00a7\u00a7XQ01)),5)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),1)-0.000130836910368116*POW(((10MAA50CP001\u00a7\u00a7XQ01)),5)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)+0.00017410736239407*POW(((10MAA50CP001\u00a7\u00a7XQ01)),5)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),5)+0.0000600526738576128*POW(((10MAA50CP001\u00a7\u00a7XQ01)),5)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)+0.000048091064787108*POW(((10MAA50CP001\u00a7\u00a7XQ01)),6)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)+0.0000043537215051897*POW(((10MAA50CP001\u00a7\u00a7XQ01)),6)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)-0.00000384933613424124*POW(((10MAA50CP001\u00a7\u00a7XQ01)),7)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)+0.00000187181066162307*POW(((10MAA50CP001\u00a7\u00a7XQ01)),7)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),6)+0.000000062738423873848*POW(((10MAA50CP001\u00a7\u00a7XQ01)),8)+0.000000203116481869944*POW(((10MAA50CP001\u00a7\u00a7XQ01)),8)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)-0.0000000084756316278152*POW(((10MAA50CP001\u00a7\u00a7XQ01)),9)+0.0000000088261380717456*POW(((10MAA50CP001\u00a7\u00a7XQ01)),9)*POW((540/((10MAA11CT021A\u00a7\u00a7XQ01)+273.15)-0.5),3)+0.00000000025076470720849*POW(((10MAA50CP001\u00a7\u00a7XQ01)),10)), -1)",
+  "code": "WHEN((10MAA50CP001\u00a7\u00a7XQ01 >= 0.01) AND (10MAA50CP001\u00a7\u00a7XQ01 <= 373.946), 22.064 * EXP(647.096/((10MAA50CP001\u00a7\u00a7XQ01)+273.15) * (-7.85951783*(1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096) + 1.84408259*POW((1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096), 1.5) - 11.7866497*POW((1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096), 3.0) + 22.6807411*POW((1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096), 3.5) - 15.9618719*POW((1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096), 4.0) + 1.80122502*POW((1 - ((10MAA50CP001\u00a7\u00a7XQ01)+273.15)/647.096), 7.5))), -1)",
   "visualizer_state": {
     "version": 1,
     "selected_signals": [
-      "10MAA11CT021A\u00a7\u00a7XQ01",
+      "10MAA50CP001\u00a7\u00a7XQ01",
       "CODE_RESULT"
     ],
     "plot_areas": [
@@ -113,7 +105,7 @@
       {
         "id": 2,
         "signals": [
-          "10MAA11CT021A\u00a7\u00a7XQ01"
+          "10MAA50CP001\u00a7\u00a7XQ01"
         ],
         "shapes": []
       }

@@ -145,16 +145,7 @@ def load_visualizer_state(
 ) -> tuple[Set[str], List[Dict[str, Any]], List[str]]:
     """
     Загружает и валидирует состояние визуализатора.
-    
-    Args:
-        state_data: Данные состояния из JSON (может быть None)
-        available_signals: Набор доступных сигналов в проекте
-    
-    Returns:
-        Tuple из:
-        - selected_signals: Набор выбранных сигналов (отфильтрованный)
-        - plot_areas: Список областей графиков (отфильтрованный)
-        - warnings: Список предупреждений о пропущенных сигналах
+    Мягкая загрузка: если сигнала из состояния нет в проекте, он просто игнорируется без предупреждений.
     """
     warnings = []
     
@@ -162,30 +153,31 @@ def load_visualizer_state(
     if state_data is None:
         return set(), [], []
     
-    # Проверяем версию (для будущей совместимости)
+    # Проверяем версию
     version = state_data.get('version', 1)
     if version > STATE_VERSION:
-        warnings.append(f"Версия состояния ({version}) новее поддерживаемой ({STATE_VERSION})")
+        warnings.append(f"Версия состояния ({version}) новее текущей")
     
-    # Загружаем выбранные сигналы
+    # --- Мягкая загрузка выбранных сигналов ---
     raw_selected = state_data.get('selected_signals', [])
     selected_signals = set()
-    missing_signals = []
     
     for sig in raw_selected:
+        # Добавляем сигнал только если он реально существует в проекте сейчас
         if sig in available_signals:
             selected_signals.add(sig)
-        else:
-            missing_signals.append(sig)
+        # Если сигнала нет — просто молчим (никаких missing_signals и warnings)
     
-    if missing_signals:
-        warnings.append(f"Сигналы не найдены и пропущены: {', '.join(missing_signals)}")
-    
-    # Загружаем области графиков
+    # --- Мягкая загрузка областей графиков ---
     plot_areas = []
     for area_data in state_data.get('plot_areas', []):
         area = deserialize_plot_area(area_data, available_signals)
+        # Если область валидна (в ней есть сигналы или маркеры), добавляем её
         if area is not None:
+            # Если в области были сигналы, которые удалили из проекта, 
+            # deserialize_plot_area их уже отфильтровал внутри.
+            # Если в области вообще не осталось сигналов — мы всё равно её создадим,
+            # но она будет пустой (пользователь сам решит, что с ней делать).
             plot_areas.append(area)
     
     return selected_signals, plot_areas, warnings
