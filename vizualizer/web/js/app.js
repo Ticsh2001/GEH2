@@ -66,7 +66,7 @@ openSignalVisualizer() {
         }
 
         // 3) Определяем URL-ы динамически
-        const currentHost = window.location.hostname; // IP или домен сервера
+        const currentHost = window.location.hostname;
         const apiPort = window.location.port || 8000;
         const visualizerPort = Settings.config?.visualizerPort || 8501;
         
@@ -76,11 +76,22 @@ openSignalVisualizer() {
         console.log('API URL:', apiUrl);
         console.log('Visualizer URL:', visualizerBase);
 
-        // 4) Создаём сессию на backend
+        // 4) Получаем сохранённое состояние визуализатора из проекта
+        const visualizerState = AppState.project?.visualizer_state || null;
+        
+        if (visualizerState) {
+            console.log('Передаём сохранённое состояние визуализатора:', visualizerState);
+        }
+
+        // 5) Создаём сессию на backend (с передачей состояния)
         fetch('/api/visualize/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ signals: uniqSignals, code: codeStr })
+            body: JSON.stringify({ 
+                signals: uniqSignals, 
+                code: codeStr,
+                visualizer_state: visualizerState  // НОВОЕ: передаём состояние
+            })
         })
         .then(r => {
             if (!r.ok) throw new Error('Failed to create visualize session');
@@ -88,6 +99,10 @@ openSignalVisualizer() {
         })
         .then(data => {
             const token = data.token;
+            
+            // НОВОЕ: сохраняем токен для последующего получения состояния
+            AppState.currentVisualizerToken = token;
+            
             const params = new URLSearchParams();
             params.set('session', token);
             params.set('api_url', apiUrl);
@@ -104,6 +119,38 @@ openSignalVisualizer() {
     } catch (e) {
         console.error(e);
         alert('Ошибка при подготовке визуализации: ' + e.message);
+    }
+},
+
+/**
+ * Получает состояние визуализатора с сервера
+ * Вызывается перед сохранением проекта
+ */
+async fetchVisualizerState() {
+    if (!AppState.currentVisualizerToken) {
+        console.log('Нет активной сессии визуализатора');
+        return null;
+    }
+    
+    try {
+        const response = await fetch(`/api/visualize/get-state/${AppState.currentVisualizerToken}`);
+        
+        if (!response.ok) {
+            console.warn('Не удалось получить состояние визуализатора:', response.status);
+            return null;
+        }
+        
+        const result = await response.json();
+        
+        if (result.success && result.state) {
+            console.log('Получено состояние визуализатора:', result.state);
+            return result.state;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Ошибка получения состояния визуализатора:', error);
+        return null;
     }
 },
 

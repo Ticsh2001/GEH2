@@ -187,6 +187,7 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
     env = {
         "np": np,
         "ABS": lambda a: pd.Series(np.abs(_ensure_series(a).values), index=index),
+        "EXP": lambda a: pd.Series(np.exp(_ensure_series(a).values), index=index),
         "POW": lambda a, b: pd.Series(np.power(_ensure_series(a).values, _ensure_series(b).values), index=index),
         "MIN": lambda *args: _aggregate_nanfunc(np.nanmin, args),
         "MAX": lambda *args: _aggregate_nanfunc(np.nanmax, args),

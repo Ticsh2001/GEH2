@@ -1,4 +1,4 @@
-# visualizer_app.py — обновлённая версия
+# visualizer_app.py — с поддержкой сохранения/загрузки состояния
 
 import pandas as pd
 import requests
@@ -10,6 +10,11 @@ from typing import List
 from datetime import datetime, time
 
 from code_signal import compute_code_signal, sanitize_numeric_column
+from visualizer_state import (
+    create_visualizer_state, 
+    load_visualizer_state,
+    STATE_VERSION
+)
 
 st.set_page_config(page_title="Signal Visualizer", layout="wide")
 st.title("📊 Визуализация сигналов")
@@ -23,6 +28,8 @@ if isinstance(signal_codes, str):
     signal_codes = [signal_codes]
 
 CODE = ""
+INITIAL_VISUALIZER_STATE = None  # Состояние из проекта
+
 if session_token:
     try:
         resp = requests.get(f"{api_url}/api/visualize/session/{session_token}")
@@ -30,9 +37,11 @@ if session_token:
         payload = resp.json()
         signal_codes = payload.get("signals", signal_codes)
         CODE = payload.get("code", CODE)
+        INITIAL_VISUALIZER_STATE = payload.get("visualizer_state")  # НОВОЕ
     except Exception as e:
         st.error(f"Не удалось получить данные сессии: {e}")
 
+# === ИНИЦИАЛИЗАЦИЯ SESSION STATE ===
 if "signals_data" not in st.session_state:
     st.session_state.signals_data = None
 if "selected_signals" not in st.session_state:
@@ -49,6 +58,17 @@ if "signal_groups" not in st.session_state:
     st.session_state.signal_groups = {"project": set(), "dependencies": set()}
 if "global_cursor_time" not in st.session_state:
     st.session_state.global_cursor_time = None
+# НОВОЕ: флаг что состояние уже загружено (чтобы не перезаписывать при rerun)
+if "state_loaded" not in st.session_state:
+    st.session_state.state_loaded = False
+# НОВОЕ: флаг что есть несохранённые изменения
+if "has_unsaved_changes" not in st.session_state:
+    st.session_state.has_unsaved_changes = False
+
+
+def mark_unsaved():
+    """Помечает что есть несохранённые изменения"""
+    st.session_state.has_unsaved_changes = True
 
 
 def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
@@ -278,13 +298,6 @@ def make_unique_name(base_name: str) -> str:
     return f"{base_name}_{idx}"
 
 
-if signal_codes and st.session_state.signals_data is None:
-    with st.spinner("Загружаем данные сигналов..."):
-        df_all, found_codes, not_found_codes = resolve_and_load_all_signals(signal_codes)
-        st.success(f"✅ Загружено сигналов: {len(found_codes)}")
-        if not_found_codes:
-            st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
-
 # --- синтетический сигнал из CODE ---
 code_signal_name = st.session_state.code_signal_name
 df_for_code = get_all_signals_df(exclude={code_signal_name} if code_signal_name else None)
@@ -324,10 +337,87 @@ elif not CODE:
         st.session_state.code_signal_name = None
     st.session_state.code_key = None
 
+
+# === ЗАГРУЗКА СОХРАНЁННОГО СОСТОЯНИЯ (один раз) ===
 df_all_signals = get_all_signals_df()
 
+if not st.session_state.state_loaded and INITIAL_VISUALIZER_STATE and df_all_signals is not None:
+    available_signals = set(df_all_signals.columns.tolist())
+    
+    loaded_selected, loaded_areas, load_warnings = load_visualizer_state(
+        INITIAL_VISUALIZER_STATE,
+        available_signals
+    )
+    
+    # Применяем загруженное состояние
+    if loaded_selected:
+        st.session_state.selected_signals = loaded_selected
+    if loaded_areas:
+        st.session_state.plot_areas = loaded_areas
+    
+    # Показываем предупреждения
+    for warn in load_warnings:
+        st.warning(f"⚠️ {warn}")
+    
+    if loaded_selected or loaded_areas:
+        st.info("📂 Загружено сохранённое состояние визуализатора")
+    
+    st.session_state.state_loaded = True
+    st.session_state.has_unsaved_changes = False
+
+
+# === ФУНКЦИЯ СОХРАНЕНИЯ СОСТОЯНИЯ ===
+def save_current_state():
+    """Сохраняет текущее состояние на сервер"""
+    if not session_token:
+        st.error("Нет токена сессии для сохранения")
+        return False
+    
+    state = create_visualizer_state(
+        st.session_state.selected_signals,
+        st.session_state.plot_areas
+    )
+    
+    try:
+        resp = requests.post(
+            f"{api_url}/api/visualize/save-state",
+            json={
+                "session_token": session_token,
+                "state": state
+            }
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        
+        if result.get("success"):
+            st.session_state.has_unsaved_changes = False
+            return True
+        else:
+            st.error(f"Ошибка сохранения: {result.get('message')}")
+            return False
+    except Exception as e:
+        st.error(f"Ошибка сохранения состояния: {e}")
+        return False
+
+
+# === SIDEBAR ===
 with st.sidebar:
     st.header("Выбор сигналов")
+    
+    # НОВОЕ: Кнопка сохранения состояния
+    if session_token:
+        save_col1, save_col2 = st.columns([2, 1])
+        with save_col1:
+            if st.button("💾 Сохранить состояние", use_container_width=True):
+                if save_current_state():
+                    st.success("✅ Состояние сохранено!")
+                    st.info("💡 Теперь сохраните проект в редакторе")
+        with save_col2:
+            if st.session_state.has_unsaved_changes:
+                st.markdown("🔴 *Изменения*")
+            else:
+                st.markdown("🟢 *Сохранено*")
+        st.divider()
 
     if df_all_signals is not None:
         available_signals = df_all_signals.columns.tolist()
@@ -351,10 +441,12 @@ with st.sidebar:
                     value=(signal in st.session_state.selected_signals),
                     key=f"proj_{signal}"
                 )
-                if checked:
+                if checked and signal not in st.session_state.selected_signals:
                     st.session_state.selected_signals.add(signal)
-                else:
+                    mark_unsaved()
+                elif not checked and signal in st.session_state.selected_signals:
                     st.session_state.selected_signals.discard(signal)
+                    mark_unsaved()
         
         if dependency_signals:
             st.divider()
@@ -368,20 +460,24 @@ with st.sidebar:
                         value=(signal in st.session_state.selected_signals),
                         key=f"dep_{signal}"
                     )
-                    if checked:
+                    if checked and signal not in st.session_state.selected_signals:
                         st.session_state.selected_signals.add(signal)
-                    else:
+                        mark_unsaved()
+                    elif not checked and signal in st.session_state.selected_signals:
                         st.session_state.selected_signals.discard(signal)
+                        mark_unsaved()
         
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ Все проекта"):
                 st.session_state.selected_signals.update(project_signals)
+                mark_unsaved()
                 st.rerun()
         with col2:
             if st.button("❌ Снять все"):
                 st.session_state.selected_signals.clear()
+                mark_unsaved()
                 st.rerun()
 
         st.divider()
@@ -458,15 +554,17 @@ with st.sidebar:
                 "id": new_id, 
                 "signals": [], 
                 "shapes": [], 
-                "cursor_time": None,  # Храним время, а не индекс
-                "x_range": None,      # [start_datetime, end_datetime]
-                "y_range": None       # [y_min, y_max]
+                "cursor_time": None,
+                "x_range": None,
+                "y_range": None
             })
+            mark_unsaved()
             st.rerun()
         if col_b.button("❌ Очистить все"):
             st.session_state.plot_areas = []
             st.session_state.selected_signals = set()
             st.session_state.global_cursor_time = None
+            mark_unsaved()
             st.rerun()
     else:
         st.info("📥 Данные сигналов еще не загружены.")
@@ -474,7 +572,6 @@ with st.sidebar:
 
 def find_nearest_index_in_range(valid_index, target_time, x_start, x_end):
     """Находит ближайший индекс в заданном диапазоне"""
-    # Фильтруем индекс по диапазону
     mask = (valid_index >= x_start) & (valid_index <= x_end)
     filtered_index = valid_index[mask]
     
@@ -484,12 +581,12 @@ def find_nearest_index_in_range(valid_index, target_time, x_start, x_end):
     if target_time is None:
         return 0, filtered_index[0]
     
-    # Находим ближайший
     diffs = abs((filtered_index - pd.to_datetime(target_time)).total_seconds())
     min_pos = diffs.argmin()
     return min_pos, filtered_index[min_pos]
 
 
+# === ОСНОВНАЯ ОБЛАСТЬ ГРАФИКОВ ===
 if df_all_signals is not None and st.session_state.selected_signals:
     if not st.session_state.plot_areas:
         st.session_state.plot_areas.append({
@@ -509,6 +606,7 @@ if df_all_signals is not None and st.session_state.selected_signals:
             with col2:
                 if st.button("Удалить", key=f"remove_area_{i}"):
                     st.session_state.plot_areas.pop(i)
+                    mark_unsaved()
                     st.rerun()
 
             selected = st.multiselect(
@@ -517,6 +615,10 @@ if df_all_signals is not None and st.session_state.selected_signals:
                 default=plot_area.get("signals", []),
                 key=f"signals_sel_{i}",
             )
+            
+            # Проверяем изменились ли сигналы
+            if set(selected) != set(plot_area.get("signals", [])):
+                mark_unsaved()
             st.session_state.plot_areas[i]["signals"] = selected
 
             if selected:
@@ -527,7 +629,6 @@ if df_all_signals is not None and st.session_state.selected_signals:
                 if len(valid_index) == 0:
                     st.warning("Нет числовых данных для выбранных сигналов.")
                 else:
-                    # === ПОЛНЫЙ ДИАПАЗОН ДАННЫХ ===
                     full_x_min = valid_index.min()
                     full_x_max = valid_index.max()
                     
@@ -536,23 +637,16 @@ if df_all_signals is not None and st.session_state.selected_signals:
                     full_y_min = float(y_data.min()) if len(y_data) > 0 else 0.0
                     full_y_max = float(y_data.max()) if len(y_data) > 0 else 1.0
                     
-                    # Небольшой отступ для Y
                     y_padding = (full_y_max - full_y_min) * 0.05
                     full_y_min -= y_padding
                     full_y_max += y_padding
 
-                    # === ИНИЦИАЛИЗАЦИЯ ДИАПАЗОНОВ (если не заданы) ===
                     if plot_area.get('x_range') is None:
                         plot_area['x_range'] = [full_x_min, full_x_max]
                     
                     if plot_area.get('y_range') is None:
                         plot_area['y_range'] = [full_y_min, full_y_max]
-                    
-                    # Текущие диапазоны
-                    current_x_start, current_x_end = plot_area['x_range']
-                    current_y_min, current_y_max = plot_area['y_range']
 
-                    # === ФИЛЬТРУЕМ ДАННЫЕ ПО ВИДИМОМУ ДИАПАЗОНУ X ===
                     x_start_ts, x_end_ts = plot_area['x_range']
                     mask_visible = (valid_index >= x_start_ts) & (valid_index <= x_end_ts)
                     visible_index = valid_index[mask_visible]
@@ -560,23 +654,18 @@ if df_all_signals is not None and st.session_state.selected_signals:
                     if len(visible_index) == 0:
                         st.warning("В выбранном диапазоне X нет данных.")
                     else:
-                        # === СЛАЙДЕР ВЕРТИКАЛЬНОЙ ЛИНИИ (в рамках видимого диапазона) ===
-                        # Инициализируем cursor_time если не задан
                         if plot_area.get('cursor_time') is None:
                             plot_area['cursor_time'] = visible_index[len(visible_index) // 2]
                         
-                        # Проверяем что cursor_time в видимом диапазоне
                         cursor_time = plot_area['cursor_time']
                         if cursor_time < x_start_ts or cursor_time > x_end_ts:
                             cursor_time = visible_index[len(visible_index) // 2]
                             plot_area['cursor_time'] = cursor_time
                         
-                        # Находим текущий индекс курсора в visible_index
                         cursor_pos, _ = find_nearest_index_in_range(
                             visible_index, cursor_time, x_start_ts, x_end_ts
                         )
                         
-                        # Применяем глобальный курсор если задан
                         if st.session_state.global_cursor_time is not None:
                             global_cursor = st.session_state.global_cursor_time
                             if x_start_ts <= global_cursor <= x_end_ts:
@@ -585,7 +674,6 @@ if df_all_signals is not None and st.session_state.selected_signals:
                                 )
                                 plot_area['cursor_time'] = cursor_time
                         
-                        # ПУНКТ 4: Слайдер на всю ширину (без кнопки рядом)
                         ts_idx = st.slider(
                             "📍 Вертикальная линия (в видимом диапазоне)",
                             min_value=0,
@@ -595,12 +683,9 @@ if df_all_signals is not None and st.session_state.selected_signals:
                             help="Слайдер работает только в рамках текущего видимого диапазона X"
                         )
                         
-                        # Обновляем cursor_time
                         ts = visible_index[ts_idx]
                         plot_area['cursor_time'] = ts
                         
-                        # Отображаем текущую позицию
-                        # Позиция линии и кнопка синхронизации на одной горизонтали
                         col_pos, col_sync = st.columns([3, 1])
                         with col_pos:
                             st.markdown(f"**📅 Позиция линии:** `{ts.strftime('%Y-%m-%d %H:%M:%S')}`")
@@ -611,7 +696,6 @@ if df_all_signals is not None and st.session_state.selected_signals:
                                     pa['cursor_time'] = ts
                                 st.rerun()
 
-                        # === ПОСТРОЕНИЕ ГРАФИКА ===
                         fig = px.line(
                             df_plot_num,
                             x=df_plot_num.index,
@@ -620,10 +704,8 @@ if df_all_signals is not None and st.session_state.selected_signals:
                             render_mode="webgl"
                         )
                         
-                        # Вертикальная линия курсора
                         fig.add_vline(x=ts, line_width=2, line_dash="dash", line_color="red")
                         
-                        # Пользовательские маркеры
                         shapes = plot_area.get('shapes', [])
                         for shape in shapes:
                             if shape['type'] == 'vline':
@@ -631,7 +713,6 @@ if df_all_signals is not None and st.session_state.selected_signals:
                             elif shape['type'] == 'hline':
                                 fig.add_hline(y=shape['y'], line_dash=shape['dash'], line_color=shape['color'], line_width=1)
                         
-                        # ПУНКТ 1 и 2: Layout с фиксированными диапазонами
                         fig.update_layout(
                             uirevision=f"plot_area_{plot_area['id']}",
                             height=600,
@@ -639,26 +720,23 @@ if df_all_signals is not None and st.session_state.selected_signals:
                             xaxis_title="Время",
                             yaxis_title="Значение",
                             margin=dict(l=20, r=20, t=40, b=20),
-                            # ПУНКТ 1: X rangeslider на ПОЛНЫЙ диапазон данных
                             xaxis=dict(
-                                range=[x_start_ts, x_end_ts],  # Видимый диапазон
+                                range=[x_start_ts, x_end_ts],
                                 rangeslider=dict(
                                     visible=True,
                                     thickness=0.08,
                                     bgcolor='#e0e0e0',
-                                    range=[full_x_min, full_x_max]  # Полный диапазон для навигации
+                                    range=[full_x_min, full_x_max]
                                 )
                             ),
-                            # Y диапазон из настроек
                             yaxis=dict(
                                 range=plot_area['y_range'],
-                                fixedrange=False  # Позволяем зум по Y на графике
+                                fixedrange=False
                             )
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
 
-                        # === МАРКЕРЫ ===
                         with st.expander(f"📍 Добавить маркеры для графика #{plot_area['id']}"):
                             col_x, col_y = st.columns(2)
                             with col_x:
@@ -674,6 +752,7 @@ if df_all_signals is not None and st.session_state.selected_signals:
                                         'color': 'blue'
                                     })
                                     plot_area['shapes'] = shapes
+                                    mark_unsaved()
                                     st.success(f"Добавлена линия на {x_full}")
                                     st.rerun()
                             
@@ -688,6 +767,7 @@ if df_all_signals is not None and st.session_state.selected_signals:
                                         'color': 'green'
                                     })
                                     plot_area['shapes'] = shapes
+                                    mark_unsaved()
                                     st.success(f"Добавлена линия на Y={y_value}")
                                     st.rerun()
                             
@@ -700,9 +780,9 @@ if df_all_signals is not None and st.session_state.selected_signals:
                                         st.text(f"  H-line: Y={s['y']} ({s['color']})")
                                 if st.button(f"🗑️ Очистить маркеры", key=f"clear_shapes_{i}"):
                                     plot_area['shapes'] = []
+                                    mark_unsaved()
                                     st.rerun()
 
-                        # === СТАТИСТИКА ===
                         nearest = df_plot_num.reindex(df_plot_num.index.union([ts])).sort_index()
                         nearest = nearest.ffill().loc[ts]
 

@@ -11,7 +11,7 @@ const AppState = {
     
     // Выделение
     selectedElement: null,
-    selectedElements: [],    // ← ДОБАВЬ ЭТУ СТРОКУ (для группы)
+    selectedElements: [],
     
     // Перетаскивание
     draggingElement: null,
@@ -42,18 +42,21 @@ const AppState = {
     project: {
         code: '',
         type: PROJECT_TYPE.PARAMETER,
-        // Для параметра
+        description: '',
         dimension: '',
-        // Для правила
         possibleCause: '',
-        guidelines: ''
+        guidelines: '',
+        visualizer_state: null  // НОВОЕ: состояние визуализатора
     },
     
     // Выходные сигналы (автоматически определяются)
     outputs: {
-        logical: [],    // Логические выходы [{elementId, portIndex, portLabel, ...}]
-        numeric: []     // Числовые выходы (формулы)
-    }
+        logical: [],
+        numeric: []
+    },
+    
+    // НОВОЕ: токен текущей сессии визуализатора
+    currentVisualizerToken: null
 };
 
 /**
@@ -64,6 +67,7 @@ function resetState() {
     AppState.connections = [];
     AppState.elementCounter = 0;
     AppState.selectedElement = null;
+    AppState.selectedElements = [];
     AppState.draggingElement = null;
     AppState.connectingFrom = null;
     AppState.tempLine = null;
@@ -84,11 +88,15 @@ function resetState() {
         description: '',
         dimension: '',
         possibleCause: '',
-        guidelines: ''
+        guidelines: '',
+        visualizer_state: null  // НОВОЕ: сбрасываем состояние визуализатора
     };
     
     AppState.outputs = {
         logical: [],
         numeric: []
     };
+    
+    // НОВОЕ: сбрасываем токен визуализатора
+    AppState.currentVisualizerToken = null;
 }

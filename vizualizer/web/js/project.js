@@ -141,70 +141,91 @@ init() {
     /**
      * Сохранение проекта
      */
-        async saveProject() { // !!! Сделать функцию асинхронной (async) !!!
-        // 1. Проверяем свойства проекта
-        if (!AppState.project.code) {
-            Modal.showProjectPropertiesModal();
-            alert('Пожалуйста, укажите код проекта перед сохранением.');
-            return;
-        }
+        async saveProject() {
+    // 1. Проверяем свойства проекта
+    if (!AppState.project.code) {
+        Modal.showProjectPropertiesModal();
+        alert('Пожалуйста, укажите код проекта перед сохранением.');
+        return;
+    }
 
-        // Обновляем размеры рамок перед сохранением
-        updateFrameChildren();
-        // ✅ нормализуем, даже если проект был открыт до фикса
-        migrateIdsDashToUnderscore();
+    // Обновляем размеры рамок перед сохранением
+    updateFrameChildren();
+    // нормализуем id
+    migrateIdsDashToUnderscore();
 
-        // ✅ подчистим связи прямо перед сохранением
-        const exists = (id) => !!AppState.elements[id];
-        AppState.connections = (AppState.connections || [])
-          .map(c => ({
-            ...c,
-            fromElement: exists(c.fromElement) ? c.fromElement : c.fromElement.replace(/-/g, '_'),
-            toElement: exists(c.toElement) ? c.toElement : c.toElement.replace(/-/g, '_')
-          }))
-          .filter(c => exists(c.fromElement) && exists(c.toElement))
-          .filter((c, idx, arr) => {
-            const key = `${c.fromElement}|${c.fromPort}|${c.toElement}|${c.toPort}`;
-            return arr.findIndex(x =>
-              `${x.fromElement}|${x.fromPort}|${x.toElement}|${x.toPort}` === key
-            ) === idx;
-          });
-        // ✅ 1. Генерируем код заранее
-        let generatedCode = '';
-        if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
-            try {
-                generatedCode = CodeGen.generate() || '';
-            } catch (err) {
-                console.error('Code generation failed:', err);
-            }
-        }
+    // подчистим связи прямо перед сохранением
+    const exists = (id) => !!AppState.elements[id];
+    AppState.connections = (AppState.connections || [])
+      .map(c => ({
+        ...c,
+        fromElement: exists(c.fromElement) ? c.fromElement : c.fromElement.replace(/-/g, '_'),
+        toElement: exists(c.toElement) ? c.toElement : c.toElement.replace(/-/g, '_')
+      }))
+      .filter(c => exists(c.fromElement) && exists(c.toElement))
+      .filter((c, idx, arr) => {
+        const key = `${c.fromElement}|${c.fromPort}|${c.toElement}|${c.toPort}`;
+        return arr.findIndex(x =>
+          `${x.fromElement}|${x.fromPort}|${x.toElement}|${x.toPort}` === key
+        ) === idx;
+      });
 
-        // 2. Сборка объекта проекта
-        const project = {
-            version: '1.0',
-            project: AppState.project,
-            elements: AppState.elements,
-            connections: AppState.connections,
-            counter: AppState.elementCounter,
-            viewport: {
-                zoom: AppState.viewport.zoom,
-                panX: AppState.viewport.panX,
-                panY: AppState.viewport.panY
-            },
-            code: generatedCode
-        };
-
-        const filename = `${AppState.project.code || 'scheme'}_${AppState.project.type}.json`;
-
-        // 3. Сохранение на сервер
+    // Генерируем код заранее
+    let generatedCode = '';
+    if (typeof CodeGen !== 'undefined' && typeof CodeGen.generate === 'function') {
         try {
-            await Settings.saveProject(filename, project);
-            alert(`Проект успешно сохранен на сервере как: ${filename}`);
-        } catch (error) {
-            console.error('Ошибка сохранения проекта:', error);
-            alert(`Ошибка сохранения проекта: ${error.message}`);
+            generatedCode = CodeGen.generate() || '';
+        } catch (err) {
+            console.error('Code generation failed:', err);
         }
-    },
+    }
+
+    // НОВОЕ: получаем состояние визуализатора перед сохранением
+    let visualizerState = AppState.project?.visualizer_state || null;
+    
+    if (AppState.currentVisualizerToken) {
+        try {
+            const freshState = await App.fetchVisualizerState();
+            if (freshState) {
+                visualizerState = freshState;
+                console.log('Состояние визуализатора обновлено перед сохранением');
+            }
+        } catch (err) {
+            console.warn('Не удалось получить состояние визуализатора:', err);
+        }
+    }
+
+    // 2. Сборка объекта проекта
+    const project = {
+        version: '1.0',
+        project: AppState.project,
+        elements: AppState.elements,
+        connections: AppState.connections,
+        counter: AppState.elementCounter,
+        viewport: {
+            zoom: AppState.viewport.zoom,
+            panX: AppState.viewport.panX,
+            panY: AppState.viewport.panY
+        },
+        code: generatedCode,
+        visualizer_state: visualizerState  // НОВОЕ: сохраняем состояние визуализатора
+    };
+
+    const filename = `${AppState.project.code || 'scheme'}_${AppState.project.type}.json`;
+
+    // 3. Сохранение на сервер
+    try {
+        await Settings.saveProject(filename, project);
+        
+        // НОВОЕ: обновляем состояние в AppState после успешного сохранения
+        AppState.project.visualizer_state = visualizerState;
+        
+        alert(`Проект успешно сохранен на сервере как: ${filename}`);
+    } catch (error) {
+        console.error('Ошибка сохранения проекта:', error);
+        alert(`Ошибка сохранения проекта: ${error.message}`);
+    }
+},
 
     async showProjectList() {
         try {
@@ -349,7 +370,7 @@ async loadProjectFromList(filename) {
     /**
      * Загрузка проекта
      */
- _processLoadedData(data) {
+_processLoadedData(data) {
   try {
     document.getElementById('workspace').innerHTML = '';
     document.getElementById('connections-svg').innerHTML = '';
@@ -358,6 +379,17 @@ async loadProjectFromList(filename) {
     if (data.project) {
       AppState.project = { ...AppState.project, ...data.project };
     }
+
+    // НОВОЕ: загружаем состояние визуализатора
+    if (data.visualizer_state) {
+      AppState.project.visualizer_state = data.visualizer_state;
+      console.log('Загружено состояние визуализатора:', data.visualizer_state);
+    } else {
+      AppState.project.visualizer_state = null;
+    }
+    
+    // НОВОЕ: сбрасываем токен предыдущей сессии визуализатора
+    AppState.currentVisualizerToken = null;
 
     AppState.elementCounter = data.counter || 0;
 
@@ -398,32 +430,20 @@ async loadProjectFromList(filename) {
 
     AppState.connections = data.connections || [];
 
-    // ✅ ВСТАВЬ ЭТОТ БЛОК СРАЗУ ЗДЕСЬ (до вычисления счётчика)
-    //Object.values(AppState.elements).forEach(e => {
-    //  if (typeof e.id === 'string') {
-    //    e.id = e.id.replace(/-/g, '_');
-    //  }
-    //  if (e.props?.name) {
-    //    e.props.name = e.props.name.replace(/-/g, '_');
-    //  }
-    //});
-    // ✅ конец добавленной секции
-    // ✅ Миграция id: '-' -> '_'
+    // Миграция id: '-' -> '_'
     migrateIdsDashToUnderscore();
-    // ✅ очистка соединений: удалить битые и дубликаты
+
+    // очистка соединений: удалить битые и дубликаты
     const exists = (id) => !!AppState.elements[id];
 
     AppState.connections = (AppState.connections || [])
-      // оставить только те, где оба конца реально существуют
       .filter(c => exists(c.fromElement) && exists(c.toElement))
-      // убрать дубликаты
       .filter((c, idx, arr) => {
         const key = `${c.fromElement}|${c.fromPort}|${c.toElement}|${c.toPort}`;
         return arr.findIndex(x =>
           `${x.fromElement}|${x.fromPort}|${x.toElement}|${x.toPort}` === key
         ) === idx;
       });
-    
 
     // корректно восстанавливаем счётчик
     const counterFromFile = Number(data.counter);
@@ -431,7 +451,7 @@ async loadProjectFromList(filename) {
 
     const maxIdSuffix = Object.values(AppState.elements).reduce((max, el) => {
         if (!el?.id) return max;
-        const match = String(el.id).match(/_(\d+)$/);   // теперь хвост по подчёркиванию
+        const match = String(el.id).match(/_(\d+)$/);
         const num = match ? parseInt(match[1], 10) : NaN;
         return Number.isFinite(num) ? Math.max(max, num) : max;
     }, 0);
