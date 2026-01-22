@@ -1,5 +1,6 @@
 /**
  * Модуль работы с соединениями
+ * connections.js
  */
 
 const Connections = {

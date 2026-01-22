@@ -242,14 +242,29 @@ const Modal = {
                         return;
                     }
                     
+                    // Новый код
                     listEl.innerHTML = items.map(t => {
-                        const sig = `${t.name}(${(t.args || []).join(', ')})`;
-                        // Сохраняем description в data-атрибут
+                        // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+                        let argList = [];
+                        
+                        if (Array.isArray(t.args)) {
+                            // Если пришел старый формат (массив): ["p", "t"]
+                            argList = t.args;
+                        } else if (t.args && typeof t.args === 'object') {
+                            // Если пришел новый формат (объект): {"p": {...}, "t": {...}}
+                            // Берем только ключи (имена переменных)
+                            argList = Object.keys(t.args);
+                        }
+
+                        // Формируем подпись функции: h(p, t)
+                        const sig = `${t.name}(${argList.join(', ')})`;
+                        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
                         const desc = (t.description || '').replace(/"/g, '&quot;');
                         return `<div class="signal-item template-item" 
-                                    data-insert="${sig}" 
-                                    data-name="${t.name}"
-                                    data-description="${desc}">${sig}</div>`;
+                                data-insert="${sig}" 
+                                data-name="${t.name}"
+                                data-description="${desc}">${sig}</div>`;
                     }).join('');
 
                     // Обработчики для каждого шаблона

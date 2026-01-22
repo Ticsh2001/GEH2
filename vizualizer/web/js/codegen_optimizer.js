@@ -807,9 +807,9 @@ function printCond(c) {
     if (!c) return 'TRUE';
 
     switch (c.type) {
-        case 'eq0': return `${c.v} = 0`;
-        case 'ne0': return `${c.v} != 0`;
-        case 'cmp': return `${c.l} ${c.op} ${c.r}`;
+        case 'eq0': return `(${c.v} = 0)`;
+        case 'ne0': return `(${c.v} != 0)`;
+        case 'cmp': return `(${c.l} ${c.op} ${c.r})`;
         case 'and': return `(${printCond(c.a)} AND ${printCond(c.b)})`;
         case 'or':  return `(${printCond(c.a)} OR ${printCond(c.b)})`;
         case 'not': return `NOT(${printCond(c.x)})`;

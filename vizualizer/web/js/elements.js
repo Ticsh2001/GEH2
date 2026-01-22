@@ -1,5 +1,6 @@
 /**
  * Модуль работы с элементами схемы
+ * elements.js
  */
 
 const Elements = {

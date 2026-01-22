@@ -1,5 +1,6 @@
 /**
  * Модуль управления viewport (масштабирование и перемещение)
+ * viewport.js
  */
 
 const Viewport = {

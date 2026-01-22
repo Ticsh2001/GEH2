@@ -1,3 +1,5 @@
+#code_signal.py
+
 import re
 from typing import List, Tuple, Dict
 
@@ -197,6 +199,9 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
                      _ensure_series(f_val).values),
             index=index,
         ),
+        "LOG": lambda x: pd.Series(np.log(_ensure_series(x).values), index=index),
+        # Логарифм по основанию 10 (если нужен)
+        "LOG10": lambda x: pd.Series(np.log10(_ensure_series(x).values), index=index),
         "PREV": PREV,
         "HISTORYAVG": HISTORYAVG,
         "HISTORYCOUNT": HISTORYCOUNT,

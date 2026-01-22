@@ -249,10 +249,29 @@ setupGlobalMouseHandlers() {
     });
 
     document.addEventListener('keydown', (e) => {
+    // 1. Проверяем, не печатает ли пользователь текст
+        const target = e.target;
+        const isInput = target.tagName === 'INPUT' || 
+                        target.tagName === 'TEXTAREA' || 
+                        target.isContentEditable;
+
+        if (isInput) return; // Если печатаем - игнорируем глобальные хоткеи
+
+        // 2. Проверяем, не открыто ли модальное окно
+        const modal = document.getElementById('modal-overlay');
+        const projectModal = document.getElementById('project-modal-overlay');
+        const isModalOpen = (modal && modal.style.display !== 'none') || 
+                            (projectModal && projectModal.style.display !== 'none');
+
+        if (isModalOpen) return; // Если открыто окно - игнорируем
+
+        // --- Дальше старая логика ---
+
         if (e.key === 'Delete' && AppState.selectedElement) {
             Elements.deleteElement(AppState.selectedElement);
             if (typeof Outputs !== 'undefined') Outputs.updateOutputStatus();
         }
+        
         if (e.key === 'Escape') {
             Elements.deselectAll();
             Connections.clearConnectionState();
