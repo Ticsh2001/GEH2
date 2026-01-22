@@ -1,4 +1,4 @@
-# visualizer_app.py — замени/обнови
+# visualizer_app.py — обновлённая версия
 
 import pandas as pd
 import requests
@@ -6,7 +6,8 @@ import streamlit as st
 import plotly.express as px
 import numpy as np
 import plotly.graph_objects as go
-from typing import List  # добавь в начало файла если нет
+from typing import List
+from datetime import datetime, time
 
 from code_signal import compute_code_signal, sanitize_numeric_column
 
@@ -43,9 +44,11 @@ if "derived_signals" not in st.session_state:
 if "code_signal_name" not in st.session_state:
     st.session_state.code_signal_name = None
 if "synthetic_computed" not in st.session_state:
-    st.session_state.synthetic_computed = {}  # уже вычисленные синтетические сигналы
+    st.session_state.synthetic_computed = {}
 if "signal_groups" not in st.session_state:
     st.session_state.signal_groups = {"project": set(), "dependencies": set()}
+if "global_cursor_time" not in st.session_state:
+    st.session_state.global_cursor_time = None
 
 
 def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
@@ -94,22 +97,11 @@ def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
         return None
 
 
-# visualizer_app.py — замени функцию resolve_and_load_all_signals
-
 def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame | None, List[str], List[str]]:
-    """
-    Разворачивает зависимости и загружает все сигналы (базовые + синтетические).
-    
-    Returns:
-        df_all: DataFrame со всеми сигналами
-        found: список найденных сигналов
-        not_found: список ненайденных сигналов
-    """
     if not input_signals:
         return None, [], []
     
     try:
-        # 1. Разворачиваем зависимости через API
         with st.spinner("🔍 Разворачиваем зависимости сигналов..."):
             resolve_resp = requests.post(
                 f"{api_url}/api/resolve-signals",
@@ -122,11 +114,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
         synthetic_signals = resolve_data.get("synthetic_signals", {})
         computation_order = resolve_data.get("computation_order", [])
         
-        # === СОХРАНЯЕМ ГРУППИРОВКУ СИГНАЛОВ ===
-        # Сигналы из текущего проекта (исходные входные)
         project_signals = set(input_signals)
-        
-        # Сигналы из зависимостей (все остальные)
         dependency_signals = set()
         for syn_name, syn_data in synthetic_signals.items():
             if syn_name not in project_signals:
@@ -135,15 +123,13 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                 if dep not in project_signals:
                     dependency_signals.add(dep)
         
-        # Также добавляем базовые сигналы, которые не из проекта
         for bs in base_signals:
             if bs not in project_signals:
                 dependency_signals.add(bs)
         
-        # Сохраняем в session_state для использования в сайдбаре
         st.session_state.signal_groups = {
-            "project": project_signals,       # входные сигналы текущего проекта
-            "dependencies": dependency_signals # сигналы из развёрнутых зависимостей
+            "project": project_signals,
+            "dependencies": dependency_signals
         }
         
         st.info(f"📊 Сигналов проекта: {len(project_signals)} | Из зависимостей: {len(dependency_signals)}")
@@ -155,7 +141,6 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                     marker = "📌" if syn_name in project_signals else "🔗"
                     st.text(f"  {marker} {syn_name} ← {deps}")
         
-        # 2. Загружаем базовые сигналы
         df_all = None
         found_signals = []
         not_found_signals = []
@@ -170,7 +155,6 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
         if df_all is None:
             df_all = pd.DataFrame()
         
-        # 3. Вычисляем синтетические сигналы в правильном порядке
         if computation_order:
             with st.spinner(f"⚙️ Вычисляем {len(computation_order)} синтетических сигналов..."):
                 progress_bar = st.progress(0)
@@ -233,8 +217,6 @@ if signal_codes and st.session_state.signals_data is None:
     if not_found_codes:
         st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
 
-
-# --- остальной код без изменений, начиная с get_all_signals_df ---
 
 def get_all_signals_df(exclude: set[str] | None = None):
     exclude = exclude or set()
@@ -303,11 +285,9 @@ if signal_codes and st.session_state.signals_data is None:
         if not_found_codes:
             st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
 
-# --- синтетический сигнал из CODE (считаем один раз, потом не пересчитываем) ---
+# --- синтетический сигнал из CODE ---
 code_signal_name = st.session_state.code_signal_name
 df_for_code = get_all_signals_df(exclude={code_signal_name} if code_signal_name else None)
-
-# Ключ "какой CODE мы уже считали" (можно оставить просто CODE; session_token добавил на всякий)
 code_key = (session_token, CODE)
 
 already_have_series = (
@@ -338,14 +318,12 @@ if CODE and df_for_code is not None:
             st.warning(f"Не удалось вычислить CODE: {exc}")
 
 elif not CODE:
-    # если CODE исчез — удаляем синтетический сигнал и сбрасываем ключ
     if code_signal_name:
         st.session_state.derived_signals.pop(code_signal_name, None)
         st.session_state.selected_signals.discard(code_signal_name)
         st.session_state.code_signal_name = None
     st.session_state.code_key = None
 
-# --- итоговый DataFrame со всеми сигналами ---
 df_all_signals = get_all_signals_df()
 
 with st.sidebar:
@@ -354,7 +332,6 @@ with st.sidebar:
     if df_all_signals is not None:
         available_signals = df_all_signals.columns.tolist()
         
-        # Получаем группы сигналов
         signal_groups = st.session_state.get("signal_groups", {
             "project": set(available_signals),
             "dependencies": set()
@@ -363,11 +340,9 @@ with st.sidebar:
         project_signals = [s for s in available_signals if s in signal_groups.get("project", set())]
         dependency_signals = [s for s in available_signals if s in signal_groups.get("dependencies", set())]
         
-        # === СИГНАЛЫ ПРОЕКТА ===
         if project_signals:
             st.subheader("📌 Сигналы проекта")
             for signal in project_signals:
-                # Помечаем синтетические сигналы
                 is_synthetic = signal in st.session_state.get("synthetic_computed", {})
                 label = f"⚙️ {signal}" if is_synthetic else signal
                 
@@ -381,7 +356,6 @@ with st.sidebar:
                 else:
                     st.session_state.selected_signals.discard(signal)
         
-        # === СИГНАЛЫ ИЗ ЗАВИСИМОСТЕЙ ===
         if dependency_signals:
             st.divider()
             with st.expander(f"🔗 Из зависимостей ({len(dependency_signals)})", expanded=False):
@@ -399,7 +373,6 @@ with st.sidebar:
                     else:
                         st.session_state.selected_signals.discard(signal)
         
-        # === Быстрые действия ===
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
@@ -481,20 +454,52 @@ with st.sidebar:
         col_a, col_b = st.columns(2)
         if col_a.button("➕ Добавить график"):
             new_id = max([area.get("id", 0) for area in st.session_state.plot_areas] + [0]) + 1
-            st.session_state.plot_areas.append({"id": new_id, "signals": []})
+            st.session_state.plot_areas.append({
+                "id": new_id, 
+                "signals": [], 
+                "shapes": [], 
+                "cursor_time": None,  # Храним время, а не индекс
+                "x_range": None,      # [start_datetime, end_datetime]
+                "y_range": None       # [y_min, y_max]
+            })
             st.rerun()
         if col_b.button("❌ Очистить все"):
             st.session_state.plot_areas = []
             st.session_state.selected_signals = set()
+            st.session_state.global_cursor_time = None
             st.rerun()
     else:
         st.info("📥 Данные сигналов еще не загружены.")
 
+
+def find_nearest_index_in_range(valid_index, target_time, x_start, x_end):
+    """Находит ближайший индекс в заданном диапазоне"""
+    # Фильтруем индекс по диапазону
+    mask = (valid_index >= x_start) & (valid_index <= x_end)
+    filtered_index = valid_index[mask]
+    
+    if len(filtered_index) == 0:
+        return 0, valid_index[0] if len(valid_index) > 0 else None
+    
+    if target_time is None:
+        return 0, filtered_index[0]
+    
+    # Находим ближайший
+    diffs = abs((filtered_index - pd.to_datetime(target_time)).total_seconds())
+    min_pos = diffs.argmin()
+    return min_pos, filtered_index[min_pos]
+
+
 if df_all_signals is not None and st.session_state.selected_signals:
     if not st.session_state.plot_areas:
-        st.session_state.plot_areas.append(
-            {"id": 1, "signals": list(st.session_state.selected_signals)}
-        )
+        st.session_state.plot_areas.append({
+            "id": 1, 
+            "signals": list(st.session_state.selected_signals), 
+            "shapes": [], 
+            "cursor_time": None,
+            "x_range": None,
+            "y_range": None
+        })
 
     for i, plot_area in enumerate(st.session_state.plot_areas):
         with st.container():
@@ -516,77 +521,215 @@ if df_all_signals is not None and st.session_state.selected_signals:
 
             if selected:
                 df_plot = df_all_signals[selected].copy()
-
-                # Для графика приводим к числам (поддержка запятых)
                 df_plot_num = df_plot.apply(sanitize_numeric_column)
 
                 valid_index = df_plot_num.dropna(how="all").index
                 if len(valid_index) == 0:
                     st.warning("Нет числовых данных для выбранных сигналов.")
                 else:
-                    ts_idx = st.slider(
-                        "Вертикальная линия (время)",
-                        min_value=0,
-                        max_value=len(valid_index) - 1,
-                        value=len(valid_index) - 1,
-                        key=f"vline_{i}",
-                    )
-                    ts = valid_index[ts_idx]
+                    # === ПОЛНЫЙ ДИАПАЗОН ДАННЫХ ===
+                    full_x_min = valid_index.min()
+                    full_x_max = valid_index.max()
+                    
+                    y_data = df_plot_num.values.flatten()
+                    y_data = y_data[~np.isnan(y_data)]
+                    full_y_min = float(y_data.min()) if len(y_data) > 0 else 0.0
+                    full_y_max = float(y_data.max()) if len(y_data) > 0 else 1.0
+                    
+                    # Небольшой отступ для Y
+                    y_padding = (full_y_max - full_y_min) * 0.05
+                    full_y_min -= y_padding
+                    full_y_max += y_padding
 
-                    # график с вертикальной линией
-                    fig = px.line(
-                        df_plot_num,
-                        x=df_plot_num.index,
-                        y=selected,
-                        title=f"График #{plot_area['id']}",
-                        render_mode="webgl"
-                    )
-                    fig.add_vline(x=ts, line_width=2, line_dash="dash", line_color="red")
-                    fig.update_layout(
-                        uirevision=f"plot_area_{plot_area['id']}",
-                        height=650,
-                        legend_title_text="Сигналы",
-                        xaxis_title="Время",
-                        yaxis_title="Значение",
-                        margin=dict(l=20, r=20, t=40, b=20),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    # === ИНИЦИАЛИЗАЦИЯ ДИАПАЗОНОВ (если не заданы) ===
+                    if plot_area.get('x_range') is None:
+                        plot_area['x_range'] = [full_x_min, full_x_max]
+                    
+                    if plot_area.get('y_range') is None:
+                        plot_area['y_range'] = [full_y_min, full_y_max]
+                    
+                    # Текущие диапазоны
+                    current_x_start, current_x_end = plot_area['x_range']
+                    current_y_min, current_y_max = plot_area['y_range']
 
-                    # значения на линии
-                    nearest = df_plot_num.reindex(df_plot_num.index.union([ts])).sort_index()
-                    nearest = nearest.ffill().loc[ts]
-
-                    # статистика + колонка значений на линии
-                    st.markdown("**📊 Статистика (по всему сигналу):**")
-                    stats_df = compute_stats_numeric(df_plot)
-                    if stats_df.empty:
-                        st.info("Нет числовых данных для расчёта статистики.")
+                    # === ФИЛЬТРУЕМ ДАННЫЕ ПО ВИДИМОМУ ДИАПАЗОНУ X ===
+                    x_start_ts, x_end_ts = plot_area['x_range']
+                    mask_visible = (valid_index >= x_start_ts) & (valid_index <= x_end_ts)
+                    visible_index = valid_index[mask_visible]
+                    
+                    if len(visible_index) == 0:
+                        st.warning("В выбранном диапазоне X нет данных.")
                     else:
-                        stats_view = stats_df.copy()
-                        stats_view["value"] = nearest.reindex(stats_view.index)
-                        stats_view["start"] = (
-                            pd.to_datetime(stats_view["start"], errors="coerce")
-                            .dt.strftime("%Y-%m-%d %H:%M:%S")
+                        # === СЛАЙДЕР ВЕРТИКАЛЬНОЙ ЛИНИИ (в рамках видимого диапазона) ===
+                        # Инициализируем cursor_time если не задан
+                        if plot_area.get('cursor_time') is None:
+                            plot_area['cursor_time'] = visible_index[len(visible_index) // 2]
+                        
+                        # Проверяем что cursor_time в видимом диапазоне
+                        cursor_time = plot_area['cursor_time']
+                        if cursor_time < x_start_ts or cursor_time > x_end_ts:
+                            cursor_time = visible_index[len(visible_index) // 2]
+                            plot_area['cursor_time'] = cursor_time
+                        
+                        # Находим текущий индекс курсора в visible_index
+                        cursor_pos, _ = find_nearest_index_in_range(
+                            visible_index, cursor_time, x_start_ts, x_end_ts
                         )
-                        stats_view["end"] = (
-                            pd.to_datetime(stats_view["end"], errors="coerce")
-                            .dt.strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        # Применяем глобальный курсор если задан
+                        if st.session_state.global_cursor_time is not None:
+                            global_cursor = st.session_state.global_cursor_time
+                            if x_start_ts <= global_cursor <= x_end_ts:
+                                cursor_pos, cursor_time = find_nearest_index_in_range(
+                                    visible_index, global_cursor, x_start_ts, x_end_ts
+                                )
+                                plot_area['cursor_time'] = cursor_time
+                        
+                        # ПУНКТ 4: Слайдер на всю ширину (без кнопки рядом)
+                        ts_idx = st.slider(
+                            "📍 Вертикальная линия (в видимом диапазоне)",
+                            min_value=0,
+                            max_value=len(visible_index) - 1,
+                            value=min(cursor_pos, len(visible_index) - 1),
+                            key=f"vline_slider_{i}",
+                            help="Слайдер работает только в рамках текущего видимого диапазона X"
                         )
-                        st.dataframe(
-                            stats_view.style.format(
-                                {
-                                    "count": "{:.0f}",
-                                    "min": "{:.6g}",
-                                    "max": "{:.6g}",
-                                    "mean": "{:.6g}",
-                                    "std": "{:.6g}",
-                                    "median": "{:.6g}",
-                                    "value_at_line": "{:.6g}",
-                                },
-                                na_rep="",
+                        
+                        # Обновляем cursor_time
+                        ts = visible_index[ts_idx]
+                        plot_area['cursor_time'] = ts
+                        
+                        # Отображаем текущую позицию
+                        # Позиция линии и кнопка синхронизации на одной горизонтали
+                        col_pos, col_sync = st.columns([3, 1])
+                        with col_pos:
+                            st.markdown(f"**📅 Позиция линии:** `{ts.strftime('%Y-%m-%d %H:%M:%S')}`")
+                        with col_sync:
+                            if st.button("🔄 Синхронизировать все", key=f"sync_{i}"):
+                                st.session_state.global_cursor_time = ts
+                                for pa in st.session_state.plot_areas:
+                                    pa['cursor_time'] = ts
+                                st.rerun()
+
+                        # === ПОСТРОЕНИЕ ГРАФИКА ===
+                        fig = px.line(
+                            df_plot_num,
+                            x=df_plot_num.index,
+                            y=selected,
+                            title=f"График #{plot_area['id']}",
+                            render_mode="webgl"
+                        )
+                        
+                        # Вертикальная линия курсора
+                        fig.add_vline(x=ts, line_width=2, line_dash="dash", line_color="red")
+                        
+                        # Пользовательские маркеры
+                        shapes = plot_area.get('shapes', [])
+                        for shape in shapes:
+                            if shape['type'] == 'vline':
+                                fig.add_vline(x=shape['x'], line_dash=shape['dash'], line_color=shape['color'], line_width=1)
+                            elif shape['type'] == 'hline':
+                                fig.add_hline(y=shape['y'], line_dash=shape['dash'], line_color=shape['color'], line_width=1)
+                        
+                        # ПУНКТ 1 и 2: Layout с фиксированными диапазонами
+                        fig.update_layout(
+                            uirevision=f"plot_area_{plot_area['id']}",
+                            height=600,
+                            legend_title_text="Сигналы",
+                            xaxis_title="Время",
+                            yaxis_title="Значение",
+                            margin=dict(l=20, r=20, t=40, b=20),
+                            # ПУНКТ 1: X rangeslider на ПОЛНЫЙ диапазон данных
+                            xaxis=dict(
+                                range=[x_start_ts, x_end_ts],  # Видимый диапазон
+                                rangeslider=dict(
+                                    visible=True,
+                                    thickness=0.08,
+                                    bgcolor='#e0e0e0',
+                                    range=[full_x_min, full_x_max]  # Полный диапазон для навигации
+                                )
                             ),
-                            use_container_width=True,
+                            # Y диапазон из настроек
+                            yaxis=dict(
+                                range=plot_area['y_range'],
+                                fixedrange=False  # Позволяем зум по Y на графике
+                            )
                         )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # === МАРКЕРЫ ===
+                        with st.expander(f"📍 Добавить маркеры для графика #{plot_area['id']}"):
+                            col_x, col_y = st.columns(2)
+                            with col_x:
+                                st.markdown("**Вертикальная линия (X)**")
+                                x_date = st.date_input("Дата", value=ts.date(), key=f"x_date_{i}")
+                                x_time = st.time_input("Время", value=ts.time(), key=f"x_time_{i}")
+                                x_full = pd.Timestamp.combine(x_date, x_time)
+                                if st.button("Добавить V-line", key=f"add_vline_{i}"):
+                                    shapes.append({
+                                        'type': 'vline',
+                                        'x': x_full,
+                                        'dash': 'dot',
+                                        'color': 'blue'
+                                    })
+                                    plot_area['shapes'] = shapes
+                                    st.success(f"Добавлена линия на {x_full}")
+                                    st.rerun()
+                            
+                            with col_y:
+                                st.markdown("**Горизонтальная линия (Y)**")
+                                y_value = st.number_input("Значение Y", value=0.0, key=f"y_val_{i}")
+                                if st.button("Добавить H-line", key=f"add_hline_{i}"):
+                                    shapes.append({
+                                        'type': 'hline',
+                                        'y': y_value,
+                                        'dash': 'dash',
+                                        'color': 'green'
+                                    })
+                                    plot_area['shapes'] = shapes
+                                    st.success(f"Добавлена линия на Y={y_value}")
+                                    st.rerun()
+                            
+                            if shapes:
+                                st.markdown("**Текущие маркеры:**")
+                                for j, s in enumerate(shapes):
+                                    if s['type'] == 'vline':
+                                        st.text(f"  V-line: {s['x']} ({s['color']})")
+                                    else:
+                                        st.text(f"  H-line: Y={s['y']} ({s['color']})")
+                                if st.button(f"🗑️ Очистить маркеры", key=f"clear_shapes_{i}"):
+                                    plot_area['shapes'] = []
+                                    st.rerun()
+
+                        # === СТАТИСТИКА ===
+                        nearest = df_plot_num.reindex(df_plot_num.index.union([ts])).sort_index()
+                        nearest = nearest.ffill().loc[ts]
+
+                        st.markdown("**📊 Статистика:**")
+                        stats_df = compute_stats_numeric(df_plot)
+                        if stats_df.empty:
+                            st.info("Нет данных для статистики.")
+                        else:
+                            stats_view = stats_df.copy()
+                            stats_view["value"] = nearest.reindex(stats_view.index)
+                            stats_view["start"] = pd.to_datetime(stats_view["start"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+                            stats_view["end"] = pd.to_datetime(stats_view["end"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+                            st.dataframe(
+                                stats_view.style.format(
+                                    {
+                                        "count": "{:.0f}",
+                                        "min": "{:.6g}",
+                                        "max": "{:.6g}",
+                                        "mean": "{:.6g}",
+                                        "std": "{:.6g}",
+                                        "median": "{:.6g}",
+                                        "value": "{:.6g}",
+                                    },
+                                    na_rep="",
+                                ),
+                                use_container_width=True,
+                            )
             else:
                 st.info("Выберите сигналы для отображения.")
         st.divider()
@@ -600,7 +743,7 @@ if df_all_signals is not None:
     with st.expander("ℹ️ Информация о данных"):
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Всего сигналов (вкл. обрезанные/синтет.)", len(df_all_signals.columns))
+            st.metric("Всего сигналов", len(df_all_signals.columns))
         with col2:
             st.metric("Количество записей", len(df_all_signals))
         with col3:
@@ -611,5 +754,5 @@ if df_all_signals is not None:
                 st.metric("Диапазон времени", "—")
 
 if CODE:
-    with st.expander("🧩 Сгенерированный код (оригинал)"):
+    with st.expander("🧩 Сгенерированный код"):
         st.code(CODE, language="text")
