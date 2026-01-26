@@ -1,48 +1,49 @@
 {
   "version": "1.0",
   "project": {
-    "code": "mydfdf",
+    "code": "h_kj_proj",
     "type": "parameter",
     "description": "",
     "dimension": "",
     "possibleCause": "",
-    "guidelines": ""
+    "guidelines": "",
+    "visualizer_state": null
   },
   "elements": {
-    "formula_3": {
-      "id": "formula_3",
+    "formula_2": {
+      "id": "formula_2",
       "type": "formula",
-      "x": 676,
-      "y": 154,
+      "x": 432,
+      "y": 205,
       "width": 140,
       "height": 80,
       "props": {
-        "expression": "dfdf+100",
+        "expression": "h_proj/1000",
         "inputCount": 1,
         "comment": ""
       }
     },
-    "output_4": {
-      "id": "output_4",
+    "output_3": {
+      "id": "output_3",
       "type": "output",
-      "x": 926,
-      "y": 205,
+      "x": 679,
+      "y": 243,
       "width": 150,
       "height": 60,
       "props": {
-        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "label": "Выход",
         "outputGroup": ""
       }
     },
     "input_signal_1": {
       "id": "input_signal_1",
       "type": "input-signal",
-      "x": 424,
-      "y": 206,
+      "x": 166,
+      "y": 219,
       "width": 150,
       "height": 50,
       "props": {
-        "name": "dfdf",
+        "name": "h_proj",
         "signalType": "undefined",
         "dimension": "",
         "description": "",
@@ -54,23 +55,24 @@
     {
       "fromElement": "input_signal_1",
       "fromPort": "out-0",
-      "toElement": "formula_3",
+      "toElement": "formula_2",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
-      "fromElement": "formula_3",
+      "fromElement": "formula_2",
       "fromPort": "out-0",
-      "toElement": "output_4",
+      "toElement": "output_3",
       "toPort": "in-0",
       "signalType": "numeric"
     }
   ],
-  "counter": 4,
+  "counter": 3,
   "viewport": {
     "zoom": 1,
     "panX": 0,
     "panY": 0
   },
-  "code": "dfdf+100"
+  "code": "h_proj/1000",
+  "visualizer_state": null
 }

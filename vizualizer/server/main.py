@@ -7,6 +7,7 @@ import pickle
 import tempfile
 from typing import Dict, List, Any, Optional
 from io import BytesIO
+from update_projects import update_projects_if_templates_changed
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -488,6 +489,15 @@ def startup():
     """Инициализация при запуске"""
     settings = load_settings()
     STATE["settings"] = settings
+
+    project_dir = settings.get("projectDataFolder")
+    if project_dir and not os.path.isabs(project_dir):
+        project_dir = os.path.normpath(os.path.join(BASE_DIR, project_dir))
+
+    update_projects_if_templates_changed(
+        project_dir=project_dir,
+        templates_path=TEMPLATES_PATH
+    )
     
     folder = settings.get("signalDataFolder")
     if not folder:
