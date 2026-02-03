@@ -116,15 +116,30 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
             warnings.append("GETPOINT пока не поддержан — возвращается NaN.")
         return pd.Series(np.nan, index=index)
 
-    def PREV(param_name):
-        if param_name not in series_map:
+    def PREV(param):
+        s = _history_series(param)
+        if s is None:
             return pd.Series(np.nan, index=index)
-        return series_map[param_name].shift(1)
+        return s.shift(1)
 
-    def _history_series(param_name):
-        if param_name not in series_map:
-            return None
-        return series_map[param_name]
+    def _history_series(param):
+        # 1) Если уже Series — используем её
+        if isinstance(param, pd.Series):
+            return sanitize_numeric_column(param).reindex(index)
+
+        # 2) Если пришло "безопасное имя" (SIG_...) — оно уже есть в env как Series.
+        # Но сюда оно попадёт только если пользователь передал строку "SIG_0".
+        if isinstance(param, str):
+            # сначала пробуем как исходное имя сигнала
+            if param in series_map:
+                return series_map[param]
+
+            # потом пробуем как safe-name
+            for orig, safe in safe_name_map.items():
+                if param == safe:
+                    return series_map.get(orig)
+
+        return None
 
     def _history_window(period):
         try:
@@ -135,12 +150,24 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
             return None
         return f"{minutes}min"
 
-    def _history_apply(param_name, period, fn):
-        s = _history_series(param_name)
+    def _history_apply(param, period, fn):
+        s = _history_series(param)
         window = _history_window(period)
         if s is None or window is None:
             return pd.Series(np.nan, index=index)
-        return fn(s.rolling(window))
+
+        # 1) Если datetime-индекс — используем time-based rolling
+        if isinstance(s.index, (pd.DatetimeIndex, pd.TimedeltaIndex, pd.PeriodIndex)):
+            return fn(s.rolling(window, min_periods=1))
+
+        # 2) Иначе пробуем интерпретировать period как "кол-во точек"
+        try:
+            n = int(period)
+            if n <= 0:
+                return pd.Series(np.nan, index=index)
+            return fn(s.rolling(window=n, min_periods=1))
+        except Exception:
+            return pd.Series(np.nan, index=index)
 
     HISTORYAVG = lambda n, p: _history_apply(n, p, lambda r: r.mean())
     HISTORYCOUNT = lambda n, p: _history_apply(n, p, lambda r: r.count())
