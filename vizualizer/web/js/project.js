@@ -305,10 +305,10 @@ renderProjectList() {
   this.filteredProjectList.forEach((item) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${item.filename}</td>
       <td>${item.code || ''}</td>
       <td>${item.description || ''}</td>
       <td>${item.type || ''}</td>
+      <td>${item.filename || ''}</td>
     `;
     tr.addEventListener('click', () => {
       this.highlightRow(tr);
