@@ -1,6 +1,17 @@
 // js/codegen_graph.js
 
 
+function toSimpleExpr(valueStr) {
+  const s = String(valueStr).trim();
+  if (s === '0') return Optimizer.Const(0);
+  const num = parseFloat(s.replace(',', '.'));
+  if (!isNaN(num) && String(num) === s) {
+    return Optimizer.Const(num);
+  }
+  return Optimizer.Var(s);
+}
+
+
 const CodeGenGraph = {
         /**
      * Собрать все условия вверх по цепочке cond‑портов (до корня).
@@ -104,6 +115,45 @@ const CodeGenGraph = {
                     result = result ? Optimizer.And(result, inLogic) : inLogic;
                 }
                 return result || Optimizer.TrueCond;
+            }
+            // codegen_graph.js -> evalLogic(graph)
+
+            case 'range': {
+                const inputGraph = graph.inputs[0]?.fromGraph;
+                if (!inputGraph) return Optimizer.TrueCond; // нет входа — считаем TRUE, либо FALSE, по вкусу
+
+                const inputVal = this.evalValue(inputGraph); // Optimizer.Expr для A
+                const name = (inputVal.type === 'var') ? inputVal.name : String(inputVal.n);
+
+                const minVal = graph.elem.props?.minValue;
+                const maxVal = graph.elem.props?.maxValue;
+                const incMin = graph.elem.props?.inclusiveMin !== false;
+                const incMax = graph.elem.props?.inclusiveMax !== false;
+
+                const minStr = String(minVal ?? 0);
+                const maxStr = String(maxVal ?? minStr);
+
+                const conds = [];
+
+                // A >= min  или  A > min
+                if (minVal !== undefined && minVal !== null) {
+                    const opMin = incMin ? '>=' : '>';
+                    conds.push(Optimizer.Cmp(name, opMin, minStr));
+                }
+
+                // A <= max  или  A < max
+                if (maxVal !== undefined && maxVal !== null) {
+                    const opMax = incMax ? '<=' : '<';
+                    conds.push(Optimizer.Cmp(name, opMax, maxStr));
+                }
+
+                if (conds.length === 0) {
+                    return Optimizer.TrueCond; // диапазон без границ → всегда истина
+                } else if (conds.length === 1) {
+                    return conds[0];
+                } else {
+                    return Optimizer.And(conds[0], conds[1]);
+                }
             }
 
             case 'or': {
@@ -274,6 +324,62 @@ const CodeGenGraph = {
             case 'or':
             case 'not':
             case 'if':
+            // codegen_graph.js -> evalGraphValue(graph)
+
+            case 'switch': {
+                const elem = graph.elem;
+                const cases = Array.isArray(elem.props?.cases) ? elem.props.cases : [];
+
+                // --- A: особый вход (in-0) ---
+                const aGraph = graph.inputs[0]?.fromGraph;
+                const aVal = aGraph ? this.evalValue(aGraph) : Optimizer.Const(0);
+                const aName = (aVal.type === 'var') ? aVal.name : String(aVal.n);
+
+                // --- default: in-1 ---
+                const defaultGraph = graph.inputs[1]?.fromGraph;
+                const defaultVal = defaultGraph
+                    ? this.evalValue(defaultGraph)
+                    : Optimizer.Const(0);
+
+                // --- кейсы: in-2.. ---
+                let expr = defaultVal;
+
+                // идём с конца, чтобы вложенный WHEN строился от последнего к первому
+                const totalInputs = elem.props?.inputCount || 3;
+                const caseCount = Math.max(0, totalInputs - 2);
+
+                for (let i = caseCount - 1; i >= 0; i--) {
+                    const inputIdx = i + 2; // in-2..in-(caseCount+1)
+                    const inGraph = graph.inputs.find(inp => {
+                    const portName = inp.conn.toPort; // "in-k"
+                    const idx = parseInt(portName.split('-')[1] || '0', 10);
+                    return idx === inputIdx;
+                    })?.fromGraph;
+
+                    if (!inGraph) continue; // нет входа для этого кейса
+
+                    const caseExpr = this.evalValue(inGraph);
+
+                    const cfg = cases[i] || {};
+                    const op = cfg.op || '=';
+                    const valueStr = (cfg.value !== undefined) ? String(cfg.value) : '0';
+
+                    // cond: A <op> value
+                    const cond = Optimizer.Cmp(aName, op, valueStr);
+
+                    expr = Optimizer.When(cond, caseExpr, expr);
+                }
+
+                // теперь expr — полное WHEN-дерево
+                // добавим внешний контекст с cond-порта (если есть)
+                let condCtx = this.collectAllCond(graph);
+                if (condCtx) {
+                    // WHEN(cond_ctx, expr, 0)
+                    expr = Optimizer.When(condCtx, expr, Optimizer.Const(0));
+                }
+
+                return { cond: null, expr };
+            }
             default:
                 expr = Optimizer.Const(0);
         }

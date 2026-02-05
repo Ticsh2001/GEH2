@@ -748,3 +748,22 @@ body {
     color: #4a90d9;
     margin-bottom: 4px;
 }
+
+/* special ports for switch */
+.port.switch-main-port {
+  background: #f97316 !important;   /* оранжевый */
+  border-color: #fed7aa !important;
+}
+
+.port.switch-main-port.connected {
+  background: #ea580c !important;
+}
+
+.port.switch-default-port {
+  background: #22c55e !important;   /* зелёный */
+  border-color: #bbf7d0 !important;
+}
+
+.port.switch-default-port.connected {
+  background: #16a34a !important;
+}

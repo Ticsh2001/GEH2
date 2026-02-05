@@ -1,0 +1,154 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "test",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "visualizer_state": null
+  },
+  "elements": {
+    "formula_4": {
+      "id": "formula_4",
+      "type": "formula",
+      "x": 368,
+      "y": 1149,
+      "width": 140,
+      "height": 136,
+      "props": {
+        "expression": "L+Z+Z",
+        "inputCount": 3,
+        "portNameMap": {
+          "in-0": "L",
+          "in-1": "Z",
+          "in-2": "Z"
+        },
+        "comment": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 107,
+      "y": 1075,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "L",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_2": {
+      "id": "input_signal_2",
+      "type": "input-signal",
+      "x": 82,
+      "y": 1166,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Z",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_3": {
+      "id": "input_signal_3",
+      "type": "input-signal",
+      "x": 77,
+      "y": 1258,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Z",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "formula_6": {
+      "id": "formula_6",
+      "type": "formula",
+      "x": 674,
+      "y": 1235,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "formula_4+\u0421\u0438\u0433\u043d\u0430\u043b",
+        "inputCount": 2,
+        "portNameMap": {
+          "in-0": "formula_4",
+          "in-1": "MM.IN"
+        },
+        "comment": ""
+      }
+    },
+    "input_signal_7": {
+      "id": "input_signal_7",
+      "type": "input-signal",
+      "x": 74,
+      "y": 1418,
+      "width": 263,
+      "height": 50,
+      "props": {
+        "name": "MM.IN",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_2",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_3",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_4",
+      "fromPort": "out-0",
+      "toElement": "formula_6",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_7",
+      "fromPort": "out-0",
+      "toElement": "formula_6",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 7,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "/* \u041d\u0435\u0442 \u0432\u044b\u0445\u043e\u0434\u043e\u0432 */",
+  "visualizer_state": null
+}

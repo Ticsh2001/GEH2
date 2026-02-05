@@ -1,0 +1,108 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "test2",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "visualizer_state": null
+  },
+  "elements": {
+    "formula_4": {
+      "id": "formula_4",
+      "type": "formula",
+      "x": 298,
+      "y": 1059,
+      "width": 140,
+      "height": 136,
+      "props": {
+        "expression": "A+K+D",
+        "inputCount": 3,
+        "portNameMap": {
+          "in-0": "A",
+          "in-1": "K",
+          "in-2": "D"
+        },
+        "comment": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": -32,
+      "y": 985,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "A",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_2": {
+      "id": "input_signal_2",
+      "type": "input-signal",
+      "x": 20,
+      "y": 1139,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "K",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_3": {
+      "id": "input_signal_3",
+      "type": "input-signal",
+      "x": -4,
+      "y": 1237,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "D",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_2",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_3",
+      "fromPort": "out-0",
+      "toElement": "formula_4",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 4,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "/* \u041d\u0435\u0442 \u0432\u044b\u0445\u043e\u0434\u043e\u0432 */",
+  "visualizer_state": null
+}

@@ -154,7 +154,105 @@ const Modal = {
                 <label>Название группы:</label>
                 <input type="text" id="prop-title" value="${props.title || 'Группа'}">
             </div>`;
-        }   
+        // modal.js -> showPropertiesModal
+
+        } else if (elemType === 'range') {
+        const min = props.minValue ?? 0;
+        const max = props.maxValue ?? 1;
+        const inclusiveMin = props.inclusiveMin !== false;
+        const inclusiveMax = props.inclusiveMax !== false;
+
+        contentHTML = `
+            <div class="modal-row">
+            <label>Минимальное значение:</label>
+            <input type="number" id="prop-min" value="${min}" step="any">
+            </div>
+            <div class="modal-row">
+            <label>Максимальное значение:</label>
+            <input type="number" id="prop-max" value="${max}" step="any">
+            </div>
+            <div class="modal-row">
+            <label>Тип границ:</label>
+            <div style="display:flex; gap:10px; font-size:13px;">
+                <label style="display:flex; align-items:center; gap:4px;">
+                <input type="checkbox" id="prop-inc-min" ${inclusiveMin ? 'checked' : ''}>
+                Включать минимальное значение ( [ )
+                </label>
+            </div>
+            <div style="display:flex; gap:10px; font-size:13px; margin-top:4px;">
+                <label style="display:flex; align-items:center; gap:4px;">
+                <input type="checkbox" id="prop-inc-max" ${inclusiveMax ? 'checked' : ''}>
+                Включать максимальное значение ( ] )
+                </label>
+            </div>
+            </div>
+        `;
+        }
+        else if (elemType === 'switch') {
+            const totalInputs = props.inputCount ?? 3;
+            const caseCount = Math.max(0, totalInputs - 2);
+
+            // cases в props: массив длиной caseCount (элементы: { op, value })
+            const cases = Array.from({ length: caseCount }, (_, i) => {
+                const c = (props.cases && props.cases[i]) || {};
+                return {
+                op: c.op || '=',
+                value: (c.value !== undefined) ? c.value : ''
+                };
+            });
+
+            // HTML настроек кейсов
+            let casesHTML = '';
+            cases.forEach((c, idx) => {
+                const caseIndex = idx + 1;     // человекочитаемый номер
+                casesHTML += `
+                <div class="modal-row" style="border:1px solid #1f2937; padding:8px; border-radius:6px; margin-bottom:6px;">
+                    <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">
+                    Кейc #${caseIndex} → вход in-${idx + 2}
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                    <select id="switch-op-${idx}" style="width:90px;">
+                        <option value="="  ${c.op === '='  ? 'selected' : ''}>=</option>
+                        <option value=">"  ${c.op === '>'  ? 'selected' : ''}>&gt;</option>
+                        <option value="<"  ${c.op === '<'  ? 'selected' : ''}>&lt;</option>
+                        <option value=">=" ${c.op === '>=' ? 'selected' : ''}>&gt;=</option>
+                        <option value="<=" ${c.op === '<=' ? 'selected' : ''}>&lt;=</option>
+                        <option value="!=" ${c.op === '!=' ? 'selected' : ''}>!=</option>
+                    </select>
+                    <input type="text" id="switch-val-${idx}" value="${c.value}"
+                            placeholder="значение для A"
+                            style="flex:1;">
+                    </div>
+                </div>
+                `;
+            });
+
+            contentHTML = `
+                <div class="modal-row">
+                <label>Количество входов (включая A и default):</label>
+                <input type="number" id="prop-input-count"
+                        value="${totalInputs}" min="2" max="10">
+                <small style="color:#999;">
+                    in-0 — A (сравниваемый сигнал), in-1 — default, in-2.. — кейсы.
+                </small>
+                </div>
+
+                <div class="modal-row">
+                <label>Кейсы (условия для A):</label>
+                <div id="switch-cases-container">
+                    ${
+                    caseCount > 0
+                        ? casesHTML
+                        : '<div style="color:#888;font-size:12px;">Нет кейсов — switch вернёт default.</div>'
+                    }
+                </div>
+                <small style="color:#999;">
+                    Порядок важен: сверху вниз генерируются вложенные WHEN.
+                </small>
+                </div>
+            `;
+        }
+           
         
         else if (elemType === 'formula') {
             let signalsHTML = '';
@@ -482,6 +580,71 @@ const Modal = {
                 elemData.props.value = value;
                 const symbol = elem.querySelector('.element-symbol');
                 if (symbol) symbol.textContent = String(value);
+            } else if (elemType === 'range') {
+                const minVal = parseFloat(document.getElementById('prop-min').value);
+                const maxVal = parseFloat(document.getElementById('prop-max').value);
+                const incMin = document.getElementById('prop-inc-min').checked;
+                const incMax = document.getElementById('prop-inc-max').checked;
+
+                // можно слегка нормализовать: если min > max — поменять местами
+                let min = isNaN(minVal) ? 0 : minVal;
+                let max = isNaN(maxVal) ? min : maxVal;
+                if (min > max) {
+                    const t = min;
+                    min = max;
+                    max = t;
+                }
+
+                elemData.props.minValue = min;
+                elemData.props.maxValue = max;
+                elemData.props.inclusiveMin = incMin;
+                elemData.props.inclusiveMax = incMax;
+
+                // обновляем подпись на элементе
+                const symbol = elem.querySelector('.element-symbol');
+                if (symbol) {
+                    const minBracket = incMin ? '[' : '(';
+                    const maxBracket = incMax ? ']' : ')';
+                    symbol.textContent = `${minBracket}${min}; ${max}${maxBracket}`;
+                }
+            } else if (elemType === 'switch') {
+                const elem = document.getElementById(elemId);
+
+                // 1) inputCount
+                let inputCount = parseInt(document.getElementById('prop-input-count').value, 10);
+                if (!Number.isFinite(inputCount) || inputCount < 2) inputCount = 2;
+                if (inputCount > 10) inputCount = 10;
+
+                elemData.props.inputCount = inputCount;
+
+                // 2) кейсы: их количество = inputCount - 2
+                const caseCount = Math.max(0, inputCount - 2);
+                const cases = [];
+
+                for (let i = 0; i < caseCount; i++) {
+                    const opEl = document.getElementById(`switch-op-${i}`);
+                    const valEl = document.getElementById(`switch-val-${i}`);
+                    if (!opEl || !valEl) {
+                    cases.push({ op: '=', value: '' });
+                    continue;
+                    }
+                    const op = opEl.value || '=';
+                    const value = valEl.value || '';
+                    cases.push({ op, value });
+                }
+
+                elemData.props.cases = cases;
+
+                // 3) Обновляем входы и размер
+                Elements.updateFormulaInputs(elemId, inputCount); // используем уже существующую функцию
+                Elements.updateElementSize(elemId);
+
+                // 4) Обновляем текст на элементе
+                const symbol = elem.querySelector('.element-symbol');
+                if (symbol) {
+                    symbol.textContent = `A → case (${caseCount}), default`;
+                }
+
             
             } else if (elemType === 'formula') {
                 const expression = document.getElementById('prop-expression').value;

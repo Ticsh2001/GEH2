@@ -134,6 +134,88 @@ const Elements = {
                         </div>
                     </div>`;
             }
+            // elements.js -> внутри createElementHTML
+
+            else if (elemType === 'range') {
+                const min = safe(props.minValue, '0');
+                const max = safe(props.maxValue, '1');
+                const inclusiveMin = props.inclusiveMin !== false; // по умолчанию true
+                const inclusiveMax = props.inclusiveMax !== false; // по умолчанию true
+
+                const minBracket = inclusiveMin ? '[' : '(';
+                const maxBracket = inclusiveMax ? ']' : ')';
+
+                innerHTML = `
+                    <div class="element-header" style="background:${config.color};">
+                    Диапазон
+                    </div>
+                    <div class="element-body">
+                    <div class="ports-left">
+                        ${buildInputPorts(1, config.inputTypes, config.inputLabels)}
+                    </div>
+                    <div class="element-symbol">
+                        ${minBracket}${min}; ${max}${maxBracket}
+                    </div>
+                    <div class="ports-right">
+                        ${buildOutputPorts(1, [SIGNAL_TYPE.LOGIC], ['в диапазоне'])}
+                    </div>
+                    </div>
+                `;
+            }
+            // elements.js -> createElementHTML
+
+            else if (elemType === 'switch') {
+            const totalInputs = props.inputCount || config.defaultProps?.inputCount || 3;
+            const caseCount = Math.max(0, totalInputs - 2);
+
+            // Строим порты вручную, чтобы добавить data-role и отдельные классы
+            let inputsHTML = '';
+
+            for (let i = 0; i < totalInputs; i++) {
+                let roleAttr = '';
+                let extraClass = '';
+
+                if (i === 0) {
+                roleAttr = 'data-role="switch-main"';
+                extraClass = ' switch-main-port';
+                } else if (i === 1) {
+                roleAttr = 'data-role="switch-default"';
+                extraClass = ' switch-default-port';
+                }
+
+                const type = config.inputTypes[i] ?? config.inputTypes[config.inputTypes.length - 1] ?? SIGNAL_TYPE.ANY;
+                const label = config.inputLabels[i] || (i === 0 ? 'A' : (i === 1 ? 'default' : `case ${i-1}`));
+
+                inputsHTML += `
+                <div class="port input any-port${extraClass}"
+                    data-port="in-${i}"
+                    data-element="${elemId}"
+                    data-signal-type="${type}"
+                    ${roleAttr}
+                    title="${label}">
+                </div>
+                `;
+            }
+
+            const label = `A, default, кейсов: ${caseCount}`;
+
+            innerHTML = `
+                <div class="element-header" style="background:${config.color};">
+                Switch
+                </div>
+                <div class="element-body">
+                <div class="ports-left">
+                    ${inputsHTML}
+                </div>
+                <div class="element-symbol" style="font-size:12px;">
+                    ${label}
+                </div>
+                <div class="ports-right">
+                    ${buildOutputPorts(1, config.outputTypes, config.outputLabels)}
+                </div>
+                </div>
+            `;
+            }
             else if (elemType === 'not') {
                 innerHTML = `
                     <div class="element-header" style="background:${config.color};">НЕ</div>

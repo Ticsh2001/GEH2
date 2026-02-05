@@ -33,6 +33,57 @@ const ELEMENT_TYPES = {
         minWidth: 150,
         minHeight: 50
     },
+    'switch': {
+        name: 'Switch',
+        inputs: 3,                     // особый + default + первый case
+        outputs: 1,
+        // ЛОГИКА ВХОДОВ:
+        // in-0: особый (A)
+        // in-1: default (B)
+        // in-2..in-N: case входы (C, D, ...)
+        inputLabels: ['A', 'default', 'case'],
+        inputTypes: [SIGNAL_TYPE.ANY, SIGNAL_TYPE.ANY, SIGNAL_TYPE.ANY],
+        outputLabels: ['результат'],
+        outputTypes: [SIGNAL_TYPE.ANY],
+        color: '#ec4899',              // розовый, чтобы отличался
+        hasProperties: true,
+        resizable: true,
+        minWidth: 160,
+        minHeight: 90,
+        hasConditionPort: true,
+        conditionPortType: SIGNAL_TYPE.LOGIC,
+        defaultProps: {
+        inputCount: 3,               // всего входов
+        cases: [
+            // массив объектов вида:
+            // { op: '=', value: '0' }
+        ]
+        }
+    },
+    
+    'range': {
+        name: 'Диапазон',
+        inputs: 1,
+        outputs: 1,
+        inputLabels: ['сигнал'],
+        inputTypes: [SIGNAL_TYPE.ANY],      // любой числовой/логический (по сути ожидаем NUMERIC)
+        outputLabels: ['в диапазоне'],
+        outputTypes: [SIGNAL_TYPE.LOGIC],   // логический выход
+        color: '#f97316',                   // можешь выбрать любой
+        hasProperties: true,
+        resizable: true,
+        minWidth: 140,
+        minHeight: 70,
+        hasConditionPort: true,             // как у IF / formula
+        conditionPortType: SIGNAL_TYPE.LOGIC,
+        defaultProps: {
+        minValue: 0,
+        maxValue: 1,
+        inclusiveMin: true,               // [min
+        inclusiveMax: true,               // max]
+        inputCount: 1                     // чтоб не ломало общую логику
+        }
+    },
     'and': {
         name: 'И',
         inputs: 2,  // По умолчанию 2, но может быть изменено
