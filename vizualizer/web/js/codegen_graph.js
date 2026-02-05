@@ -352,34 +352,24 @@ const CodeGenGraph = {
                     const valueStr = (cfg.value !== undefined) ? String(cfg.value) : '0';
 
                     const inputIndex = Number.isInteger(cfg.inputIndex) ? cfg.inputIndex : null;
-                    if (inputIndex === null) {
-                    // нет выбранного порта — пропускаем кейс
-                    continue;
-                    }
+                    if (inputIndex === null) continue;
 
                     const portName = `in-${inputIndex}`;
                     const inGraph = graph.inputs.find(inp => inp.conn.toPort === portName)?.fromGraph;
-                    if (!inGraph) {
-                    // к этому порту ничего не подключено
-                    continue;
-                    }
+                    if (!inGraph) continue;
 
                     const caseExpr = this.evalValue(inGraph);
-
                     const cond = Optimizer.Cmp(aName, op, valueStr);
 
                     expr = Optimizer.When(cond, caseExpr, expr);
                 }
 
-                // контекст от cond‑порта
+                // ✅ ВАЖНО: возвращаем cond, а НЕ встраиваем его в expr
                 let condCtx = this.collectAllCond(graph);
-                if (condCtx) {
-                    expr = Optimizer.When(condCtx, expr, Optimizer.Const(0));
-                }
-
-                return { cond: null, expr };
-                }
-                default:
+                
+                return { cond: condCtx, expr };
+            }
+            default:
                     expr = Optimizer.Const(0);
         }
 
