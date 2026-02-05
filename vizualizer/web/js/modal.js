@@ -3,6 +3,35 @@
  * modal.js
  */
 
+// modal.js
+
+function getSignalNameForPort(elemId, portIndex) {
+  // ищем соединение, ведущее в этот вход
+  const portName = `in-${portIndex}`;
+  const conn = AppState.connections.find(
+    c => c.toElement === elemId && c.toPort === portName
+  );
+  if (!conn) return null;
+
+  const src = AppState.elements[conn.fromElement];
+  if (!src) return null;
+
+  // разные типы элементов можно отображать по-разному
+  switch (src.type) {
+    case 'input-signal':
+      return src.props?.name || src.id;
+    case 'const':
+      return String(src.props?.value ?? 0);
+    case 'formula':
+      return src.props?.expression || src.id;
+    case 'output':
+      return src.props?.label || src.id;
+    default:
+      // логические и прочие — просто имя типа + id
+      return ELEMENT_TYPES[src.type]?.name || src.id;
+  }
+}
+
 const Modal = {
     /**
      * Инициализация модальных окон
@@ -192,36 +221,97 @@ const Modal = {
             const totalInputs = props.inputCount ?? 3;
             const caseCount = Math.max(0, totalInputs - 2);
 
-            // cases в props: массив длиной caseCount (элементы: { op, value })
-            const cases = Array.from({ length: caseCount }, (_, i) => {
-                const c = (props.cases && props.cases[i]) || {};
-                return {
-                op: c.op || '=',
-                value: (c.value !== undefined) ? c.value : ''
-                };
-            });
+            // Список доступных портов для кейсов: in-2..in-(totalInputs-1)
+            // Отображаем как "in-2 (case 1)", "in-3 (case 2)" и т.д.
+            const availableCasePorts = [];
+                for (let i = 2; i < totalInputs; i++) {
+                const signalName = getSignalNameForPort(elemId, i);
+                const niceName = signalName || `in-${i}`;
+                availableCasePorts.push({
+                    index: i,
+                    signalName: signalName,
+                    label: niceName,
+                    portLabel: `in-${i}`
+                });
+                }
 
-            // HTML настроек кейсов
+            // Нормализуем cases из props
+            let propsCases = Array.isArray(props.cases) ? props.cases : [];
+            const usedInputIndexes = new Set();
+            propsCases.forEach(c => {
+            if (Number.isInteger(c.inputIndex) && c.inputIndex >= 2 && c.inputIndex < totalInputs) {
+                usedInputIndexes.add(c.inputIndex);
+            }
+            });
+            // обрежем/расширим до caseCount
+            if (propsCases.length < caseCount) {
+                propsCases = propsCases.concat(
+                Array.from({ length: caseCount - propsCases.length }, () => ({
+                    op: '=',
+                    value: '',
+                    inputIndex: null
+                }))
+                );
+            } else if (propsCases.length > caseCount) {
+                propsCases = propsCases.slice(0, caseCount);
+            }
+
+            // HTML кейсов
             let casesHTML = '';
-            cases.forEach((c, idx) => {
-                const caseIndex = idx + 1;     // человекочитаемый номер
+            propsCases.forEach((c, idx) => {
+                const op = c.op || '=';
+                const value = (c.value !== undefined) ? c.value : '';
+                const inputIndex = Number.isInteger(c.inputIndex) ? c.inputIndex : null;
+
+                // Собираем options для селекта
+                let optionsHTML = '<option value="">(не выбрано)</option>';
+
+                // Для текущего кейса считаем, что его выбор "не занят",
+                // чтобы он мог видеть свой текущий порт без звёздочки.
+                availableCasePorts.forEach(port => {
+                const selected = (inputIndex === port.index) ? 'selected' : '';
+
+                const alreadyUsed =
+                    usedInputIndexes.has(port.index) && port.index !== inputIndex;
+
+                let baseLabel;
+                if (port.signalName) {
+                    baseLabel = port.signalName;
+                } else {
+                    baseLabel = port.portLabel;
+                }
+
+                const display = alreadyUsed ? `${baseLabel}*` : baseLabel;
+
+                optionsHTML += `<option value="${port.index}" ${selected}>${display}</option>`;
+                });
+
+                const caseIndex = idx + 1;
+
                 casesHTML += `
                 <div class="modal-row" style="border:1px solid #1f2937; padding:8px; border-radius:6px; margin-bottom:6px;">
                     <div style="font-size:11px; color:#9ca3af; margin-bottom:4px;">
-                    Кейc #${caseIndex} → вход in-${idx + 2}
+                    Кейc #${caseIndex}
                     </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                    <select id="switch-op-${idx}" style="width:90px;">
-                        <option value="="  ${c.op === '='  ? 'selected' : ''}>=</option>
-                        <option value=">"  ${c.op === '>'  ? 'selected' : ''}>&gt;</option>
-                        <option value="<"  ${c.op === '<'  ? 'selected' : ''}>&lt;</option>
-                        <option value=">=" ${c.op === '>=' ? 'selected' : ''}>&gt;=</option>
-                        <option value="<=" ${c.op === '<=' ? 'selected' : ''}>&lt;=</option>
-                        <option value="!=" ${c.op === '!=' ? 'selected' : ''}>!=</option>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                    <span style="font-size:12px;color:#9ca3af;">Условие для A:</span>
+                    <select id="switch-op-${idx}" style="width:80px;">
+                        <option value="="  ${op === '='  ? 'selected' : ''}>=</option>
+                        <option value=">"  ${op === '>'  ? 'selected' : ''}>&gt;</option>
+                        <option value="<"  ${op === '<'  ? 'selected' : ''}>&lt;</option>
+                        <option value=">=" ${op === '>=' ? 'selected' : ''}>&gt;=</option>
+                        <option value="<=" ${op === '<=' ? 'selected' : ''}>&lt;=</option>
+                        <option value="!=" ${op === '!=' ? 'selected' : ''}>!=</option>
                     </select>
-                    <input type="text" id="switch-val-${idx}" value="${c.value}"
+                    <input type="text" id="switch-val-${idx}" value="${value}"
                             placeholder="значение для A"
-                            style="flex:1;">
+                            style="flex:1; min-width:120px;">
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+                    <span style="font-size:12px;color:#9ca3af;">Сигнал для этого кейса:</span>
+                    <select id="switch-input-${idx}" style="flex:1; min-width:160px;">
+                        ${optionsHTML}
+                    </select>
                     </div>
                 </div>
                 `;
@@ -229,11 +319,11 @@ const Modal = {
 
             contentHTML = `
                 <div class="modal-row">
-                <label>Количество входов (включая A и default):</label>
+                <label>Количество входов (вместе с A и default):</label>
                 <input type="number" id="prop-input-count"
                         value="${totalInputs}" min="2" max="10">
                 <small style="color:#999;">
-                    in-0 — A (сравниваемый сигнал), in-1 — default, in-2.. — кейсы.
+                    in-0 — A (сравниваемый сигнал), in-1 — default, in-2.. — case входы.
                 </small>
                 </div>
 
@@ -247,7 +337,7 @@ const Modal = {
                     }
                 </div>
                 <small style="color:#999;">
-                    Порядок важен: сверху вниз генерируются вложенные WHEN.
+                    Порядок строк = порядок проверки: сверху вниз генерируются вложенные WHEN.
                 </small>
                 </div>
             `;
@@ -614,35 +704,42 @@ const Modal = {
                 let inputCount = parseInt(document.getElementById('prop-input-count').value, 10);
                 if (!Number.isFinite(inputCount) || inputCount < 2) inputCount = 2;
                 if (inputCount > 10) inputCount = 10;
-
                 elemData.props.inputCount = inputCount;
 
-                // 2) кейсы: их количество = inputCount - 2
                 const caseCount = Math.max(0, inputCount - 2);
-                const cases = [];
 
+                // 2) читаем кейсы
+                const cases = [];
                 for (let i = 0; i < caseCount; i++) {
                     const opEl = document.getElementById(`switch-op-${i}`);
                     const valEl = document.getElementById(`switch-val-${i}`);
-                    if (!opEl || !valEl) {
-                    cases.push({ op: '=', value: '' });
-                    continue;
+                    const inEl = document.getElementById(`switch-input-${i}`);
+
+                    const op = opEl ? (opEl.value || '=') : '=';
+                    const value = valEl ? (valEl.value || '') : '';
+                    let inputIndex = null;
+
+                    if (inEl && inEl.value !== '') {
+                    const idx = parseInt(inEl.value, 10);
+                    if (Number.isFinite(idx) && idx >= 2 && idx < inputCount) {
+                        inputIndex = idx;
                     }
-                    const op = opEl.value || '=';
-                    const value = valEl.value || '';
-                    cases.push({ op, value });
+                    }
+
+                    cases.push({ op, value, inputIndex });
                 }
 
                 elemData.props.cases = cases;
 
-                // 3) Обновляем входы и размер
-                Elements.updateFormulaInputs(elemId, inputCount); // используем уже существующую функцию
+                // 3) Обновляем входы и размер (динамические порты)
+                Elements.updateSwitchInputs(elemId, inputCount);
                 Elements.updateElementSize(elemId);
 
-                // 4) Обновляем текст на элементе
+                // 4) Обновляем подпись
                 const symbol = elem.querySelector('.element-symbol');
                 if (symbol) {
-                    symbol.textContent = `A → case (${caseCount}), default`;
+                    const cnt = Math.max(0, inputCount - 2);
+                    symbol.textContent = `A → ${cnt} кейс(ов), default`;
                 }
 
             

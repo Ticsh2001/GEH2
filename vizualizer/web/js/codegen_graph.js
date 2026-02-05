@@ -326,62 +326,61 @@ const CodeGenGraph = {
             case 'if':
             // codegen_graph.js -> evalGraphValue(graph)
 
+            // codegen_graph.js -> evalGraphValue(graph)
+
             case 'switch': {
                 const elem = graph.elem;
                 const cases = Array.isArray(elem.props?.cases) ? elem.props.cases : [];
 
                 // --- A: особый вход (in-0) ---
-                const aGraph = graph.inputs[0]?.fromGraph;
+                const aGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
                 const aVal = aGraph ? this.evalValue(aGraph) : Optimizer.Const(0);
                 const aName = (aVal.type === 'var') ? aVal.name : String(aVal.n);
 
                 // --- default: in-1 ---
-                const defaultGraph = graph.inputs[1]?.fromGraph;
+                const defaultGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-1')?.fromGraph;
                 const defaultVal = defaultGraph
                     ? this.evalValue(defaultGraph)
                     : Optimizer.Const(0);
 
-                // --- кейсы: in-2.. ---
                 let expr = defaultVal;
 
-                // идём с конца, чтобы вложенный WHEN строился от последнего к первому
-                const totalInputs = elem.props?.inputCount || 3;
-                const caseCount = Math.max(0, totalInputs - 2);
-
-                for (let i = caseCount - 1; i >= 0; i--) {
-                    const inputIdx = i + 2; // in-2..in-(caseCount+1)
-                    const inGraph = graph.inputs.find(inp => {
-                    const portName = inp.conn.toPort; // "in-k"
-                    const idx = parseInt(portName.split('-')[1] || '0', 10);
-                    return idx === inputIdx;
-                    })?.fromGraph;
-
-                    if (!inGraph) continue; // нет входа для этого кейса
-
-                    const caseExpr = this.evalValue(inGraph);
-
+                // кейсы: в заданном порядке (сверху вниз), но строим WHEN с конца
+                for (let i = cases.length - 1; i >= 0; i--) {
                     const cfg = cases[i] || {};
                     const op = cfg.op || '=';
                     const valueStr = (cfg.value !== undefined) ? String(cfg.value) : '0';
 
-                    // cond: A <op> value
+                    const inputIndex = Number.isInteger(cfg.inputIndex) ? cfg.inputIndex : null;
+                    if (inputIndex === null) {
+                    // нет выбранного порта — пропускаем кейс
+                    continue;
+                    }
+
+                    const portName = `in-${inputIndex}`;
+                    const inGraph = graph.inputs.find(inp => inp.conn.toPort === portName)?.fromGraph;
+                    if (!inGraph) {
+                    // к этому порту ничего не подключено
+                    continue;
+                    }
+
+                    const caseExpr = this.evalValue(inGraph);
+
                     const cond = Optimizer.Cmp(aName, op, valueStr);
 
                     expr = Optimizer.When(cond, caseExpr, expr);
                 }
 
-                // теперь expr — полное WHEN-дерево
-                // добавим внешний контекст с cond-порта (если есть)
+                // контекст от cond‑порта
                 let condCtx = this.collectAllCond(graph);
                 if (condCtx) {
-                    // WHEN(cond_ctx, expr, 0)
                     expr = Optimizer.When(condCtx, expr, Optimizer.Const(0));
                 }
 
                 return { cond: null, expr };
-            }
-            default:
-                expr = Optimizer.Const(0);
+                }
+                default:
+                    expr = Optimizer.Const(0);
         }
 
         return { cond, expr };

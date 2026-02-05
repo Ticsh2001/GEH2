@@ -7,6 +7,63 @@ const Elements = {
     /**
      * Генерация HTML для элемента
      */
+    updateSwitchInputs(elemId, inputCount) {
+        const elem = document.getElementById(elemId);
+        if (!elem) return;
+
+        const portsLeft = elem.querySelector('.ports-left');
+        if (!portsLeft) return;
+
+        const elemData = AppState.elements[elemId];
+        const config = ELEMENT_TYPES[elemData.type];
+
+        // Чистим старые подключения к входам, которые больше не существуют
+        AppState.connections = AppState.connections.filter(c => {
+            if (c.toElement === elemId && c.toPort.startsWith('in-')) {
+            const portNum = parseInt(c.toPort.split('-')[1], 10);
+            return portNum < inputCount;
+            }
+            return true;
+        });
+
+        let inputsHTML = '';
+        for (let i = 0; i < inputCount; i++) {
+            let roleAttr = '';
+            let extraClass = '';
+
+            if (i === 0) {
+            roleAttr = 'data-role="switch-main"';
+            extraClass = ' switch-main-port';
+            } else if (i === 1) {
+            roleAttr = 'data-role="switch-default"';
+            extraClass = ' switch-default-port';
+            }
+
+            const type = config.inputTypes[i] ?? config.inputTypes[config.inputTypes.length - 1] ?? SIGNAL_TYPE.ANY;
+            const label =
+            config.inputLabels[i] ||
+            (i === 0 ? 'A' : i === 1 ? 'default' : `case ${i - 1}`);
+
+            inputsHTML += `
+            <div class="port input any-port${extraClass}"
+                data-port="in-${i}"
+                data-element="${elemId}"
+                data-signal-type="${type}"
+                ${roleAttr}
+                title="${label}">
+            </div>
+            `;
+        }
+
+        portsLeft.innerHTML = inputsHTML;
+
+        // навешиваем обработчики портов
+        portsLeft.querySelectorAll('.port').forEach(port =>
+            Connections.setupPortHandlers(port)
+        );
+
+        Connections.drawConnections();
+    },
         createElementHTML(elemType, elemId, x, y, props = {}, width, height) {
             const config = ELEMENT_TYPES[elemType];
             if (!config) throw new Error(`Неизвестный тип элемента: ${elemType}`);
