@@ -51,6 +51,86 @@ const CodeGenGraph = {
 
         return c;
     },
+
+    isInlineableType(type) {
+        return type === 'switch';
+    },
+
+    expandElementRefs(exprStr, currentElemId) {
+        if (!exprStr) return exprStr;
+
+        const tokenRegex = /\b[a-zA-Z_]\w*\b/g;
+        const matches = exprStr.match(tokenRegex);
+        if (!matches) return exprStr;
+
+        const seen = new Set();
+        let result = exprStr;
+
+        for (const token of matches) {
+            if (seen.has(token)) continue;
+            seen.add(token);
+
+            if (token === currentElemId) continue;
+
+            const elem = AppState.elements[token];
+            if (!elem || !this.isInlineableType(elem.type)) continue;
+
+            const refGraph = this.buildDependencyGraph(token);
+            if (!refGraph) continue;
+
+            const { cond, expr } = this.evalGraphValue(refGraph);
+            if (!expr) continue;
+
+            let embedded = expr;
+            if (cond) {
+                embedded = Optimizer.When(cond, embedded, Optimizer.Const(0));
+            }
+
+            const printed = Optimizer.printExpr(Optimizer.simplifyExpr(embedded));
+            const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            result = result.replace(new RegExp(`\\b${escaped}\\b`, 'g'), `(${printed})`);
+        }
+
+        return result;
+    },
+
+    buildSwitchExpr(graph) {
+        if (!graph) return Optimizer.Const(0);
+
+        const elem = graph.elem;
+        const cases = Array.isArray(elem.props?.cases) ? elem.props.cases : [];
+
+        const aGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
+        const aVal = aGraph ? this.evalValue(aGraph) : Optimizer.Const(0);
+        const aName = (aVal.type === 'var') ? aVal.name : String(aVal.n);
+
+        const defaultGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-1')?.fromGraph;
+        const defaultVal = defaultGraph ? this.evalValue(defaultGraph) : Optimizer.Const(0);
+
+        let expr = defaultVal;
+
+        for (let i = cases.length - 1; i >= 0; i--) {
+            const cfg = cases[i] || {};
+            const op = cfg.op || '=';
+            const valueStr = (cfg.value !== undefined) ? String(cfg.value) : '0';
+
+            const inputIndex = Number.isInteger(cfg.inputIndex) ? cfg.inputIndex : null;
+            if (inputIndex === null) continue;
+
+            const portName = `in-${inputIndex}`;
+            const inGraph = graph.inputs.find(inp => inp.conn.toPort === portName)?.fromGraph;
+            if (!inGraph) continue;
+
+            const caseExpr = this.evalValue(inGraph);
+            const cond = Optimizer.Cmp(aName, op, valueStr);
+
+            expr = Optimizer.When(cond, caseExpr, expr);
+        }
+
+        return expr;
+    },
+
+
     buildDependencyGraph(elementId) {
         const graph = {
             nodeId: elementId,
@@ -201,6 +281,18 @@ const CodeGenGraph = {
             case 'separator':
                 return this.evalValue(graph.inputs[0]?.fromGraph);
 
+            case 'switch': {
+                const exprCore = this.buildSwitchExpr(graph);
+                const condCtx = this.collectAllCond(graph);
+                let fullExpr = exprCore;
+
+                if (condCtx) {
+                    fullExpr = Optimizer.When(condCtx, fullExpr, Optimizer.Const(0));
+                }
+
+                return Optimizer.Var(Optimizer.printExpr(Optimizer.simplifyExpr(fullExpr)));
+            }
+
             default:
                 return Optimizer.Const(0);
         }
@@ -329,45 +421,11 @@ const CodeGenGraph = {
             // codegen_graph.js -> evalGraphValue(graph)
 
             case 'switch': {
-                const elem = graph.elem;
-                const cases = Array.isArray(elem.props?.cases) ? elem.props.cases : [];
-
-                // --- A: особый вход (in-0) ---
-                const aGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
-                const aVal = aGraph ? this.evalValue(aGraph) : Optimizer.Const(0);
-                const aName = (aVal.type === 'var') ? aVal.name : String(aVal.n);
-
-                // --- default: in-1 ---
-                const defaultGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-1')?.fromGraph;
-                const defaultVal = defaultGraph
-                    ? this.evalValue(defaultGraph)
-                    : Optimizer.Const(0);
-
-                let expr = defaultVal;
-
-                // кейсы: в заданном порядке (сверху вниз), но строим WHEN с конца
-                for (let i = cases.length - 1; i >= 0; i--) {
-                    const cfg = cases[i] || {};
-                    const op = cfg.op || '=';
-                    const valueStr = (cfg.value !== undefined) ? String(cfg.value) : '0';
-
-                    const inputIndex = Number.isInteger(cfg.inputIndex) ? cfg.inputIndex : null;
-                    if (inputIndex === null) continue;
-
-                    const portName = `in-${inputIndex}`;
-                    const inGraph = graph.inputs.find(inp => inp.conn.toPort === portName)?.fromGraph;
-                    if (!inGraph) continue;
-
-                    const caseExpr = this.evalValue(inGraph);
-                    const cond = Optimizer.Cmp(aName, op, valueStr);
-
-                    expr = Optimizer.When(cond, caseExpr, expr);
-                }
-
-                // ✅ ВАЖНО: возвращаем cond, а НЕ встраиваем его в expr
-                let condCtx = this.collectAllCond(graph);
+                const exprCore = this.buildSwitchExpr(graph);
+                const condCtx = this.collectAllCond(graph);
+                return { cond: condCtx, expr: exprCore };
                 
-                return { cond: condCtx, expr };
+                //#return { cond: condCtx, expr };
             }
             default:
                     expr = Optimizer.Const(0);
@@ -421,6 +479,7 @@ const CodeGenGraph = {
                 result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
+        result = this.expandElementRefs(result, elem.id);
 
         return result;
     }

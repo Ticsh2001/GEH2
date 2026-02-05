@@ -62,6 +62,7 @@ const CodeGen = {
                 result = result.replace(new RegExp(ref, 'g'), `(${refExpr})`);
             }
         }
+        result = CodeGenGraph.expandElementRefs(result, elem.id);
 
         return result;
     },

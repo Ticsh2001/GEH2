@@ -10,35 +10,186 @@
     "visualizer_state": null
   },
   "elements": {
-    "switch_5": {
-      "id": "switch_5",
-      "type": "switch",
-      "x": 782.4999999999998,
-      "y": 1144.3333333333333,
-      "width": 240,
-      "height": 143,
+    "if_25": {
+      "id": "if_25",
+      "type": "if",
+      "x": 613.5714285714284,
+      "y": 816.7142857142858,
+      "width": 120,
+      "height": 80,
       "props": {
-        "inputCount": 4,
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "const_26": {
+      "id": "const_26",
+      "type": "const",
+      "x": 363.57142857142856,
+      "y": 1061,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "if_27": {
+      "id": "if_27",
+      "type": "if",
+      "x": 616.4285714285714,
+      "y": 922.4285714285714,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "and_28": {
+      "id": "and_28",
+      "type": "and",
+      "x": 832.1428571428571,
+      "y": 872.4285714285713,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "inputCount": 2
+      }
+    },
+    "separator_29": {
+      "id": "separator_29",
+      "type": "separator",
+      "x": 1026.4285714285713,
+      "y": 872.4285714285713,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "const_32": {
+      "id": "const_32",
+      "type": "const",
+      "x": 357.8571428571428,
+      "y": 1306.7142857142858,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "const_33": {
+      "id": "const_33",
+      "type": "const",
+      "x": 366.4285714285714,
+      "y": 1468.1428571428569,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "switch_36": {
+      "id": "switch_36",
+      "type": "switch",
+      "x": 612.142857142857,
+      "y": 1396,
+      "width": 160,
+      "height": 146,
+      "props": {
+        "inputCount": 3,
         "cases": [
           {
-            "op": ">",
-            "value": "3",
-            "inputIndex": 2
-          },
-          {
             "op": "=",
-            "value": "3",
-            "inputIndex": 3
+            "value": "1",
+            "inputIndex": 2
           }
         ],
         "comment": ""
       }
     },
-    "output_6": {
-      "id": "output_6",
+    "switch_37": {
+      "id": "switch_37",
+      "type": "switch",
+      "x": 1007.8571428571428,
+      "y": 1314.5714285714284,
+      "width": 197.14285714285714,
+      "height": 146,
+      "props": {
+        "inputCount": 6,
+        "cases": [
+          {
+            "op": "<=",
+            "value": "1",
+            "inputIndex": 2
+          },
+          {
+            "op": "=",
+            "value": "2",
+            "inputIndex": 3
+          },
+          {
+            "op": "=",
+            "value": "3",
+            "inputIndex": 4
+          },
+          {
+            "op": "=",
+            "value": "4",
+            "inputIndex": 4
+          }
+        ],
+        "comment": ""
+      }
+    },
+    "if_38": {
+      "id": "if_38",
+      "type": "if",
+      "x": 1394.9999999999998,
+      "y": 1338.142857142857,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "const_39": {
+      "id": "const_39",
+      "type": "const",
+      "x": 1237.8571428571427,
+      "y": 1552.4285714285713,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": -1,
+        "comment": ""
+      }
+    },
+    "separator_40": {
+      "id": "separator_40",
+      "type": "separator",
+      "x": 1592.142857142857,
+      "y": 1332.4285714285713,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "const_41": {
+      "id": "const_41",
+      "type": "const",
+      "x": 1674.9999999999998,
+      "y": 1109.5714285714284,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": -1,
+        "comment": ""
+      }
+    },
+    "output_42": {
+      "id": "output_42",
       "type": "output",
-      "x": 1127.8333333333333,
-      "y": 1225,
+      "x": 1839.9999999999998,
+      "y": 1145.2857142857142,
       "width": 150,
       "height": 60,
       "props": {
@@ -46,11 +197,60 @@
         "outputGroup": ""
       }
     },
-    "input_signal_1": {
-      "id": "input_signal_1",
+    "const_43": {
+      "id": "const_43",
+      "type": "const",
+      "x": 1734.9999999999998,
+      "y": 1501,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": -1,
+        "comment": ""
+      }
+    },
+    "formula_44": {
+      "id": "formula_44",
+      "type": "formula",
+      "x": 1972.142857142857,
+      "y": 1638.142857142857,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "B-switch_37",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "output_45": {
+      "id": "output_45",
+      "type": "output",
+      "x": 1897.1428571428569,
+      "y": 1531,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "output_46": {
+      "id": "output_46",
+      "type": "output",
+      "x": 2171.428571428571,
+      "y": 1663.8571428571427,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "\u0412\u044b\u0445\u043e\u0434",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_23": {
+      "id": "input_signal_23",
       "type": "input-signal",
-      "x": 243,
-      "y": 1106,
+      "x": 359.99999999999994,
+      "y": 861.7142857142857,
       "width": 150,
       "height": 50,
       "props": {
@@ -61,11 +261,11 @@
         "comment": ""
       }
     },
-    "input_signal_2": {
-      "id": "input_signal_2",
+    "input_signal_24": {
+      "id": "input_signal_24",
       "type": "input-signal",
-      "x": 252,
-      "y": 1187,
+      "x": 355.71428571428567,
+      "y": 966,
       "width": 150,
       "height": 50,
       "props": {
@@ -76,11 +276,11 @@
         "comment": ""
       }
     },
-    "input_signal_3": {
-      "id": "input_signal_3",
+    "input_signal_30": {
+      "id": "input_signal_30",
       "type": "input-signal",
-      "x": 258,
-      "y": 1275,
+      "x": 364.2857142857142,
+      "y": 1267.4285714285713,
       "width": 150,
       "height": 50,
       "props": {
@@ -91,11 +291,11 @@
         "comment": ""
       }
     },
-    "input_signal_4": {
-      "id": "input_signal_4",
+    "input_signal_31": {
+      "id": "input_signal_31",
       "type": "input-signal",
-      "x": 255,
-      "y": 1361,
+      "x": 361.4285714285714,
+      "y": 1414.5714285714284,
       "width": 150,
       "height": 50,
       "props": {
@@ -106,148 +306,227 @@
         "comment": ""
       }
     },
-    "if_7": {
-      "id": "if_7",
-      "type": "if",
-      "x": 751,
-      "y": 848,
-      "width": 120,
-      "height": 80,
-      "props": {
-        "operator": ">",
-        "comment": ""
-      }
-    },
-    "const_8": {
-      "id": "const_8",
-      "type": "const",
-      "x": 555,
-      "y": 1009,
-      "width": 120,
-      "height": 60,
-      "props": {
-        "value": 0
-      }
-    },
-    "separator_9": {
-      "id": "separator_9",
-      "type": "separator",
-      "x": 954.6969696969696,
-      "y": 873.7727272727274,
-      "width": 120,
-      "height": 80,
-      "props": {}
-    },
-    "const_10": {
-      "id": "const_10",
-      "type": "const",
-      "x": 1167.1969696969695,
-      "y": 1025.439393939394,
-      "width": 120,
-      "height": 60,
-      "props": {
-        "value": 100,
-        "comment": ""
-      }
-    },
-    "output_11": {
-      "id": "output_11",
-      "type": "output",
-      "x": 1339.6969696969693,
-      "y": 1062.939393939394,
+    "input_signal_34": {
+      "id": "input_signal_34",
+      "type": "input-signal",
+      "x": 349.99999999999994,
+      "y": 1586,
       "width": 150,
-      "height": 60,
+      "height": 50,
       "props": {
-        "label": "\u0412\u044b\u0445\u043e\u0434",
-        "outputGroup": ""
+        "name": "E",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_35": {
+      "id": "input_signal_35",
+      "type": "input-signal",
+      "x": 361.4285714285714,
+      "y": 1674.5714285714287,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "F",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
       }
     }
   },
   "connections": [
     {
-      "fromElement": "input_signal_1",
+      "fromElement": "const_26",
       "fromPort": "out-0",
-      "toElement": "switch_5",
-      "toPort": "in-0",
-      "signalType": "numeric"
-    },
-    {
-      "fromElement": "input_signal_2",
-      "fromPort": "out-0",
-      "toElement": "switch_5",
+      "toElement": "if_25",
       "toPort": "in-1",
       "signalType": "numeric"
     },
     {
-      "fromElement": "input_signal_3",
+      "fromElement": "const_26",
       "fromPort": "out-0",
-      "toElement": "switch_5",
-      "toPort": "in-2",
-      "signalType": "numeric"
-    },
-    {
-      "fromElement": "input_signal_4",
-      "fromPort": "out-0",
-      "toElement": "switch_5",
-      "toPort": "in-3",
-      "signalType": "numeric"
-    },
-    {
-      "fromElement": "switch_5",
-      "fromPort": "out-0",
-      "toElement": "output_6",
-      "toPort": "in-0",
-      "signalType": "any"
-    },
-    {
-      "fromElement": "const_8",
-      "fromPort": "out-0",
-      "toElement": "if_7",
+      "toElement": "if_27",
       "toPort": "in-1",
       "signalType": "numeric"
     },
     {
-      "fromElement": "input_signal_1",
+      "fromElement": "input_signal_23",
       "fromPort": "out-0",
-      "toElement": "if_7",
+      "toElement": "if_25",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
-      "fromElement": "if_7",
+      "fromElement": "input_signal_24",
       "fromPort": "out-0",
-      "toElement": "separator_9",
+      "toElement": "if_27",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_25",
+      "fromPort": "out-0",
+      "toElement": "and_28",
       "toPort": "in-0",
       "signalType": "logic"
     },
     {
-      "fromElement": "separator_9",
+      "fromElement": "if_27",
       "fromPort": "out-0",
-      "toElement": "const_10",
-      "toPort": "cond-0",
-      "signalType": "true"
+      "toElement": "and_28",
+      "toPort": "in-1",
+      "signalType": "logic"
     },
     {
-      "fromElement": "const_10",
+      "fromElement": "and_28",
       "fromPort": "out-0",
-      "toElement": "output_11",
+      "toElement": "separator_29",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "input_signal_31",
+      "fromPort": "out-0",
+      "toElement": "switch_36",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
-      "fromElement": "separator_9",
+      "fromElement": "const_33",
+      "fromPort": "out-0",
+      "toElement": "switch_36",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_34",
+      "fromPort": "out-0",
+      "toElement": "switch_36",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_30",
+      "fromPort": "out-0",
+      "toElement": "switch_37",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_32",
+      "fromPort": "out-0",
+      "toElement": "switch_37",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "switch_36",
+      "fromPort": "out-0",
+      "toElement": "switch_37",
+      "toPort": "in-3",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "input_signal_35",
+      "fromPort": "out-0",
+      "toElement": "switch_37",
+      "toPort": "in-4",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "switch_37",
+      "fromPort": "out-0",
+      "toElement": "if_38",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "const_39",
+      "fromPort": "out-0",
+      "toElement": "if_38",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_38",
+      "fromPort": "out-0",
+      "toElement": "separator_40",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "separator_29",
+      "fromPort": "out-0",
+      "toElement": "separator_40",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "separator_29",
       "fromPort": "out-1",
-      "toElement": "switch_5",
+      "toElement": "const_41",
       "toPort": "cond-0",
       "signalType": "false"
+    },
+    {
+      "fromElement": "const_41",
+      "fromPort": "out-0",
+      "toElement": "output_42",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "separator_40",
+      "fromPort": "out-1",
+      "toElement": "const_43",
+      "toPort": "cond-0",
+      "signalType": "false"
+    },
+    {
+      "fromElement": "separator_40",
+      "fromPort": "out-0",
+      "toElement": "formula_44",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "input_signal_24",
+      "fromPort": "out-0",
+      "toElement": "formula_44",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "switch_37",
+      "fromPort": "out-0",
+      "toElement": "formula_44",
+      "toPort": "in-1",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "const_43",
+      "fromPort": "out-0",
+      "toElement": "output_45",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_44",
+      "fromPort": "out-0",
+      "toElement": "output_46",
+      "toPort": "in-0",
+      "signalType": "numeric"
     }
   ],
-  "counter": 11,
+  "counter": 46,
   "viewport": {
-    "zoom": 0.9,
-    "panX": 133.1477272727277,
-    "panY": -618.1454545454546
+    "zoom": 0.6000000000000001,
+    "panX": -47.142857142857224,
+    "panY": -420.0857142857144
   },
-  "code": "WHEN((A <= 0), WHEN((A > 3), C, WHEN((A = 3), D, B)), 0)",
+  "code": "WHEN(((A <= 0) OR (B <= 0)), -1, WHEN((((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) <= -1) AND (A > 0)) AND (B > 0)), -1, WHEN((((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) > -1) AND (A > 0)) AND (B > 0)), B-switch_37, 0)))",
   "visualizer_state": null
 }
