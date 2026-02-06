@@ -767,3 +767,22 @@ body {
 .port.switch-default-port.connected {
   background: #16a34a !important;
 }
+
+.user-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: #ccc;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+    user-select: none;
+}
+
+.user-badge:hover {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+}

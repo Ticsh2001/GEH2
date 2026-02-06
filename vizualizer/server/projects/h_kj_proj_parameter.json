@@ -7,14 +7,18 @@
     "dimension": "",
     "possibleCause": "",
     "guidelines": "",
+    "templateArgs": {},
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-02-06T09:27:48.071Z",
     "visualizer_state": null
   },
   "elements": {
     "formula_2": {
       "id": "formula_2",
       "type": "formula",
-      "x": 432,
-      "y": 205,
+      "x": 442,
+      "y": 220,
       "width": 140,
       "height": 80,
       "props": {
@@ -26,8 +30,8 @@
     "output_3": {
       "id": "output_3",
       "type": "output",
-      "x": 679,
-      "y": 243,
+      "x": 829,
+      "y": 340,
       "width": 150,
       "height": 60,
       "props": {
@@ -38,8 +42,8 @@
     "input_signal_1": {
       "id": "input_signal_1",
       "type": "input-signal",
-      "x": 166,
-      "y": 219,
+      "x": 194,
+      "y": 266,
       "width": 150,
       "height": 50,
       "props": {
@@ -69,9 +73,9 @@
   ],
   "counter": 3,
   "viewport": {
-    "zoom": 1,
-    "panX": 0,
-    "panY": 0
+    "zoom": 0.9,
+    "panX": 334.318831168831,
+    "panY": 134.05876623376622
   },
   "code": "h_proj/1000",
   "visualizer_state": null

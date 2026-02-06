@@ -47,7 +47,10 @@ const AppState = {
         possibleCause: '',
         guidelines: '',
         templateArgs: {},
-        visualizer_state: null  // НОВОЕ: состояние визуализатора
+        visualizer_state: null,  // НОВОЕ: состояние визуализатора
+        author: '',            // НОВОЕ
+        lastModifiedBy: '',    // НОВОЕ
+        lastModifiedAt: ''     // НОВОЕ
     },
     
     // Выходные сигналы (автоматически определяются)
@@ -91,6 +94,9 @@ function resetState() {
         possibleCause: '',
         guidelines: '',
         templateArgs: {},
+        author: '',            // НОВОЕ
+        lastModifiedBy: '',    // НОВОЕ
+        lastModifiedAt: '',     // НОВОЕ
         visualizer_state: null  // НОВОЕ: сбрасываем состояние визуализатора
     };
     

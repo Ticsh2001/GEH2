@@ -9,6 +9,7 @@ const App = {
      */
 init() {
     // Settings.init() вызовется внутри autoLoadFromURL, если есть ?load=
+    this.initUser();
     Settings.init().catch(console.error);
 
     this.setupPaletteDragDrop();
@@ -44,6 +45,59 @@ init() {
 
     // ===== Автозагрузка проекта из URL =====
     this.autoLoadFromURL();
+},
+
+/**
+ * Инициализация пользователя.
+ * Если имя есть в localStorage — подхватываем.
+ * Если нет — показываем ненавязчивый промпт один раз.
+ */
+initUser() {
+    let username = localStorage.getItem('lse_username');
+
+    if (!username) {
+        username = prompt('Представьтесь, пожалуйста (имя будет сохранено в проектах):');
+        if (username && username.trim()) {
+            username = username.trim();
+            localStorage.setItem('lse_username', username);
+        } else {
+            username = 'Аноним';
+            localStorage.setItem('lse_username', username);
+        }
+    }
+
+    AppState.currentUser = username;
+    this.updateUserBadge();
+
+    // Клик по бейджу — смена пользователя
+    const badge = document.getElementById('user-badge');
+    if (badge) {
+        badge.addEventListener('click', () => this.changeUser());
+    }
+},
+
+/**
+ * Смена пользователя
+ */
+changeUser() {
+    const current = AppState.currentUser || '';
+    const newName = prompt('Введите имя пользователя:', current);
+    if (newName !== null && newName.trim()) {
+        const trimmed = newName.trim();
+        localStorage.setItem('lse_username', trimmed);
+        AppState.currentUser = trimmed;
+        this.updateUserBadge();
+    }
+},
+
+/**
+ * Обновление бейджа в UI
+ */
+updateUserBadge() {
+    const el = document.getElementById('user-badge-name');
+    if (el) {
+        el.textContent = AppState.currentUser || '—';
+    }
 },
 
 async autoLoadFromURL() {

@@ -14,62 +14,73 @@
  *  4. Внешние скобки вокруг   ((a + b) - c)   → (a + b) - c
  *     всего выражения целиком
  */
+/**
+ * Косметическая чистка лишних скобок в готовом выражении.
+ * Работает ТОЛЬКО со строкой, не влияет на генерацию.
+ *
+ * Убирает:
+ *  1. Двойные скобки:        ((x + y))        → (x + y)
+ *     НО НЕ после имён функций: WHEN((x > 0), ...) — не трогаем
+ *  2. Скобки вокруг атомов:  (Сигнал) + Y     → Сигнал + Y
+ *     НО НЕ аргументы функций:  ABS(Сигнал)   — не трогаем
+ *  3. Скобки вокруг числа:   (42) + Y         → 42 + Y
+ *     НО НЕ аргументы функций:  ROUND(0)      — не трогаем
+ *  4. Внешние скобки вокруг всего выражения
+ */
 function cleanupParentheses(code) {
     if (typeof code !== 'string') return code;
 
     let prev;
-    // Несколько проходов, пока есть что чистить
     for (let pass = 0; pass < 20; pass++) {
         prev = code;
 
         // 1. Двойные скобки: (( … )) → ( … )
-        //    Ищем (( содержимое )), где содержимое сбалансировано
-        code = stripBalanced(code, /\(\(/g, '((', '))');
+        //    Пропускаем (( после идентификатора — это func((...))
+        code = stripBalanced(code);
 
-        // 2. Скобки вокруг «атома» — идентификатора или числа
-        //    Атом: буквы/цифры/точка/underscore (включая кириллицу)
-        //    НО не трогаем вызовы функций вида  name(...)
+        // 2. Скобки вокруг «атома» — идентификатора
+        //    НО НЕ трогаем func(X) — если перед ( стоит буква/цифра/)
         code = code.replace(
             /\((\s*[\w\u0400-\u04FF][\w\u0400-\u04FF.]*\s*)\)/g,
             (match, inner, offset) => {
-                const trimmed = inner.trim();
-                // Проверяем: после закрывающей скобки не должно быть «(»
-                // и перед открывающей не должно быть идентификатора (иначе это вызов функции)
-                if (offset > 0) {
-                    const charBefore = code[offset - 1];
-                    if (/[\w\u0400-\u04FF]/.test(charBefore)) {
-                        // Это аргумент функции func(X) — проверяем,
-                        // нет ли внутри просто атома
-                        return trimmed;
-                    }
+                if (offset > 0 && /[\w\u0400-\u04FF)]/.test(code[offset - 1])) {
+                    return match; // func(X) или )(X) — не трогаем
                 }
-                return trimmed;
+                return inner.trim();
             }
         );
 
-        // 3. Скобки вокруг числа (отрицательные не трогаем — там минус важен)
-        code = code.replace(/\((\s*\d+\.?\d*\s*)\)/g, (_, n) => n.trim());
+        // 3. Скобки вокруг числа
+        //    НО НЕ трогаем func(42)
+        code = code.replace(
+            /\((\s*\d+\.?\d*\s*)\)/g,
+            (match, n, offset) => {
+                if (offset > 0 && /[\w\u0400-\u04FF)]/.test(code[offset - 1])) {
+                    return match; // func(42) — не трогаем
+                }
+                return n.trim();
+            }
+        );
 
-        // Если ничего не изменилось — выходим
         if (code === prev) break;
     }
 
-    // 4. Убираем внешние скобки вокруг всего выражения, если они парные
+    // 4. Убираем внешние скобки, если обрамляют ВСЁ выражение
     code = stripOuterParens(code.trim());
 
     return code;
 }
+
 
 /* ── Вспомогательные функции ─────────────────────────── */
 
 /**
  * Убирает внешние скобки, только если они обрамляют ВСЁ выражение.
  *  "(a + b)"   → "a + b"
- *  "(a) + (b)" → без изменений (скобки не внешние)
+ *  "(a) + (b)" → без изменений
  */
 function stripOuterParens(s) {
     while (s.length > 2 && s[0] === '(' && s[s.length - 1] === ')') {
-        // Проверяем, что первая «(» закрывается именно последней «)»
         let depth = 0;
         let closesAtEnd = true;
         for (let i = 0; i < s.length; i++) {
@@ -90,17 +101,26 @@ function stripOuterParens(s) {
 }
 
 /**
- * Находит «(( … ))» со сбалансированным содержимым и заменяет на «( … )».
+ * Находит (( … )) со сбалансированным содержимым и заменяет на ( … ).
+ * КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: пропускает (( после идентификаторов,
+ * чтобы не ломать func((arg), ...) → func(arg), ...)
  */
-function stripBalanced(code, _regex, openSeq, closeSeq) {
+function stripBalanced(code) {
     let result = code;
     let idx = 0;
+
     while (idx < result.length - 1) {
-        // Ищем «((»
-        const pos = result.indexOf(openSeq, idx);
+        const pos = result.indexOf('((', idx);
         if (pos === -1) break;
 
-        // Находим конец внутреннего выражения, считая баланс от первой «(»
+        // ★ Главная защита: если перед (( стоит буква/цифра/_/кириллица,
+        //   значит это func(( — НЕ трогаем
+        if (pos > 0 && /[\w\u0400-\u04FF]/.test(result[pos - 1])) {
+            idx = pos + 1;
+            continue;
+        }
+
+        // Находим конец выражения от первой (
         let depth = 0;
         let end = -1;
         for (let i = pos; i < result.length; i++) {
@@ -115,10 +135,9 @@ function stripBalanced(code, _regex, openSeq, closeSeq) {
 
         const inner = result.slice(pos, end + 1); // включая внешние скобки
 
-        // Проверяем, что это действительно (( … ))
+        // Проверяем что это действительно (( … ))
         if (inner.length >= 4 && inner[1] === '(' && inner[inner.length - 2] === ')') {
-            // Убеждаемся, что внутренние скобки сбалансированы сами по себе
-            const candidate = inner.slice(1, -1); // убираем одну пару
+            const candidate = inner.slice(1, -1);
             let d = 0, ok = true;
             for (let i = 0; i < candidate.length; i++) {
                 if (candidate[i] === '(') d++;
@@ -127,8 +146,7 @@ function stripBalanced(code, _regex, openSeq, closeSeq) {
             }
             if (ok && d === 0) {
                 result = result.slice(0, pos) + candidate + result.slice(end + 1);
-                // Не сдвигаем idx — вдруг ещё слой
-                continue;
+                continue; // не сдвигаем idx — вдруг ещё слой
             }
         }
         idx = pos + 1;

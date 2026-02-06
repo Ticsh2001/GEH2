@@ -60,10 +60,18 @@ const Settings = {
   },
   
   async listProjects() {
+    //const r = await fetch(`${this.apiUrl}/api/project/list`);
+    //if (!r.ok) throw new Error('Failed to list projects');
+    //const data = await r.json();
+    //this.templates = data.templates || [];  // <-- обновляем кеш
+    //return data;
     const r = await fetch(`${this.apiUrl}/api/project/list`);
     if (!r.ok) throw new Error('Failed to list projects');
     const data = await r.json();
-    this.templates = data.templates || [];  // <-- обновляем кеш
+
+    // ВАЖНО: templates тут НЕ трогаем, потому что /api/project/list их не возвращает
+    // this.templates = data.templates || [];  // <-- УДАЛИТЬ
+
     return data;
   },
 

@@ -196,6 +196,19 @@ init() {
         }
     }
 
+    // Определяем автора
+    const currentUser = AppState.currentUser || 'Аноним';
+    const now = new Date().toISOString();
+
+    // Если автор не задан — это новый проект, текущий пользователь = автор
+    if (!AppState.project.author) {
+        AppState.project.author = currentUser;
+    }
+
+    // Последний редактор — всегда текущий пользователь
+    AppState.project.lastModifiedBy = currentUser;
+    AppState.project.lastModifiedAt = now;
+
     // 2. Сборка объекта проекта
     const project = {
         version: '1.0',

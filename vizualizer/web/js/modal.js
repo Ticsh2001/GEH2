@@ -930,6 +930,17 @@ const Modal = {
                     </small>
                 </div>
             </div>
+            
+            <div class="modal-row" style="margin-top:12px; padding-top:8px; border-top:1px solid #333;">
+                <small style="color:#888;">
+                    ${AppState.project.author 
+                        ? `Автор: <b>${AppState.project.author}</b>` 
+                        : 'Автор: ещё не задан (определится при сохранении)'}
+                    ${AppState.project.lastModifiedBy 
+                        ? `&nbsp;|&nbsp; Последнее изменение: <b>${AppState.project.lastModifiedBy}</b> (${AppState.project.lastModifiedAt ? new Date(AppState.project.lastModifiedAt).toLocaleString() : '—'})` 
+                        : ''}
+                </small>
+            </div>
 
 
             
