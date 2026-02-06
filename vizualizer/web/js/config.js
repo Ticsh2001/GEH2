@@ -15,7 +15,8 @@ const SIGNAL_TYPE = {
 // Типы проекта
 const PROJECT_TYPE = {
     PARAMETER: 'parameter',
-    RULE: 'rule'
+    RULE: 'rule',
+    TEMPLATE: 'template'
 };
 
 // Конфигурация элементов

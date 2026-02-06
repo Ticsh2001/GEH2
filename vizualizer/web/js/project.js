@@ -81,13 +81,14 @@ init() {
     this.projectList = [];
     this.filteredProjectList = [];
     this.selectedProjectFilename = null;
+    this.selectedProjectSource = 'projects';
 
     document.getElementById('project-cancel').addEventListener('click', () => this.closeProjectListModal());
     document.getElementById('project-refresh').addEventListener('click', () => this.refreshProjectList());
 
     document.getElementById('project-load').addEventListener('click', () => {
         if (this.selectedProjectFilename) {
-            this.loadProjectFromList(this.selectedProjectFilename);
+            this.loadProjectFromList(this.selectedProjectFilename, this.selectedProjectSource);
         }
     });
 
@@ -212,10 +213,11 @@ init() {
     };
 
     const filename = `${AppState.project.code || 'scheme'}_${AppState.project.type}.json`;
+    const target = AppState.project.type === PROJECT_TYPE.TEMPLATE ? 'templates' : 'projects';
 
     // 3. Сохранение на сервер
     try {
-        await Settings.saveProject(filename, project);
+        await Settings.saveProject(filename, project, target);
         
         // НОВОЕ: обновляем состояние в AppState после успешного сохранения
         AppState.project.visualizer_state = visualizerState;
@@ -295,6 +297,7 @@ renderProjectList() {
   const loadBtn = document.getElementById('project-load');
   loadBtn.disabled = true;
   this.selectedProjectFilename = null;
+  this.selectedProjectSource = 'projects'; // ← Сброс по умолчанию
 
   if (!this.filteredProjectList.length) {
     tbody.innerHTML = `<tr><td colspan="4" class="project-list__empty">Ничего не найдено</td></tr>`;
@@ -304,6 +307,7 @@ renderProjectList() {
   tbody.innerHTML = '';
   this.filteredProjectList.forEach((item) => {
     const tr = document.createElement('tr');
+    tr.dataset.source = item.source || 'projects';          // ← НОВОЕ
     tr.innerHTML = `
       <td>${item.code || ''}</td>
       <td>${item.description || ''}</td>
@@ -313,13 +317,15 @@ renderProjectList() {
     tr.addEventListener('click', () => {
       this.highlightRow(tr);
       this.selectedProjectFilename = item.filename;
+      this.selectedProjectSource = item.source || 'projects'; // ← НОВОЕ
       loadBtn.disabled = false;
     });
     tr.addEventListener('dblclick', () => {
       this.highlightRow(tr);
       this.selectedProjectFilename = item.filename;
+      this.selectedProjectSource = item.source || 'projects'; // ← НОВОЕ
       loadBtn.disabled = false;
-      this.loadProjectFromList(item.filename);
+      this.loadProjectFromList(item.filename, this.selectedProjectSource);
     });
     tbody.appendChild(tr);
   });
@@ -350,9 +356,9 @@ filterProjectList(query) {
   this.renderProjectList();
 },
 
-async loadProjectFromList(filename) {
+async loadProjectFromList(filename, source = 'projects') {
   try {
-    const data = await Settings.loadProject(filename);
+    const data = await Settings.loadProject(filename, source);
     this._processLoadedData(data);
     this.closeProjectListModal();
     alert(`Проект "${filename}" успешно загружен.`);

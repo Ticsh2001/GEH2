@@ -1,38 +1,49 @@
 {
   "version": "1.0",
   "project": {
-    "code": "test2",
-    "type": "parameter",
+    "code": "emplatee",
+    "type": "template",
     "description": "",
     "dimension": "",
     "possibleCause": "",
     "guidelines": "",
+    "templateArgs": {
+      "A": "ass",
+      "B": "sad"
+    },
     "visualizer_state": null
   },
   "elements": {
-    "formula_4": {
-      "id": "formula_4",
+    "formula_3": {
+      "id": "formula_3",
       "type": "formula",
-      "x": 298,
-      "y": 1059,
+      "x": 460,
+      "y": 1048,
       "width": 140,
-      "height": 136,
+      "height": 108,
       "props": {
-        "expression": "A+K+D",
-        "inputCount": 3,
-        "portNameMap": {
-          "in-0": "A",
-          "in-1": "K",
-          "in-2": "D"
-        },
+        "expression": "A+B/3",
+        "inputCount": 2,
         "comment": ""
+      }
+    },
+    "output_4": {
+      "id": "output_4",
+      "type": "output",
+      "x": 679,
+      "y": 1110,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
       }
     },
     "input_signal_1": {
       "id": "input_signal_1",
       "type": "input-signal",
-      "x": -32,
-      "y": 985,
+      "x": 148,
+      "y": 1020,
       "width": 150,
       "height": 50,
       "props": {
@@ -46,27 +57,12 @@
     "input_signal_2": {
       "id": "input_signal_2",
       "type": "input-signal",
-      "x": 20,
-      "y": 1139,
+      "x": 125,
+      "y": 1089,
       "width": 150,
       "height": 50,
       "props": {
-        "name": "K",
-        "signalType": "undefined",
-        "dimension": "",
-        "description": "",
-        "comment": ""
-      }
-    },
-    "input_signal_3": {
-      "id": "input_signal_3",
-      "type": "input-signal",
-      "x": -4,
-      "y": 1237,
-      "width": 150,
-      "height": 50,
-      "props": {
-        "name": "D",
+        "name": "B",
         "signalType": "undefined",
         "dimension": "",
         "description": "",
@@ -78,22 +74,22 @@
     {
       "fromElement": "input_signal_1",
       "fromPort": "out-0",
-      "toElement": "formula_4",
+      "toElement": "formula_3",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
       "fromElement": "input_signal_2",
       "fromPort": "out-0",
-      "toElement": "formula_4",
+      "toElement": "formula_3",
       "toPort": "in-1",
       "signalType": "numeric"
     },
     {
-      "fromElement": "input_signal_3",
+      "fromElement": "formula_3",
       "fromPort": "out-0",
-      "toElement": "formula_4",
-      "toPort": "in-2",
+      "toElement": "output_4",
+      "toPort": "in-0",
       "signalType": "numeric"
     }
   ],
@@ -103,6 +99,6 @@
     "panX": 100,
     "panY": -804
   },
-  "code": "/* Нет выходов */",
+  "code": "A+B/3",
   "visualizer_state": null
 }

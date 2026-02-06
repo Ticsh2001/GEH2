@@ -35,15 +35,14 @@ const Settings = {
     return await r.json();
   },
 
-  async saveProject(filename, projectData) {
-    if (!filename.endsWith('.json')) {
-      filename += '.json';
-    }
+  async saveProject(filename, projectData, target = 'projects') {
+      if (!filename.endsWith('.json')) filename += '.json';
     const r = await fetch(`${this.apiUrl}/api/project/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        filename: filename,
+        filename,
+        target,
         content: projectData
       })
     });
@@ -54,7 +53,9 @@ const Settings = {
   async listProjects() {
     const r = await fetch(`${this.apiUrl}/api/project/list`);
     if (!r.ok) throw new Error('Failed to list projects');
-    return r.json();
+    const data = await r.json();
+    this.templates = data.templates || [];  // <-- обновляем кеш
+    return data;
   },
 
   async fetchFormulaTemplates() {
@@ -63,11 +64,11 @@ const Settings = {
     return await r.json();
   },
 
-  async loadProject(filename) {
+  async loadProject(filename, source = 'projects') {
     if (!filename.endsWith('.json')) {
       filename += '.json';
     }
-    const r = await fetch(`${this.apiUrl}/api/project/load/${encodeURIComponent(filename)}`);
+    const r = await fetch(`${this.apiUrl}/api/project/load/${encodeURIComponent(filename)}?source=${source}`);
     if (!r.ok) {
       if (r.status === 404) {
         throw new Error(`Project "${filename}" not found (404)`);

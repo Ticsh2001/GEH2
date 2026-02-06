@@ -46,6 +46,7 @@ const AppState = {
         dimension: '',
         possibleCause: '',
         guidelines: '',
+        templateArgs: {},
         visualizer_state: null  // НОВОЕ: состояние визуализатора
     },
     
@@ -89,6 +90,7 @@ function resetState() {
         dimension: '',
         possibleCause: '',
         guidelines: '',
+        templateArgs: {},
         visualizer_state: null  // НОВОЕ: сбрасываем состояние визуализатора
     };
     

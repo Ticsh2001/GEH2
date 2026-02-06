@@ -1,38 +1,49 @@
 {
   "version": "1.0",
   "project": {
-    "code": "test2",
-    "type": "parameter",
-    "description": "",
+    "code": "temp2",
+    "type": "template",
+    "description": "sdasdsds",
     "dimension": "",
     "possibleCause": "",
     "guidelines": "",
+    "templateArgs": {
+      "A": "asdas",
+      "B": "asdasds"
+    },
     "visualizer_state": null
   },
   "elements": {
-    "formula_4": {
-      "id": "formula_4",
+    "formula_3": {
+      "id": "formula_3",
       "type": "formula",
-      "x": 298,
-      "y": 1059,
+      "x": 542,
+      "y": 1076.5,
       "width": 140,
-      "height": 136,
+      "height": 108,
       "props": {
-        "expression": "A+K+D",
-        "inputCount": 3,
-        "portNameMap": {
-          "in-0": "A",
-          "in-1": "K",
-          "in-2": "D"
-        },
+        "expression": "A-B-100",
+        "inputCount": 2,
         "comment": ""
+      }
+    },
+    "output_4": {
+      "id": "output_4",
+      "type": "output",
+      "x": 719,
+      "y": 1132.5,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
       }
     },
     "input_signal_1": {
       "id": "input_signal_1",
       "type": "input-signal",
-      "x": -32,
-      "y": 985,
+      "x": 291,
+      "y": 1024.5,
       "width": 150,
       "height": 50,
       "props": {
@@ -46,27 +57,12 @@
     "input_signal_2": {
       "id": "input_signal_2",
       "type": "input-signal",
-      "x": 20,
-      "y": 1139,
+      "x": 284,
+      "y": 1136.5,
       "width": 150,
       "height": 50,
       "props": {
-        "name": "K",
-        "signalType": "undefined",
-        "dimension": "",
-        "description": "",
-        "comment": ""
-      }
-    },
-    "input_signal_3": {
-      "id": "input_signal_3",
-      "type": "input-signal",
-      "x": -4,
-      "y": 1237,
-      "width": 150,
-      "height": 50,
-      "props": {
-        "name": "D",
+        "name": "B",
         "signalType": "undefined",
         "dimension": "",
         "description": "",
@@ -78,22 +74,22 @@
     {
       "fromElement": "input_signal_1",
       "fromPort": "out-0",
-      "toElement": "formula_4",
+      "toElement": "formula_3",
       "toPort": "in-0",
       "signalType": "numeric"
     },
     {
       "fromElement": "input_signal_2",
       "fromPort": "out-0",
-      "toElement": "formula_4",
+      "toElement": "formula_3",
       "toPort": "in-1",
       "signalType": "numeric"
     },
     {
-      "fromElement": "input_signal_3",
+      "fromElement": "formula_3",
       "fromPort": "out-0",
-      "toElement": "formula_4",
-      "toPort": "in-2",
+      "toElement": "output_4",
+      "toPort": "in-0",
       "signalType": "numeric"
     }
   ],
@@ -101,8 +97,8 @@
   "viewport": {
     "zoom": 1,
     "panX": 100,
-    "panY": -804
+    "panY": -804.5
   },
-  "code": "/* Нет выходов */",
+  "code": "A-B-100",
   "visualizer_state": null
 }

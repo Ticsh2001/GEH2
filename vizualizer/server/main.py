@@ -435,6 +435,103 @@ def resolve_signal_dependencies(
     
     return base_signals, resolved
 
+def get_storage_path(filename: str, storage: str = "projects") -> str:
+    key_map = {
+        "projects": "projectDataFolder",
+        "templates": "templateDataFolder"
+    }
+    key = key_map.get(storage)
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown storage")
+    folder = STATE["settings"].get(key)
+    if not folder:
+        raise HTTPException(status_code=500, detail=f"{key} not configured")
+
+    base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    os.makedirs(base_dir, exist_ok=True)
+
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    path = os.path.join(base_dir, filename)
+    if not path.startswith(base_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt")
+
+    return path
+
+def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
+    """Обновляет или добавляет шаблон в formula_templates.json на основе сохранённого проекта-шаблона."""
+    project_meta = content.get("project") or {}
+    template_name = project_meta.get("code", "").strip()
+    if not template_name:
+        print("[WARN] Template project saved without code (name) — skip template update.")
+        return
+
+    # Определяем список входов
+    elements = content.get("elements", {}) or {}
+    input_signals = []
+    for elem in elements.values():
+        if elem.get("type") == "input-signal":
+            signal_name = (elem.get("props") or {}).get("name")
+            if signal_name:
+                input_signals.append(signal_name)
+
+    # Удаляем дубли, сохраняем порядок добавления
+    seen = set()
+    ordered_inputs = []
+    for name in input_signals:
+        if name not in seen:
+            ordered_inputs.append(name)
+            seen.add(name)
+
+    args_descriptions = project_meta.get("templateArgs") or {}
+    args = {}
+    arg_desc_lines = []
+    for name in ordered_inputs:
+        desc = (args_descriptions.get(name) or "").strip()
+        arg_entry = {}
+        if desc:
+            arg_entry["description"] = desc
+            arg_desc_lines.append(f"{name} - {desc}")
+        else:
+            arg_desc_lines.append(f"{name} -")
+        args[name] = arg_entry
+
+    general_description = (project_meta.get("description") or "").strip()
+    full_description_parts = []
+    if general_description:
+        full_description_parts.append(general_description)
+    if arg_desc_lines:
+        full_description_parts.extend(arg_desc_lines)
+    full_description = "; ".join(full_description_parts)
+
+    entry = {
+        "name": template_name,
+        "args": args,
+        "body": content.get("code", ""),
+        "description": full_description
+    }
+
+    templates_data = load_templates()
+    templates = templates_data.get("templates", [])
+    found = False
+    updated = []
+    for tpl in templates:
+        if tpl.get("name") == template_name:
+            updated.append(entry)
+            found = True
+        else:
+            updated.append(tpl)
+    if not found:
+        updated.append(entry)
+
+    templates_data["templates"] = updated
+    with open(TEMPLATES_PATH, "w", encoding="utf-8") as f:
+        json.dump(templates_data, f, ensure_ascii=False, indent=2)
+
+    STATE["templates"] = templates_data
+    print(f"[OK] Template '{template_name}' saved/updated in formula_templates.json")
+
 
 def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
     """Топологическая сортировка синтетических сигналов"""
@@ -503,6 +600,11 @@ def startup():
     if not folder:
         raise RuntimeError("settings.json: signalDataFolder is required")
     
+    template_dir = settings.get("templateDataFolder")
+    if template_dir and not os.path.isabs(template_dir):
+        template_dir = os.path.normpath(os.path.join(BASE_DIR, template_dir))
+    os.makedirs(template_dir, exist_ok=True)
+    
     refresh_signals_cache()
     STATE["templates"] = load_templates()
     STATE["signal_index"] = load_signal_index(settings.get("signalArchiveFolder"))
@@ -556,58 +658,95 @@ def api_formula_templates():
 # API — ПРОЕКТЫ
 # =============================================================================
 
-@app.get("/api/project/list")
-def list_projects():
-    """Список всех проектов"""
-    folder = STATE["settings"].get("projectDataFolder")
-    if not folder:
-        raise HTTPException(status_code=500, detail="Project folder not configured")
-
-    project_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    os.makedirs(project_dir, exist_ok=True)
-
-    projects = []
-    for fname in sorted(os.listdir(project_dir)):
+def collect_projects(directory: str, source_label: str) -> list[dict]:
+    items = []
+    if not directory or not os.path.isdir(directory):
+        return items
+    for fname in sorted(os.listdir(directory)):
         if not fname.endswith(".json"):
             continue
-        path = os.path.join(project_dir, fname)
+        path = os.path.join(directory, fname)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
         except Exception:
             continue
-        project_meta = payload.get("project", {})
-        projects.append({
+        project_meta = payload.get("project", {}) or {}
+        items.append({
             "filename": fname,
             "code": project_meta.get("code") or project_meta.get("tagname") or "",
             "description": project_meta.get("description") or "",
-            "type": project_meta.get("type") or ""
+            "type": project_meta.get("type") or "",
+            "source": source_label
         })
+    return items
+
+@app.get("/api/project/list")
+def list_projects():
+    def collect(directory_key: str, source_label: str) -> list[dict]:
+        folder = STATE["settings"].get(directory_key)
+        if not folder:
+            return []
+        base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+        if not os.path.isdir(base_dir):
+            return []
+        items = []
+        for fname in sorted(os.listdir(base_dir)):
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(base_dir, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                continue
+            project_meta = payload.get("project", {}) or {}
+            items.append({
+                "filename": fname,
+                "code": project_meta.get("code") or project_meta.get("tagname") or "",
+                "description": project_meta.get("description") or "",
+                "type": project_meta.get("type") or "",
+                "source": source_label
+            })
+        return items
+
+    projects = collect("projectDataFolder", "projects")
+    projects.extend(collect("templateDataFolder", "templates"))
     return {"projects": projects}
 
 
 @app.post("/api/project/save")
 async def save_project(request: Request):
-    """Сохраняет проект"""
     try:
         data = await request.json()
         filename = data.get("filename")
         content = data.get("content")
+        target = data.get("target", "projects")  # ← новый аргумент
 
         if not filename or not content:
             raise HTTPException(status_code=400, detail="Filename and content are required")
-        
-        path = get_project_path(filename)
-        
+
+        project_meta = content.get("project") or {}
+        project_type = project_meta.get("type", "parameter")
+
+        # Если проект помечен как шаблон — сохраняем в templates
+        if project_type == "template":
+            target = "templates"
+
+        path = get_storage_path(filename, storage=target)  # ← путь в нужную папку
+
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(content, f, indent=2)
-        
-        # Обновляем кэш сигналов
+            json.dump(content, f, ensure_ascii=False, indent=2)
+
+        # Если это шаблон, обновляем formula_templates.json
+        if project_type == "template":
+            upsert_formula_template_from_project(content)
+
+        # Обновляем кэш сигналов (проекты-шаблоны могут тоже появляться в описаниях)
         refresh_signals_cache()
-        
-        print(f"[OK] Project saved: {filename}, signals cache refreshed: {len(STATE['signals'])} signals")
+
         return {"status": "ok", "message": f"Project saved to {filename}"}
-        
+
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -616,17 +755,14 @@ async def save_project(request: Request):
 
 
 @app.get("/api/project/load/{filename}")
-def load_project(filename: str):
+def load_project(filename: str, source: str = "projects"):
     """Загружает проект"""
     try:
-        path = get_project_path(filename)
-        
+        path = get_storage_path(filename, storage=source)
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Project not found")
-
         with open(path, "r", encoding="utf-8") as f:
             content = json.load(f)
-            
         return content
         
     except HTTPException as e:

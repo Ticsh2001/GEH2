@@ -883,6 +883,12 @@ const Modal = {
                         <div class="type-icon">📋</div>
                         <div class="type-name">Правило</div>
                         <div class="type-desc">Логическое условие</div>
+                        <div class="type-desc">Формула для повторного использования</div>
+                    </div>
+                    <div class="project-type-btn ${project.type === PROJECT_TYPE.TEMPLATE ? 'active' : ''}" data-type="${PROJECT_TYPE.TEMPLATE}">
+                        <div class="type-icon">🧩</div>
+                        <div class="type-name">Шаблон</div>
+                        <div class="type-desc">Формула для повторного использования</div>
                     </div>
                 </div>
             </div>
@@ -908,9 +914,49 @@ const Modal = {
                     <textarea id="project-guidelines" placeholder="Инструкции и рекомендации при срабатывании правила">${project.guidelines || ''}</textarea>
                 </div>
             </div>
+
+            <div id="template-fields" class="conditional-fields ${project.type === PROJECT_TYPE.TEMPLATE ? 'visible' : ''}">
+                <div class="modal-row">
+                    <label>Описание шаблона:</label>
+                    <textarea id="project-template-description"
+                            placeholder="Общее описание и контекст применения шаблона">${project.type === PROJECT_TYPE.TEMPLATE ? (project.description || '') : ''}</textarea>
+                </div>
+
+                <div class="modal-row">
+                    <label>Параметры шаблона:</label>
+                    <div id="template-args-container" class="template-args-list"></div>
+                    <small style="color:#999;">
+                    Заполни описание каждого входного сигнала — оно попадёт в шаблон формулы.
+                    </small>
+                </div>
+            </div>
+
+
             
             ${outputsHtml}
         `;
+
+        const templateArgsContainer = content.querySelector('#template-args-container');
+        if (templateArgsContainer) {
+        const inputs = [...new Set(
+            Object.values(AppState.elements)
+            .filter(el => el?.type === 'input-signal')
+            .map(el => el.props?.name?.trim() || el.id)
+            .filter(Boolean)
+        )];
+
+        if (!inputs.length) {
+            templateArgsContainer.innerHTML = '<div style="color:#888;">В проекте пока нет входных сигналов.</div>';
+        } else {
+            const storedArgs = AppState.project.templateArgs || {};
+            templateArgsContainer.innerHTML = inputs.map(name => `
+            <div class="template-arg-row" data-template-arg="${name}">
+                <span class="template-arg-label">${name}</span>
+                <textarea class="template-arg-description" placeholder="Описание для ${name}">${storedArgs[name] || ''}</textarea>
+            </div>
+            `).join('');
+        }
+        }
         
         // Обработчики переключения типа
         content.querySelectorAll('.project-type-btn').forEach(btn => {
@@ -921,6 +967,7 @@ const Modal = {
                 const type = btn.dataset.type;
                 document.getElementById('parameter-fields').classList.toggle('visible', type === PROJECT_TYPE.PARAMETER);
                 document.getElementById('rule-fields').classList.toggle('visible', type === PROJECT_TYPE.RULE);
+                document.getElementById('template-fields').classList.toggle('visible', type === PROJECT_TYPE.TEMPLATE);
             });
         });
         
@@ -933,20 +980,35 @@ const Modal = {
     saveProjectProperties() {
         const activeTypeBtn = document.querySelector('.project-type-btn.active');
         const type = activeTypeBtn ? activeTypeBtn.dataset.type : PROJECT_TYPE.PARAMETER;
-
+        const description = document.getElementById('project-description')?.value || '';
         AppState.project.code = document.getElementById('project-code').value;
         AppState.project.type = type;
+
+        
 
         if (type === PROJECT_TYPE.PARAMETER) {
             AppState.project.dimension = document.getElementById('project-dimension').value;
             AppState.project.description = document.getElementById('project-description').value || '';            
             AppState.project.possibleCause = '';
             AppState.project.guidelines = '';
-        } else {
+        } else if (type === PROJECT_TYPE.RULE) {
             AppState.project.dimension = '';
             AppState.project.description = '';
             AppState.project.possibleCause = document.getElementById('project-possible-cause').value;
             AppState.project.guidelines = document.getElementById('project-guidelines').value;
+        } else if (type === PROJECT_TYPE.TEMPLATE) {
+            AppState.project.description = document.getElementById('project-template-description').value || '';
+            AppState.project.dimension = '';
+            AppState.project.possibleCause = '';
+            AppState.project.guidelines = '';
+
+            const argDescriptions = {};
+            document.querySelectorAll('[data-template-arg]').forEach(row => {
+            const argName = row.dataset.templateArg;
+            const textarea = row.querySelector('.template-arg-description');
+            argDescriptions[argName] = textarea?.value?.trim() || '';
+            });
+            AppState.project.templateArgs = argDescriptions;
         }
 
         this.hideModal('project-modal-overlay');

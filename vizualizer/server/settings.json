@@ -1,6 +1,7 @@
 {
   "signalDataFolder": "signals",
   "projectDataFolder": "projects",
+  "templateDataFolder": "data/templates",
   "signalArchiveFolder": "archive",
   "visualizerPort": 8501
 }
