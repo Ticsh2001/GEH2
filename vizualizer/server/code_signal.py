@@ -176,26 +176,67 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
     HISTORYMIN = lambda n, p: _history_apply(n, p, lambda r: r.min())
     HISTORYDIFF = lambda n, p: _history_apply(n, p, lambda r: r.max() - r.min())
 
+# code_signal.py
+
     def HISTORYGRADIENT(param_name, period):
+        """
+        Возвращает коэффициент наклона (a) линейной регрессии y = a*x + b
+        по значениям param_name за предшествующие `period` минут.
+
+        Поддерживает:
+        - datetime-индекс: period интерпретируется как минуты (time-based rolling)
+            и наклон возвращается в единицах "значение за минуту".
+        - non-datetime индекс: period интерпретируется как количество точек (integer window),
+            и наклон возвращается в "значение за индексный шаг".
+        """
         s = _history_series(param_name)
-        window = _history_window(period)
-        if s is None or window is None:
+        if s is None:
             return pd.Series(np.nan, index=index)
 
+        # проверяем period
+        try:
+            minutes = int(period)
+        except Exception:
+            return pd.Series(np.nan, index=index)
+
+        if minutes <= 0:
+            return pd.Series(np.nan, index=index)
+
+        # функция, вычисляющая наклон по подсерии (сработает для любого окна)
         def slope(window_series: pd.Series):
             valid = window_series.dropna()
             if len(valid) < 2:
                 return np.nan
-            x = valid.index.view(np.int64).astype(float) / 1e9
+
+            # x: времена в минутах (если datetime), иначе последовательные индексы
+            if isinstance(valid.index, (pd.DatetimeIndex, pd.TimedeltaIndex, pd.PeriodIndex)):
+                # индекс в nanoseconds -> в минуты: /1e9 (сек) / 60
+                x = valid.index.view(np.int64).astype(float) / 1e9 / 60.0
+            else:
+                # используем относительные индексы 0..n-1 (шаги)
+                x = np.arange(len(valid), dtype=float)
+
             y = valid.values.astype(float)
+
             x_mean = x.mean()
             y_mean = y.mean()
             denom = np.sum((x - x_mean) ** 2)
             if denom == 0:
                 return np.nan
-            return np.sum((x - x_mean) * (y - y_mean)) / denom
 
-        return s.rolling(window).apply(slope, raw=False)
+            num = np.sum((x - x_mean) * (y - y_mean))
+            return num / denom
+
+        # Выбираем rolling: если datetime-индекс — time-based, иначе window по числу точек
+        if isinstance(s.index, (pd.DatetimeIndex, pd.TimedeltaIndex, pd.PeriodIndex)):
+            window = f"{minutes}min"
+            rolling = s.rolling(window=window, min_periods=2)
+        else:
+            rolling = s.rolling(window=minutes, min_periods=2)
+
+        # Возвращаем Series с применённой функцией
+        return rolling.apply(slope, raw=False)
+
 
     def ROUND(a, b=0):
         a_values = _ensure_series(a).values

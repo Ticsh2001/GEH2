@@ -527,6 +527,6 @@
     "panX": -196.89166666666688,
     "panY": -625.8916666666668
   },
-  "code": "WHEN(((A <= 0) OR (B <= 0)), -1, WHEN((((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) <= -1) AND (A > 0)) AND (B > 0)), -1, WHEN((((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) > -1) AND (A > 0)) AND (B > 0)), B-(WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0))))), 0)))",
+  "code": "WHEN((A <= 0) OR (B <= 0), -1, WHEN((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) <= -1) AND (A > 0) AND (B > 0), -1, WHEN((WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0)))) > -1) AND (A > 0) AND (B > 0), B-(WHEN((C <= 1), 0, WHEN((C = 2), WHEN((D = 1), E, 0), WHEN((C = 3), F, WHEN((C = 4), F, 0))))), 0)))",
   "visualizer_state": null
 }
