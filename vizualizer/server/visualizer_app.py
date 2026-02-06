@@ -9,12 +9,468 @@ import plotly.graph_objects as go
 from typing import List
 from datetime import datetime, time
 
-from code_signal import compute_code_signal, sanitize_numeric_column
+from code_signal import compute_code_signal, sanitize_numeric_column, evaluate_code_expression, CodeEvaluationError
 from visualizer_state import (
     create_visualizer_state, 
     load_visualizer_state,
     STATE_VERSION
 )
+
+
+def compute_streaming_signal_streaming_forward(
+    formula: str,
+    df_base: pd.DataFrame,
+    signal_name: str,
+) -> pd.Series:
+    """
+    Потоковый (однопроходный) расчёт самоссылающегося сигнала.
+    Идём по индексу слева направо, на каждом шаге подаём уже посчитанную
+    часть сигнала (для PREV/HISTORY от самого себя).
+    """
+    # Базовые данные и индекс
+    df_work = df_base.copy()
+    idx = df_work.index
+    n = len(idx)
+
+    # Буфер для результата
+    result = pd.Series(np.nan, index=idx, name=signal_name)
+
+    # Идём по времени слева направо
+    for i in range(n):
+        # На каждом шаге подставляем уже вычисленные значения сигнала (до текущего момента)
+        df_work_current = df_work.iloc[: i + 1].copy()
+        df_work_current[signal_name] = result.iloc[: i].reindex(df_work_current.index)
+        # В текущем шаге ещё нет значения -> пусть будет NaN на конце
+        # evaluate_code_expression посчитает весь кусок до текущего индекса
+        try:
+            series_step, _ = evaluate_code_expression(formula, df_work_current)
+        except Exception as e:
+            raise CodeEvaluationError(f"Ошибка на шаге {i} ({idx[i]}): {e}") from e
+
+        # Берём значение в текущей точке времени
+        val_i = series_step.iloc[-1]
+        result.iat[i] = val_i
+
+    return result
+
+def compute_streaming_signal(
+    formula: str,
+    df_base: pd.DataFrame,
+    signal_name: str,
+) -> pd.Series:
+    """
+    Потоковый расчёт самоссылающегося сигнала.
+    Все зависимости уже в df_base (посчитаны пакетно).
+    Один проход по строкам, O(n).
+    """
+    import re
+    from code_signal import sanitize_numeric_column
+
+    df_work = df_base.copy()
+    df_work[signal_name] = np.nan
+
+    index = df_work.index
+    n = len(index)
+
+    # Нормализуем числовые колонки один раз
+    for col in df_work.columns:
+        df_work[col] = sanitize_numeric_column(df_work[col])
+
+    result = np.full(n, np.nan, dtype=np.float64)
+
+    # numpy-массивы для быстрого доступа
+    col_arrays = {}
+    for col in df_work.columns:
+        col_arrays[col] = df_work[col].values
+    col_arrays[signal_name] = result
+
+    # Безопасные имена сигналов
+    safe_name_map = {}
+    used_safe = set()
+    sorted_signals = sorted(col_arrays.keys(), key=len, reverse=True)
+
+    for idx_s, sig in enumerate(sorted_signals):
+        base = re.sub(r"\W", "_", sig)
+        if not base or not re.match(r"[A-Za-z_]", base):
+            base = f"SIG_{idx_s}"
+        while base in used_safe:
+            base += "_"
+        used_safe.add(base)
+        safe_name_map[sig] = base
+
+    # Замена имён сигналов в формуле
+    def replace_signal_names(expr):
+        parts = []
+        pos = 0
+        in_str = False
+        str_ch = ""
+        while pos < len(expr):
+            ch = expr[pos]
+            if in_str:
+                parts.append(ch)
+                if ch == str_ch and (pos == 0 or expr[pos - 1] != "\\"):
+                    in_str = False
+                pos += 1
+                continue
+            if ch in ("'", '"'):
+                in_str = True
+                str_ch = ch
+                parts.append(ch)
+                pos += 1
+                continue
+            matched = None
+            for name in sorted_signals:
+                if expr.startswith(name, pos):
+                    matched = name
+                    break
+            if matched:
+                parts.append(safe_name_map[matched])
+                pos += len(matched)
+            else:
+                parts.append(ch)
+                pos += 1
+        return "".join(parts)
+
+    def normalize_expr(expr):
+        expr = re.sub(r"\bAND\b", "&", expr, flags=re.IGNORECASE)
+        expr = re.sub(r"\bOR\b", "|", expr, flags=re.IGNORECASE)
+        expr = re.sub(r"\bNOT\b", "~", expr, flags=re.IGNORECASE)
+        expr = expr.replace("<>", "!=")
+        expr = re.sub(r"(?<![<>=!])=(?![<>=])", "==", expr)
+        return expr
+
+    normalized = normalize_expr(formula)
+    safe_formula = replace_signal_names(normalized)
+
+    safe_self = safe_name_map[signal_name]
+
+    # =========================================================================
+    # Подмена PREV / HISTORY*(self, period) → специальные токены
+    # =========================================================================
+
+    # PREV(self) → __prev_self__
+    safe_formula = re.sub(
+        r"PREV\s*\(\s*" + re.escape(safe_self) + r"\s*\)",
+        "__prev_self__",
+        safe_formula,
+        flags=re.IGNORECASE,
+    )
+
+    # PREV(other_signal) → __prev_OTHER__
+    # Собираем все PREV(safe_name) кроме self
+    prev_other_map = {}
+    for orig, safe in safe_name_map.items():
+        if orig == signal_name:
+            continue
+        pat = re.compile(
+            r"PREV\s*\(\s*" + re.escape(safe) + r"\s*\)", re.IGNORECASE
+        )
+        token = f"__prev_{safe}__"
+        if pat.search(safe_formula):
+            prev_other_map[orig] = token
+            safe_formula = pat.sub(token, safe_formula)
+
+    # HISTORY*(self, period) → __history{func}_self_{period}__
+    history_self_specs = []  # (func_name, period, token)
+    for func_name in [
+        "HISTORYAVG", "HISTORYSUM", "HISTORYCOUNT",
+        "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT",
+    ]:
+        pat = re.compile(
+            func_name + r"\s*\(\s*" + re.escape(safe_self) + r"\s*,\s*(\d+)\s*\)",
+            re.IGNORECASE,
+        )
+        for m in pat.finditer(safe_formula):
+            period = int(m.group(1))
+            token = f"__hist_{func_name}_{period}__"
+            history_self_specs.append((func_name, period, token))
+        safe_formula = pat.sub(
+            lambda m: f"__hist_{func_name}_{int(m.group(1))}__",
+            safe_formula,
+        )
+
+    # HISTORY*(other, period) → __history{func}_other_{period}__
+    history_other_specs = []  # (func_name, orig_signal, period, token)
+    for orig, safe in safe_name_map.items():
+        if orig == signal_name:
+            continue
+        for func_name in [
+            "HISTORYAVG", "HISTORYSUM", "HISTORYCOUNT",
+            "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT",
+        ]:
+            pat = re.compile(
+                func_name + r"\s*\(\s*" + re.escape(safe) + r"\s*,\s*(\d+)\s*\)",
+                re.IGNORECASE,
+            )
+            for m in pat.finditer(safe_formula):
+                period = int(m.group(1))
+                token = f"__hist_{func_name}_{safe}_{period}__"
+                history_other_specs.append((func_name, orig, period, token))
+            safe_formula = pat.sub(
+                lambda m, fn=func_name, s=safe: f"__hist_{fn}_{s}_{int(m.group(1))}__",
+                safe_formula,
+            )
+
+    # GETPOINT → NaN
+    safe_formula = re.sub(
+        r"GETPOINT\s*\([^)]*\)", "np.nan", safe_formula, flags=re.IGNORECASE
+    )
+
+    # Компилируем один раз
+    compiled = compile(safe_formula, "<streaming_formula>", "eval")
+
+    # =========================================================================
+    # Предвычисление HISTORY для НЕ-self сигналов (они полностью известны)
+    # =========================================================================
+    precomputed_history_other = {}
+    for func_name, orig, period, token in history_other_specs:
+        arr = col_arrays[orig]
+        series = pd.Series(arr, index=index)
+        if func_name == "HISTORYAVG":
+            rolled = series.rolling(period, min_periods=1).mean()
+        elif func_name == "HISTORYSUM":
+            rolled = series.rolling(period, min_periods=1).sum()
+        elif func_name == "HISTORYCOUNT":
+            rolled = series.rolling(period, min_periods=1).count()
+        elif func_name == "HISTORYMAX":
+            rolled = series.rolling(period, min_periods=1).max()
+        elif func_name == "HISTORYMIN":
+            rolled = series.rolling(period, min_periods=1).min()
+        elif func_name == "HISTORYDIFF":
+            r_max = series.rolling(period, min_periods=1).max()
+            r_min = series.rolling(period, min_periods=1).min()
+            rolled = r_max - r_min
+        elif func_name == "HISTORYGRADIENT":
+            rolled = _precompute_gradient(series, period)
+        else:
+            rolled = pd.Series(np.nan, index=index)
+        precomputed_history_other[token] = rolled.values
+
+    # Предвычисление PREV для НЕ-self сигналов
+    precomputed_prev_other = {}
+    for orig, token in prev_other_map.items():
+        arr = col_arrays[orig]
+        shifted = np.empty(n, dtype=np.float64)
+        shifted[0] = np.nan
+        shifted[1:] = arr[:-1]
+        precomputed_prev_other[token] = shifted
+
+    # =========================================================================
+    # Кольцевые буферы для HISTORY*(self)
+    # =========================================================================
+    ring_buffers = {}
+    for func_name, period, token in history_self_specs:
+        ring_buffers[token] = {
+            "func": func_name,
+            "period": period,
+            "buffer": np.full(period, np.nan, dtype=np.float64),
+            "pos": 0,
+            "count": 0,
+        }
+
+    def ring_push(rb, value):
+        rb["buffer"][rb["pos"]] = value
+        rb["pos"] = (rb["pos"] + 1) % rb["period"]
+        if rb["count"] < rb["period"]:
+            rb["count"] += 1
+
+    def ring_compute(rb):
+        buf = rb["buffer"]
+        cnt = rb["count"]
+        if cnt == 0:
+            return np.nan
+        window = buf[:cnt] if cnt < rb["period"] else buf
+        valid = window[~np.isnan(window)]
+        if len(valid) == 0:
+            return np.nan
+
+        func = rb["func"]
+        if func == "HISTORYAVG":
+            return np.mean(valid)
+        elif func == "HISTORYSUM":
+            return np.sum(valid)
+        elif func == "HISTORYCOUNT":
+            return float(len(valid))
+        elif func == "HISTORYMAX":
+            return np.max(valid)
+        elif func == "HISTORYMIN":
+            return np.min(valid)
+        elif func == "HISTORYDIFF":
+            return np.max(valid) - np.min(valid)
+        elif func == "HISTORYGRADIENT":
+            return _scalar_gradient(valid)
+        return np.nan
+
+    # =========================================================================
+    # Скалярные версии всех функций
+    # =========================================================================
+
+    def _safe_float(v):
+        if v is None:
+            return np.nan
+        try:
+            f = float(v)
+            return f
+        except (TypeError, ValueError):
+            return np.nan
+
+    def _is_nan(v):
+        try:
+            return np.isnan(v)
+        except (TypeError, ValueError):
+            return True
+
+    def WHEN(cond, t_val, f_val):
+        try:
+            return t_val if bool(cond) else f_val
+        except (ValueError, TypeError):
+            return np.nan
+
+    def ABS(a):
+        a = _safe_float(a)
+        return np.abs(a) if not _is_nan(a) else np.nan
+
+    def EXP(a):
+        a = _safe_float(a)
+        return np.exp(a) if not _is_nan(a) else np.nan
+
+    def POW(a, b):
+        a, b = _safe_float(a), _safe_float(b)
+        if _is_nan(a) or _is_nan(b):
+            return np.nan
+        return np.power(a, b)
+
+    def LOG(a):
+        a = _safe_float(a)
+        return np.log(a) if (not _is_nan(a) and a > 0) else np.nan
+
+    def LOG10(a):
+        a = _safe_float(a)
+        return np.log10(a) if (not _is_nan(a) and a > 0) else np.nan
+
+    def MIN(*args):
+        vals = [_safe_float(a) for a in args]
+        vals = [v for v in vals if not _is_nan(v)]
+        return min(vals) if vals else np.nan
+
+    def MAX(*args):
+        vals = [_safe_float(a) for a in args]
+        vals = [v for v in vals if not _is_nan(v)]
+        return max(vals) if vals else np.nan
+
+    def AVG(*args):
+        vals = [_safe_float(a) for a in args]
+        vals = [v for v in vals if not _is_nan(v)]
+        return sum(vals) / len(vals) if vals else np.nan
+
+    def MED(*args):
+        vals = [_safe_float(a) for a in args]
+        vals = [v for v in vals if not _is_nan(v)]
+        return float(np.median(vals)) if vals else np.nan
+
+    def ROUND(a, b=0):
+        a = _safe_float(a)
+        if _is_nan(a):
+            return np.nan
+        return round(a, int(b))
+
+    def GETPOINT(*_):
+        return np.nan
+
+    # =========================================================================
+    # Datetime-массив для HISTORYGRADIENT (нужны временные метки)
+    # =========================================================================
+    if isinstance(index, pd.DatetimeIndex):
+        timestamps_minutes = index.view(np.int64).astype(np.float64) / 1e9 / 60.0
+    else:
+        timestamps_minutes = np.arange(n, dtype=np.float64)
+
+    # =========================================================================
+    # ГЛАВНЫЙ ЦИКЛ — один проход O(n)
+    # =========================================================================
+    for i in range(n):
+        # Базовое окружение
+        env = {
+            "__builtins__": {},
+            "np": np,
+            "WHEN": WHEN,
+            "ABS": ABS,
+            "EXP": EXP,
+            "POW": POW,
+            "LOG": LOG,
+            "LOG10": LOG10,
+            "MIN": MIN,
+            "MAX": MAX,
+            "AVG": AVG,
+            "MED": MED,
+            "ROUND": ROUND,
+            "GETPOINT": GETPOINT,
+            # PREV(self)
+            "__prev_self__": result[i - 1] if i > 0 else np.nan,
+        }
+
+        # Значения всех сигналов на текущем шаге
+        for orig_name, safe in safe_name_map.items():
+            env[safe] = col_arrays[orig_name][i]
+
+        # Предвычисленные PREV(other)
+        for token, arr in precomputed_prev_other.items():
+            env[token] = arr[i]
+
+        # Предвычисленные HISTORY*(other)
+        for token, arr in precomputed_history_other.items():
+            env[token] = arr[i]
+
+        # HISTORY*(self) из кольцевых буферов
+        for token, rb in ring_buffers.items():
+            env[token] = ring_compute(rb)
+
+        # Вычисляем формулу
+        try:
+            val = eval(compiled, env)
+            result[i] = float(val) if val is not None else np.nan
+        except Exception:
+            result[i] = np.nan
+
+        # Обновляем кольцевые буферы HISTORY*(self) после вычисления
+        for token, rb in ring_buffers.items():
+            ring_push(rb, result[i])
+
+    return pd.Series(result, index=index, name=signal_name)
+
+
+def _scalar_gradient(values: np.ndarray) -> float:
+    """Наклон линейной регрессии для окна значений (скалярная версия)."""
+    n = len(values)
+    if n < 2:
+        return np.nan
+    x = np.arange(n, dtype=np.float64)
+    y = values.astype(np.float64)
+    x_mean = x.mean()
+    y_mean = y.mean()
+    denom = np.sum((x - x_mean) ** 2)
+    if denom == 0:
+        return np.nan
+    return np.sum((x - x_mean) * (y - y_mean)) / denom
+
+
+def _precompute_gradient(series: pd.Series, period: int) -> pd.Series:
+    """Предвычисляет градиент для полностью известного сигнала (пакетно)."""
+    def slope(window):
+        valid = window.dropna()
+        if len(valid) < 2:
+            return np.nan
+        x = np.arange(len(valid), dtype=np.float64)
+        y = valid.values.astype(np.float64)
+        x_m, y_m = x.mean(), y.mean()
+        d = np.sum((x - x_m) ** 2)
+        if d == 0:
+            return np.nan
+        return np.sum((x - x_m) * (y - y_m)) / d
+    return series.rolling(window=period, min_periods=2).apply(slope, raw=False)
+
+
+
 
 st.set_page_config(page_title="Signal Visualizer", layout="wide")
 st.title("📊 Визуализация сигналов")
@@ -175,39 +631,69 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
         if df_all is None:
             df_all = pd.DataFrame()
         
-        if computation_order:
-            with st.spinner(f"⚙️ Вычисляем {len(computation_order)} синтетических сигналов..."):
+                # === ДЕТЕКЦИЯ САМОССЫЛАЮЩИХСЯ СИГНАЛОВ ===
+        self_referential_signals = set()
+        for name, data in synthetic_signals.items():
+            if name in data.get("dependencies", []):  # Прямая самоссылка
+                self_referential_signals.add(name)
+        
+        batch_order = [s for s in computation_order if s not in self_referential_signals]
+        streaming_order = [s for s in computation_order if s in self_referential_signals]
+
+        # === ВЫЧИСЛЕНИЕ ПАКЕТНЫХ СИГНАЛОВ (без самоссылок) ===
+        if batch_order:
+            with st.spinner(f"⚙️ Вычисляем {len(batch_order)} пакетных сигналов..."):
                 progress_bar = st.progress(0)
-                
-                for idx, syn_name in enumerate(computation_order):
+                for idx, syn_name in enumerate(batch_order):
                     syn_data = synthetic_signals[syn_name]
                     formula = syn_data.get("formula", "")
-                    
-                    if not formula:
-                        st.warning(f"⚠️ Синтетический сигнал '{syn_name}' не имеет формулы")
+                    if not formula or df_all.empty:
                         continue
-                    
-                    if df_all.empty:
-                        st.warning(f"⚠️ Нет данных для вычисления '{syn_name}'")
-                        continue
-                    
                     try:
                         syn_series = compute_code_signal(
-                            formula,
-                            df_all,
+                            formula, df_all,
                             warn_callback=lambda msg, name=syn_name: st.warning(f"[{name}] {msg}", icon="⚠️")
                         )
                         syn_series.name = syn_name
                         df_all[syn_name] = syn_series
                         found_signals.append(syn_name)
                         st.session_state.synthetic_computed[syn_name] = formula
-                        
                     except Exception as e:
-                        st.error(f"❌ Ошибка вычисления '{syn_name}': {e}")
+                        st.error(f"❌ Ошибка '{syn_name}': {e}")
                         not_found_signals.append(syn_name)
-                    
-                    progress_bar.progress((idx + 1) / len(computation_order))
-                
+                    progress_bar.progress((idx + 1) / len(batch_order))
+                progress_bar.empty()
+
+        # === ВЫЧИСЛЕНИЕ ПОТОКОВЫХ СИГНАЛОВ (с самоссылкой) ===
+        if streaming_order:
+            with st.spinner(f"🌀 Вычисляем {len(streaming_order)} потоковых сигналов..."):
+                progress_bar = st.progress(0)
+                for idx, syn_name in enumerate(streaming_order):
+                    syn_data = synthetic_signals[syn_name]
+                    formula = syn_data.get("formula", "")
+                    if not formula or df_all.empty:
+                        not_found_signals.append(syn_name)
+                        progress_bar.progress((idx + 1) / len(streaming_order))
+                        continue
+                    try:
+                        #streaming_series = compute_streaming_signal_streaming_forward(
+                        #    formula=formula,
+                        #    df_base=df_all,
+                        #    signal_name=syn_name,
+                        #    )
+                        streaming_series = compute_streaming_signal(
+                            formula=formula,
+                            df_base=df_all,
+                            signal_name=syn_name,
+                        )
+                        df_all[syn_name] = streaming_series
+                        found_signals.append(syn_name)
+                        st.session_state.synthetic_computed[syn_name] = formula
+                        st.info(f"✅ Потоковый сигнал '{syn_name}' вычислен")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка итеративного расчёта '{syn_name}': {e}")
+                        not_found_signals.append(syn_name)
+                    progress_bar.progress((idx + 1) / len(streaming_order))
                 progress_bar.empty()
         
         return df_all if not df_all.empty else None, found_signals, not_found_signals

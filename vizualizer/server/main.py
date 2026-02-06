@@ -534,7 +534,7 @@ def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
 
 
 def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
-    """Топологическая сортировка синтетических сигналов"""
+    """Топологическая сортировка (игнорирует самоссылки для корректной сортировки)"""
     if not synthetic_signals:
         return []
     
@@ -543,6 +543,8 @@ def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
     
     for name, data in synthetic_signals.items():
         for dep in data.get("dependencies", []):
+            if dep == name:  # Пропускаем самоссылку для построения графа
+                continue
             if dep in synthetic_signals:
                 graph[dep].append(name)
                 in_degree[name] += 1
@@ -553,7 +555,6 @@ def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
     while queue:
         node = queue.pop(0)
         result.append(node)
-        
         for neighbor in graph[node]:
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
