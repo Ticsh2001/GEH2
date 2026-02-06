@@ -4,8 +4,17 @@ const Settings = {
   config: null,
   templates: null,
   apiUrl: '',  // ← Добавь это! Пустая строка = относительные пути
+  _initPromise: null,   // <-- НОВОЕ
 
   async init() {
+    // Если уже инициализируемся — ждём тот же промис
+    if (this._initPromise) return this._initPromise;
+
+    this._initPromise = this._doInit();
+    return this._initPromise;
+  },
+
+  async _doInit() {
     try {
       const r = await fetch('/api/settings');
       if (r.ok) this.config = await r.json();

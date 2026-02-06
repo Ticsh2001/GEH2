@@ -336,3 +336,35 @@ function expandFormulaTemplates(expr, templatesMap) {
 
     return expr;
 }
+
+/**
+ * Ищет проект по имени сигнала и открывает в новой вкладке
+ */
+async function openSignalProject(signalName) {
+    try {
+        const result = await Settings.listProjects();
+        const projects = result.projects || [];
+
+        // Ищем проект, чей code совпадает с именем сигнала
+        const match = projects.find(p => {
+            const code = (p.code || '').trim();
+            return code === signalName
+                || code.toLowerCase() === signalName.toLowerCase();
+        });
+
+        if (!match) {
+            alert(`Проект для сигнала «${signalName}» не найден.\nВозможно, это физический сигнал (не синтетический).`);
+            return;
+        }
+
+        // Формируем URL и открываем в новой вкладке
+        const source = match.source || 'projects';
+        const url = `${window.location.origin}${window.location.pathname}?load=${encodeURIComponent(match.filename)}&source=${encodeURIComponent(source)}`;
+
+        window.open(url, '_blank');
+
+    } catch (err) {
+        console.error('Ошибка при открытии проекта сигнала:', err);
+        alert('Не удалось найти проект: ' + err.message);
+    }
+}

@@ -7,44 +7,71 @@ const App = {
     /**
      * Инициализация приложения
      */
-    init() {
-        Settings.init().catch(console.error);
-        //Settings.init().then(() => {
-        //    // если хочешь — можно обновить UI (например, статус “Сигналы загружены”)
-        //    console.log('Settings loaded, signals:', Settings.signals.length);
-        //    }).catch(err => console.error(err));
-        //console.log('signals loaded:', Settings.signals.slice(0, 5));
-        this.setupPaletteDragDrop();
-        this.setupGlobalMouseHandlers();
-        this.setupContextMenu();
-        this.setupWorkspaceClick();
-        this.setupOutputCounter();
-        this.setupMultiSelection();
+init() {
+    // Settings.init() вызовется внутри autoLoadFromURL, если есть ?load=
+    Settings.init().catch(console.error);
 
-        // Инициализация модулей
-        Viewport.init();
-        Modal.init();
-        Project.init();
+    this.setupPaletteDragDrop();
+    this.setupGlobalMouseHandlers();
+    this.setupContextMenu();
+    this.setupWorkspaceClick();
+    this.setupOutputCounter();
+    this.setupMultiSelection();
 
-        // Первоначальное определение выходов (только если модуль загружен)
-        if (typeof Outputs !== 'undefined' && Outputs.updateOutputStatus) {
-            Outputs.updateOutputStatus();
-        }
+    Viewport.init();
+    Modal.init();
+    Project.init();
 
-        console.log('Logic Scheme Editor initialized');
-        document.getElementById('btn-generate-code').addEventListener('click', () => {
-            const code = CodeGen.generate();
-            document.getElementById('code-output').value = code;
-            document.getElementById('code-modal-overlay').style.display = 'flex';
-        });
+    if (typeof Outputs !== 'undefined' && Outputs.updateOutputStatus) {
+        Outputs.updateOutputStatus();
+    }
 
-        document.getElementById('code-modal-close').addEventListener('click', () => {
-            document.getElementById('code-modal-overlay').style.display = 'none';
-        });
-        document.getElementById('btn-visualize').addEventListener('click', () => {
-            App.openSignalVisualizer();
-});        
-    },
+    console.log('Logic Scheme Editor initialized');
+
+    document.getElementById('btn-generate-code').addEventListener('click', () => {
+        const code = CodeGen.generate();
+        document.getElementById('code-output').value = code;
+        document.getElementById('code-modal-overlay').style.display = 'flex';
+    });
+
+    document.getElementById('code-modal-close').addEventListener('click', () => {
+        document.getElementById('code-modal-overlay').style.display = 'none';
+    });
+
+    document.getElementById('btn-visualize').addEventListener('click', () => {
+        App.openSignalVisualizer();
+    });
+
+    // ===== Автозагрузка проекта из URL =====
+    this.autoLoadFromURL();
+},
+
+async autoLoadFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const filename = params.get('load');
+    if (!filename) return;
+
+    const source = params.get('source') || 'projects';
+    console.log(`[autoLoad] Загрузка: ${filename}, source: ${source}`);
+
+    try {
+        // Гарантируем что Settings готов
+        await Settings.init();
+        console.log('[autoLoad] Settings готов');
+
+        const data = await Settings.loadProject(filename, source);
+        console.log('[autoLoad] Данные получены:', Object.keys(data));
+
+        Project._processLoadedData(data);
+        console.log('[autoLoad] Проект загружен успешно');
+
+        // Чистим URL чтобы F5 не перезагружал повторно
+        window.history.replaceState({}, '', window.location.pathname);
+
+    } catch (err) {
+        console.error('[autoLoad] Ошибка:', err);
+    }
+},
 
 openSignalVisualizer() {
     try {
@@ -360,6 +387,15 @@ setupGlobalMouseHandlers() {
         document.getElementById('ctx-copy').addEventListener('click', () => {
             document.getElementById('context-menu').style.display = 'none';
             Elements.copySelectedElements();
+        });
+        // ===== НОВОЕ: Открыть проект сигнала =====
+        document.getElementById('ctx-open-project').addEventListener('click', () => {
+            const elemId = document.getElementById('context-menu').dataset.elementId;
+            document.getElementById('context-menu').style.display = 'none';
+            const elem = AppState.elements[elemId];
+            if (elem && elem.type === 'input-signal' && elem.props?.name) {
+                openSignalProject(elem.props.name.trim());
+            }
         });
     },
 

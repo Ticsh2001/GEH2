@@ -593,6 +593,12 @@ const Elements = {
         menu.style.top = `${y}px`;
         menu.style.display = 'block';
         menu.dataset.elementId = elemId;
+        const openProjectItem = document.getElementById('ctx-open-project');
+        if (openProjectItem) {
+            const elem = AppState.elements[elemId];
+            const isSignal = elem && elem.type === 'input-signal' && elem.props?.name;
+            openProjectItem.style.display = isSignal ? 'block' : 'none';
+        }
     },
 
     /**
