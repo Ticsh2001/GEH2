@@ -100,9 +100,23 @@ const CodeGenGraph = {
         const elem = graph.elem;
         const cases = Array.isArray(elem.props?.cases) ? elem.props.cases : [];
 
+        // === ИСПРАВЛЕНИЕ: Получаем A как значение ИЛИ условие ===
         const aGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
-        const aVal = aGraph ? this.evalValue(aGraph) : Optimizer.Const(0);
-        const aName = (aVal.type === 'var') ? aVal.name : String(aVal.n);
+        let aExpr, isLogicA = false;
+        
+        if (aGraph) {
+            // Сначала пробуем получить как значение
+            aExpr = this.evalValue(aGraph);
+            
+            // Если элемент логический (range, and, or, not, if) - помечаем флаг
+            const logicalTypes = ['range', 'and', 'or', 'not', 'if'];
+            if (logicalTypes.includes(aGraph.elem.type)) {
+                isLogicA = true;
+            }
+        } else {
+            aExpr = Optimizer.Const(0);
+        }
+        // ======================================================
 
         const defaultGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-1')?.fromGraph;
         const defaultVal = defaultGraph ? this.evalValue(defaultGraph) : Optimizer.Const(0);
@@ -122,7 +136,27 @@ const CodeGenGraph = {
             if (!inGraph) continue;
 
             const caseExpr = this.evalValue(inGraph);
-            const cond = Optimizer.Cmp(aName, op, valueStr);
+            
+            // === ИСПРАВЛЕНИЕ: Специальная обработка логического A ===
+            let cond;
+            if (isLogicA) {
+                // Для логических элементов: сравниваем с 1/0
+                if (valueStr === '1') {
+                    // Если A - условие, и ищем 1 → используем само условие
+                    cond = this.evalLogic(aGraph);
+                } else if (valueStr === '0') {
+                    // Если ищем 0 → отрицаем условие
+                    cond = Optimizer.Not(this.evalLogic(aGraph));
+                } else {
+                    // Для других значений (2,3...) → всегда false
+                    cond = Optimizer.FalseCond;
+                }
+            } else {
+                // Для числовых значений - стандартное сравнение
+                const aName = (aExpr.type === 'var') ? aExpr.name : String(aExpr.n);
+                cond = Optimizer.Cmp(aName, op, valueStr);
+            }
+            // ====================================================
 
             expr = Optimizer.When(cond, caseExpr, expr);
         }
@@ -278,19 +312,23 @@ const CodeGenGraph = {
                 return Optimizer.Var(expr);
             }
 
+            case 'range':
+            case 'and':
+            case 'or':
+            case 'not':
+            case 'if': {
+                // Для логических элементов и диапазона возвращаем переменную (ID элемента)
+                // Это предотвращает подстановку константы 0 и позволяет генерировать корректные условия
+                return Optimizer.Var(elem.id);
+            }
+
             case 'separator':
                 return this.evalValue(graph.inputs[0]?.fromGraph);
 
             case 'switch': {
                 const exprCore = this.buildSwitchExpr(graph);
                 const condCtx = this.collectAllCond(graph);
-                let fullExpr = exprCore;
-
-                if (condCtx) {
-                    fullExpr = Optimizer.When(condCtx, fullExpr, Optimizer.Const(0));
-                }
-
-                return Optimizer.Var(Optimizer.printExpr(Optimizer.simplifyExpr(fullExpr)));
+                return { cond: condCtx, expr: exprCore };
             }
 
             default:
