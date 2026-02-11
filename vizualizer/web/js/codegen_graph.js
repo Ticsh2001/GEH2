@@ -153,7 +153,7 @@ const CodeGenGraph = {
                 }
             } else {
                 // Для числовых значений - стандартное сравнение
-                const aName = (aExpr.type === 'var') ? aExpr.name : String(aExpr.n);
+                const aName = this.exprToStr(aExpr);
                 cond = Optimizer.Cmp(aName, op, valueStr);
             }
             // ====================================================
@@ -237,7 +237,8 @@ const CodeGenGraph = {
                 if (!inputGraph) return Optimizer.TrueCond; // нет входа — считаем TRUE, либо FALSE, по вкусу
 
                 const inputVal = this.evalValue(inputGraph); // Optimizer.Expr для A
-                const name = (inputVal.type === 'var') ? inputVal.name : String(inputVal.n);
+                //const name = (inputVal.type === 'var') ? inputVal.name : String(inputVal.n);
+                const name = this.exprToStr(inputVal);
 
                 const minVal = graph.elem.props?.minValue;
                 const maxVal = graph.elem.props?.maxValue;
@@ -328,7 +329,7 @@ const CodeGenGraph = {
             case 'switch': {
                 const exprCore = this.buildSwitchExpr(graph);
                 const condCtx = this.collectAllCond(graph);
-                return { cond: condCtx, expr: exprCore };
+                return condCtx ? Optimizer.When(condCtx, exprCore, Optimizer.Const(0)) : exprCore;
             }
 
             default:
@@ -472,27 +473,39 @@ const CodeGenGraph = {
         return { cond, expr };
     },
 
-    buildIfLogic(leftVal, op, rightVal) {
-        const leftName = leftVal.type === 'var' ? leftVal.name : String(leftVal.n);
-        const rightName = rightVal.type === 'var' ? rightVal.name : String(rightVal.n);
+    exprToStr(expr) {
+        if (!expr) return '0';
+        if (expr.type === 'var') return expr.name;
+        if (expr.type === 'const') return String(expr.n);
+        return Optimizer.printExpr(expr);
+    },
 
-        const leftZero = leftVal.type === 'const' && leftVal.n === 0;
-        const rightZero = rightVal.type === 'const' && rightVal.n === 0;
+    buildIfLogic(leftVal, op, rightVal) {
+        const leftIsVar = leftVal?.type === 'var';
+        const rightIsVar = rightVal?.type === 'var';
+        const leftIsConst = leftVal?.type === 'const';
+        const rightIsConst = rightVal?.type === 'const';
+
+        const leftStr = this.exprToStr(leftVal);
+        const rightStr = this.exprToStr(rightVal);
+
+        const leftZero = leftIsConst && leftVal.n === 0;
+        const rightZero = rightIsConst && rightVal.n === 0;
 
         switch (op) {
             case '=':
-                if (rightZero) return Optimizer.Eq0(leftName);
-                if (leftZero) return Optimizer.Eq0(rightName);
-                return Optimizer.Cmp(leftName, '=', rightName);
+                if (rightZero && leftIsVar) return Optimizer.Eq0(leftStr);
+                if (leftZero && rightIsVar) return Optimizer.Eq0(rightStr);
+                return Optimizer.Cmp(leftStr, '=', rightStr);
             case '!=':
-                if (rightZero) return Optimizer.Ne0(leftName);
-                if (leftZero) return Optimizer.Ne0(rightName);
-                return Optimizer.Cmp(leftName, '!=', rightName);
+                if (rightZero && leftIsVar) return Optimizer.Ne0(leftStr);
+                if (leftZero && rightIsVar) return Optimizer.Ne0(rightStr);
+                return Optimizer.Cmp(leftStr, '!=', rightStr);
             case '>':
             case '<':
             case '>=':
             case '<=':
-                return Optimizer.Cmp(leftName, op, rightName);
+                return Optimizer.Cmp(leftStr, op, rightStr);
             default:
                 return Optimizer.TrueCond;
         }
