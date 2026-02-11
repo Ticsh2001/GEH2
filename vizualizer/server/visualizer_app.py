@@ -16,6 +16,83 @@ from visualizer_state import (
     STATE_VERSION
 )
 
+def _compute_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Коэффициент детерминации R^2."""
+    mask = ~np.isnan(y_true) & ~np.isnan(y_pred)
+    if mask.sum() < 2:
+        return np.nan
+    yt = y_true[mask]
+    yp = y_pred[mask]
+    ss_res = np.sum((yt - yp) ** 2)
+    ss_tot = np.sum((yt - yt.mean()) ** 2)
+    if ss_tot == 0:
+        return np.nan
+    return 1.0 - ss_res / ss_tot
+
+
+def fit_linear(x: np.ndarray, y: np.ndarray) -> dict:
+    """Линейная аппроксимация y = a + b*x."""
+    mask = ~np.isnan(x) & ~np.isnan(y)
+    if mask.sum() < 2:
+        return {"a": np.nan, "b": np.nan, "r2": np.nan, "y_pred": np.full_like(y, np.nan)}
+    coeffs = np.polyfit(x[mask], y[mask], 1)  # [b, a]
+    b, a = coeffs[0], coeffs[1]
+    y_pred = a + b * x
+    r2 = _compute_r2(y, y_pred)
+    return {"a": a, "b": b, "r2": r2, "y_pred": y_pred}
+
+
+def fit_polynomial(x: np.ndarray, y: np.ndarray, degree: int) -> dict:
+    """Полиномиальная аппроксимация степени N: y = Σ c_k * x^k (k=0..N)."""
+    degree = max(1, int(degree))
+    mask = ~np.isnan(x) & ~np.isnan(y)
+    if mask.sum() <= degree:
+        return {"coeffs": None, "r2": np.nan, "y_pred": np.full_like(y, np.nan)}
+    coeffs = np.polyfit(x[mask], y[mask], degree)  # старший → младший
+    y_pred = np.polyval(coeffs, x)
+    r2 = _compute_r2(y, y_pred)
+    return {"coeffs": coeffs, "r2": r2, "y_pred": y_pred}
+
+
+def fit_power_law(x: np.ndarray, y: np.ndarray) -> dict:
+    """
+    Степенная зависимость: y = a * x^p.
+    Фит делается в логарифмическом пространстве: ln(y) = ln(a) + p*ln(x).
+    Требует x > 0 и y > 0.
+    """
+    mask = (~np.isnan(x)) & (~np.isnan(y)) & (x > 0) & (y > 0)
+    if mask.sum() < 2:
+        return {"a": np.nan, "p": np.nan, "r2": np.nan, "y_pred": np.full_like(y, np.nan), "used_points": 0}
+    lx = np.log(x[mask])
+    ly = np.log(y[mask])
+    coeffs = np.polyfit(lx, ly, 1)  # [p, ln(a)]
+    p, ln_a = coeffs[0], coeffs[1]
+    a = float(np.exp(ln_a))
+    y_pred = a * np.power(x, p)
+    r2 = _compute_r2(y, y_pred)
+    return {"a": a, "p": p, "r2": r2, "y_pred": y_pred, "used_points": int(mask.sum())}
+
+
+def _format_poly_equation(coeffs: np.ndarray, x_name: str, y_name: str) -> str:
+    """
+    Форматирует полином: y = c0 + c1*x + c2*x^2 + ...
+    coeffs: [cN, ..., c1, c0] — порядок Polyfit (старшие → младшие)
+    """
+    if coeffs is None or len(coeffs) == 0:
+        return f"{y_name} = NaN"
+    terms = []
+    deg = len(coeffs) - 1
+    for i, c in enumerate(coeffs):
+        k = deg - i  # степень
+        coef = f"{c:.6g}"
+        if k == 0:
+            terms.append(f"{coef}")
+        elif k == 1:
+            terms.append(f"{coef}·{x_name}")
+        else:
+            terms.append(f"{coef}·{x_name}^{k}")
+    return f"{y_name} = " + " + ".join(terms)
+
 
 def compute_streaming_signal_streaming_forward(
     formula: str,
@@ -1307,6 +1384,196 @@ else:
 
 if df_all_signals is not None:
     with st.expander("ℹ️ Информация о данных"):
+        # === ОБЛАКО ТОЧЕК X–Y + АППРОКСИМАЦИЯ (всегда внизу) ===
+        # === ОБЛАКО ТОЧЕК X–Y + АППРОКСИМАЦИЯ (всегда внизу) ===
+        if df_all_signals is not None:
+            # Доступны только отмеченные галочками сигналы + CODE_RESULT (если есть)
+            available_cols = df_all_signals.columns.tolist()
+            selected_set = st.session_state.get("selected_signals", set())
+            available_signals = [c for c in available_cols if c in selected_set]
+
+            code_sig = st.session_state.get("code_signal_name")
+            if code_sig and code_sig in available_cols and code_sig not in available_signals:
+                available_signals.append(code_sig)
+
+            st.divider()
+            st.subheader("🔷 Облако точек X–Y + аппроксимация")
+
+            # Нужно минимум два сигнала для выбора осей
+            if len(available_signals) < 2:
+                st.info("Отметьте минимум два сигнала слева (включая при желании CODE_RESULT), чтобы выбрать X и Y.")
+            else:
+                # Значения по умолчанию: X — первый доступный; Y — CODE_RESULT, если есть, иначе второй
+                default_x_idx = 0
+                default_y_idx = 1
+                if code_sig and code_sig in available_signals:
+                    default_y_idx = available_signals.index(code_sig)
+
+                col_sel = st.columns(3)
+                with col_sel[0]:
+                    x_sig = st.selectbox(
+                        "Ось X",
+                        available_signals,
+                        index=min(default_x_idx, len(available_signals) - 1),
+                        key="xy_x_sig"
+                    )
+                with col_sel[1]:
+                    y_sig = st.selectbox(
+                        "Ось Y",
+                        available_signals,
+                        index=min(default_y_idx, len(available_signals) - 1),
+                        key="xy_y_sig"
+                    )
+                with col_sel[2]:
+                    max_points = st.number_input(
+                        "Макс. точек на графике",
+                        min_value=100,
+                        max_value=500_000,
+                        value=50_000,
+                        step=100,
+                        help="Для ускорения визуализации при больших наборах",
+                        key="xy_max_points"
+                    )
+
+                # Базовые серии и предварительные минимумы/максимумы
+                x_series = sanitize_numeric_column(df_all_signals[x_sig])
+                y_series = sanitize_numeric_column(df_all_signals[y_sig])
+
+                x_min_default = float(x_series.dropna().min()) if x_series.dropna().size > 0 else 0.0
+                x_max_default = float(x_series.dropna().max()) if x_series.dropna().size > 0 else 1.0
+                y_min_default = float(y_series.dropna().min()) if y_series.dropna().size > 0 else 0.0
+                y_max_default = float(y_series.dropna().max()) if y_series.dropna().size > 0 else 1.0
+
+                # UI фильтров диапазона (каждая граница опциональна)
+                st.markdown("**Фильтр диапазонов значений (опционально):**")
+                col_f = st.columns(2)
+
+                with col_f[0]:
+                    st.markdown(f"**Фильтр по X: {x_sig}**")
+                    x_min_en = st.checkbox("Задать минимум X", value=False, key="xy_x_min_en")
+                    x_min_val = st.number_input("Минимум X", value=x_min_default, key="xy_x_min", disabled=not x_min_en)
+                    x_max_en = st.checkbox("Задать максимум X", value=False, key="xy_x_max_en")
+                    x_max_val = st.number_input("Максимум X", value=x_max_default, key="xy_x_max", disabled=not x_max_en)
+
+                with col_f[1]:
+                    st.markdown(f"**Фильтр по Y: {y_sig}**")
+                    y_min_en = st.checkbox("Задать минимум Y", value=False, key="xy_y_min_en")
+                    y_min_val = st.number_input("Минимум Y", value=y_min_default, key="xy_y_min", disabled=not y_min_en)
+                    y_max_en = st.checkbox("Задать максимум Y", value=False, key="xy_y_max_en")
+                    y_max_val = st.number_input("Максимум Y", value=y_max_default, key="xy_y_max", disabled=not y_max_en)
+
+                # Формируем пары (X(t), Y(t)) по совпадающим меткам времени, сразу сбрасываем NaN
+                xy_df = pd.DataFrame({x_sig: x_series, y_sig: y_series}).dropna()
+
+                original_count = len(xy_df)
+
+                # Применяем фильтры: каждая граница учитывается только если включена
+                if x_min_en:
+                    xy_df = xy_df[xy_df[x_sig] >= x_min_val]
+                if x_max_en:
+                    xy_df = xy_df[xy_df[x_sig] <= x_max_val]
+                if y_min_en:
+                    xy_df = xy_df[xy_df[y_sig] >= y_min_val]
+                if y_max_en:
+                    xy_df = xy_df[xy_df[y_sig] <= y_max_val]
+
+                filtered_count = len(xy_df)
+
+                # Подвыборка после фильтрации — для ускорения рендера
+                if filtered_count > max_points:
+                    step = max(1, filtered_count // max_points)
+                    xy_df = xy_df.iloc[::step, :]
+                    # после подвыборки не меняем filtered_count, он отражает объём данных для аппроксимации
+
+                if xy_df.empty:
+                    st.warning("После применения фильтров не осталось валидных точек для отображения.")
+                else:
+                    x_vals = xy_df[x_sig].to_numpy(dtype=np.float64)
+                    y_vals = xy_df[y_sig].to_numpy(dtype=np.float64)
+
+                    st.caption(f"Точек всего: {original_count} | после фильтра: {filtered_count} | отрисовано: {len(xy_df)}")
+
+                    # Настройки аппроксимации
+                    fit_type = st.selectbox(
+                        "Тип аппроксимации",
+                        ["Без аппроксимации", "Линейная (y = a + b·X)", "Полиномиальная степень N", "Степенная (y = a·X^p)"],
+                        key="xy_fit_type"
+                    )
+
+                    poly_degree = None
+                    if "Полиномиальная" in fit_type:
+                        poly_degree = st.slider(
+                            "Степень полинома (N)",
+                            min_value=2, max_value=8, value=2, step=1,
+                            key="xy_poly_deg"
+                        )
+
+                    # Облако точек
+                    fig_scatter = px.scatter(
+                        xy_df, x=x_sig, y=y_sig,
+                        title=f"Облако точек: {x_sig} → {y_sig}",
+                        render_mode="webgl",
+                        opacity=0.75
+                    )
+
+                    # Диапазон X для кривой
+                    x_min = float(np.nanmin(x_vals))
+                    x_max = float(np.nanmax(x_vals))
+                    x_grid = np.linspace(x_min, x_max, 500)
+
+                    info_lines = []
+                    if fit_type.startswith("Линейная"):
+                        fit = fit_linear(x_vals, y_vals)
+                        a, b, r2 = fit["a"], fit["b"], fit["r2"]
+                        y_line = a + b * x_grid
+                        fig_scatter.add_trace(go.Scatter(x=x_grid, y=y_line, mode="lines", name="Линейная аппр.", line=dict(color="red", width=2)))
+                        info_lines.append(f"Модель: {y_sig} = {a:.6g} + {b:.6g}·{x_sig}")
+                        info_lines.append(f"R² = {r2:.4f}" if not np.isnan(r2) else "R² недоступен")
+
+                    elif fit_type.startswith("Полиномиальная"):
+                        fit = fit_polynomial(x_vals, y_vals, degree=poly_degree or 2)
+                        coeffs, r2 = fit["coeffs"], fit["r2"]
+                        if coeffs is None:
+                            info_lines.append("Недостаточно точек для выбранной степени полинома.")
+                        else:
+                            y_line = np.polyval(coeffs, x_grid)
+                            fig_scatter.add_trace(go.Scatter(x=x_grid, y=y_line, mode="lines", name=f"Полином N={poly_degree}", line=dict(color="orange", width=2)))
+                            info_lines.append(_format_poly_equation(coeffs, x_sig, y_sig))
+                            info_lines.append(f"R² = {r2:.4f}" if not np.isnan(r2) else "R² недоступен")
+
+                    elif fit_type.startswith("Степенная"):
+                        fit = fit_power_law(x_vals, y_vals)  # учитывает только X>0 и Y>0
+                        a, p, r2 = fit["a"], fit["p"], fit["r2"]
+                        used = fit.get("used_points", 0)
+                        if np.isnan(a) or np.isnan(p):
+                            info_lines.append("Для степенной аппроксимации нужны пары с X>0 и Y>0.")
+                        else:
+                            x_pos = x_grid[x_grid > 0]
+                            y_line = a * np.power(x_pos, p)
+                            fig_scatter.add_trace(go.Scatter(x=x_pos, y=y_line, mode="lines", name="Степенная аппр.", line=dict(color="green", width=2)))
+                            info_lines.append(f"Модель: {y_sig} = {a:.6g}·{x_sig}^{p:.6g}")
+                            info_lines.append(f"Использовано точек: {used}")
+                            info_lines.append(f"R² = {r2:.4f}" if not np.isnan(r2) else "R² недоступен")
+
+                    fig_scatter.update_layout(
+                        uirevision="xy_scatter_fixed_bottom",
+                        height=600,
+                        xaxis_title=x_sig,
+                        yaxis_title=y_sig,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                        legend_title_text="",
+                    )
+
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+
+                    if info_lines:
+                        st.markdown("**Аппроксимация:**")
+                        for line in info_lines:
+                            st.markdown(f"- {line}")
+        
+
+
+
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Всего сигналов", len(df_all_signals.columns))
