@@ -1,0 +1,10 @@
+{
+  "files": [
+    {"file": "tec20_analog_dks.csv"},
+    {"file": "tec20_analog_gt_st.csv"},
+    {"file": "tec20_analog_tmo.csv"},
+    {"file": "tec20_events_dks.csv"},
+    {"file": "tec20_events_gt_st.csv"},
+    {"file": "tec20_events_tmo.csv"}
+  ]
+}

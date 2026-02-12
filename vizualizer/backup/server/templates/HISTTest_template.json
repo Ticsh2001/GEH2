@@ -1,0 +1,329 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "HISTTest",
+    "type": "template",
+    "description": "Проверка исторических данных для сигнала, дающего -1 в случае ошибки расчета",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {
+      "Signal": "Сигнал для проверки",
+      "T_check": "Временной промежуток проверки (мин)",
+      "N_check": "Количество срабатываний на временном промежутке"
+    },
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-02-10T09:11:08.219Z",
+    "visualizer_state": null
+  },
+  "elements": {
+    "switch_3": {
+      "id": "switch_3",
+      "type": "switch",
+      "x": 802,
+      "y": 1147,
+      "width": 160,
+      "height": 146,
+      "props": {
+        "inputCount": 3,
+        "cases": [
+          {
+            "op": "=",
+            "value": "0",
+            "inputIndex": 2
+          }
+        ],
+        "comment": ""
+      }
+    },
+    "if_4": {
+      "id": "if_4",
+      "type": "if",
+      "x": 484,
+      "y": 1046,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "const_5": {
+      "id": "const_5",
+      "type": "const",
+      "x": 232,
+      "y": 1131,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "const_6": {
+      "id": "const_6",
+      "type": "const",
+      "x": 538,
+      "y": 1189,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "formula_7": {
+      "id": "formula_7",
+      "type": "formula",
+      "x": 526,
+      "y": 1293,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "-1*Signal",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "formula_11": {
+      "id": "formula_11",
+      "type": "formula",
+      "x": 1091.8409090909092,
+      "y": 1183.9772727272727,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "HISTORYSUM(switch_3, T_check)",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "if_12": {
+      "id": "if_12",
+      "type": "if",
+      "x": 1314.8409090909092,
+      "y": 1229.9772727272727,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "separator_14": {
+      "id": "separator_14",
+      "type": "separator",
+      "x": 1503.8409090909092,
+      "y": 1233.9772727272727,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "const_15": {
+      "id": "const_15",
+      "type": "const",
+      "x": 1777.8409090909092,
+      "y": 1360.9772727272727,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 1,
+        "comment": ""
+      }
+    },
+    "const_16": {
+      "id": "const_16",
+      "type": "const",
+      "x": 1650.8409090909092,
+      "y": 1497.9772727272727,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "output_17": {
+      "id": "output_17",
+      "type": "output",
+      "x": 1945.4599567099567,
+      "y": 1398.1360028860024,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "output_18": {
+      "id": "output_18",
+      "type": "output",
+      "x": 1833.2377344877345,
+      "y": 1535.9137806637802,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_19": {
+      "id": "input_signal_19",
+      "type": "input-signal",
+      "x": 221.15440115440117,
+      "y": 1058.155844155844,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Signal",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_20": {
+      "id": "input_signal_20",
+      "type": "input-signal",
+      "x": 551.5710678210678,
+      "y": 1454.465367965368,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "T_check",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_21": {
+      "id": "input_signal_21",
+      "type": "input-signal",
+      "x": 1097.6821789321789,
+      "y": 1391.1320346320347,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "N_check",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "const_5",
+      "fromPort": "out-0",
+      "toElement": "if_4",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_4",
+      "fromPort": "out-0",
+      "toElement": "switch_3",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "const_6",
+      "fromPort": "out-0",
+      "toElement": "switch_3",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_7",
+      "fromPort": "out-0",
+      "toElement": "switch_3",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "switch_3",
+      "fromPort": "out-0",
+      "toElement": "formula_11",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "formula_11",
+      "fromPort": "out-0",
+      "toElement": "if_12",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_12",
+      "fromPort": "out-0",
+      "toElement": "separator_14",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "separator_14",
+      "fromPort": "out-0",
+      "toElement": "const_15",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "separator_14",
+      "fromPort": "out-1",
+      "toElement": "const_16",
+      "toPort": "cond-0",
+      "signalType": "false"
+    },
+    {
+      "fromElement": "const_15",
+      "fromPort": "out-0",
+      "toElement": "output_17",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_16",
+      "fromPort": "out-0",
+      "toElement": "output_18",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_19",
+      "fromPort": "out-0",
+      "toElement": "if_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_19",
+      "fromPort": "out-0",
+      "toElement": "formula_7",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_20",
+      "fromPort": "out-0",
+      "toElement": "formula_11",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_21",
+      "fromPort": "out-0",
+      "toElement": "if_12",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 21,
+  "viewport": {
+    "zoom": 0.6000000000000001,
+    "panX": -10.109307359307536,
+    "panY": -350.1077922077923
+  },
+  "code": "WHEN((HISTORYSUM((WHEN((Signal <= 0), -1*Signal, 0)), T_check) > N_check), 1, 0)",
+  "visualizer_state": null
+}

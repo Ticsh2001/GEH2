@@ -1,0 +1,12 @@
+# FastAPI backend
+fastapi
+uvicorn[standard]
+
+# Data processing
+pandas
+numpy
+
+# Visualizer (Streamlit)
+streamlit
+plotly
+requests

@@ -1,0 +1,104 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "TEMPLATE",
+    "type": "template",
+    "description": "Пример работы шаблона",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {
+      "A": "враывроыва",
+      "B": "ываывываываыва"
+    },
+    "visualizer_state": null
+  },
+  "elements": {
+    "formula_18": {
+      "id": "formula_18",
+      "type": "formula",
+      "x": 576.6666666666666,
+      "y": 443.0000000000001,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "A+B/14",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "output_19": {
+      "id": "output_19",
+      "type": "output",
+      "x": 842.2222222222222,
+      "y": 500.7777777777778,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_16": {
+      "id": "input_signal_16",
+      "type": "input-signal",
+      "x": 255.00000000000006,
+      "y": 411.3333333333335,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "A",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    },
+    "input_signal_17": {
+      "id": "input_signal_17",
+      "type": "input-signal",
+      "x": 271.6666666666667,
+      "y": 563.0000000000001,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "B",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_16",
+      "fromPort": "out-0",
+      "toElement": "formula_18",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_17",
+      "fromPort": "out-0",
+      "toElement": "formula_18",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_18",
+      "fromPort": "out-0",
+      "toElement": "output_19",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 19,
+  "viewport": {
+    "zoom": 0.9,
+    "panX": -35.5,
+    "panY": -192.70000000000005
+  },
+  "code": "A+B/14",
+  "visualizer_state": null
+}
