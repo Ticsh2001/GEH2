@@ -8,6 +8,8 @@ import numpy as np
 import plotly.graph_objects as go
 from typing import List
 from datetime import datetime, time
+from io import BytesIO
+from code_signal import register_tables
 
 from code_signal import compute_code_signal, sanitize_numeric_column, evaluate_code_expression, CodeEvaluationError
 from visualizer_state import (
@@ -289,9 +291,9 @@ def compute_streaming_signal(
             )
 
     # GETPOINT → NaN
-    safe_formula = re.sub(
-        r"GETPOINT\s*\([^)]*\)", "np.nan", safe_formula, flags=re.IGNORECASE
-    )
+    #safe_formula = re.sub(
+    #    r"GETPOINT\s*\([^)]*\)", "np.nan", safe_formula, flags=re.IGNORECASE
+    #)
 
     # Компилируем один раз
     compiled = compile(safe_formula, "<streaming_formula>", "eval")
@@ -451,7 +453,30 @@ def compute_streaming_signal(
             return np.nan
         return round(a, int(b))
 
-    def GETPOINT(*_):
+    def GETPOINT(curveName, pointX, pointY, axisToFind):
+        curve_name = str(curveName)
+        axis = str(axisToFind).strip().upper()
+
+        df_tbl = TABLE_REGISTRY.get(curve_name)
+        if df_tbl is None:
+            return np.nan
+        try:
+            x, y = _get_xy_from_table(df_tbl)
+        except Exception:
+            return np.nan
+
+        if axis == "Y":
+            xq = _safe_float(pointX)
+            if _is_nan(xq):
+                return np.nan
+            return float(_interp_1d(x, y, np.array([xq], dtype=np.float64))[0])
+
+        if axis == "X":
+            yq = _safe_float(pointY)
+            if _is_nan(yq):
+                return np.nan
+            return float(_interp_1d(y, x, np.array([yq], dtype=np.float64))[0])
+
         return np.nan
 
     # =========================================================================
@@ -485,6 +510,14 @@ def compute_streaming_signal(
             # PREV(self)
             "__prev_self__": result[i - 1] if i > 0 else np.nan,
         }
+                # --- НОВОЕ: X/Y без кавычек ---
+        env["X"] = "X"
+        env["Y"] = "Y"
+
+        # --- НОВОЕ: имена таблиц без кавычек ---
+        for tbl_name in TABLE_REGISTRY.keys():
+            if tbl_name not in env:
+                env[tbl_name] = tbl_name
 
         # Значения всех сигналов на текущем шаге
         for orig_name, safe in safe_name_map.items():
@@ -530,6 +563,22 @@ def _scalar_gradient(values: np.ndarray) -> float:
         return np.nan
     return np.sum((x - x_mean) * (y - y_mean)) / denom
 
+def load_table_df(curve_name: str) -> pd.DataFrame:
+    cache = st.session_state.tables_cache
+    if curve_name in cache:
+        return cache[curve_name]
+
+    r = requests.get(f"{api_url}/api/table/file/{curve_name}")
+    r.raise_for_status()
+    print(BytesIO(r.content))
+
+    df = pd.read_excel(BytesIO(r.content), engine="openpyxl")  # header=0 по умолчанию
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.dropna(axis=1, how="all")
+
+    cache[curve_name] = df
+    return df
+
 
 def _precompute_gradient(series: pd.Series, period: int) -> pd.Series:
     """Предвычисляет градиент для полностью известного сигнала (пакетно)."""
@@ -562,6 +611,7 @@ if isinstance(signal_codes, str):
 
 CODE = ""
 INITIAL_VISUALIZER_STATE = None  # Состояние из проекта
+TABLES = []
 
 if session_token:
     try:
@@ -570,6 +620,7 @@ if session_token:
         payload = resp.json()
         signal_codes = payload.get("signals", signal_codes)
         CODE = payload.get("code", CODE)
+        TABLES = payload.get("tables", [])
         INITIAL_VISUALIZER_STATE = payload.get("visualizer_state")  # НОВОЕ
     except Exception as e:
         st.error(f"Не удалось получить данные сессии: {e}")
@@ -597,6 +648,8 @@ if "state_loaded" not in st.session_state:
 # НОВОЕ: флаг что есть несохранённые изменения
 if "has_unsaved_changes" not in st.session_state:
     st.session_state.has_unsaved_changes = False
+if "tables_cache" not in st.session_state:
+    st.session_state.tables_cache = {}
 
 
 def mark_unsaved():
@@ -704,6 +757,8 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                 if df_all is not None:
                     found_signals = list(df_all.columns)
                     not_found_signals = [s for s in base_signals if s not in df_all.columns]
+
+        
         
         if df_all is None:
             df_all = pd.DataFrame()
@@ -799,6 +854,19 @@ if signal_codes and st.session_state.signals_data is None:
         st.success(f"✅ Загружено сигналов: {len(found_codes)}")
     if not_found_codes:
         st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
+
+if TABLES:
+    for t in TABLES:
+        try:
+            load_table_df(t)
+        except Exception as e:
+            st.warning(f"⚠️ Таблица '{t}' не загружена: {e}")
+
+    # Передаём таблицы в вычислитель (code_signal.py)
+    register_tables(st.session_state.tables_cache)
+else:
+    print('NO tables')
+    register_tables({})
 
 
 def get_all_signals_df(exclude: set[str] | None = None):

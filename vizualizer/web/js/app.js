@@ -133,6 +133,11 @@ openSignalVisualizer() {
         const signals = Object.values(AppState.elements)
             .filter(e => e && e.type === 'input-signal')
             .map(e => e.props?.name || e.id);
+
+        const tables = Object.values(AppState.elements)
+            .filter(e => e && e.type === 'table')
+            .map(e => e.props?.name || e.id);
+
         const uniqSignals = [...new Set(signals)];
         
         if (uniqSignals.length === 0) {
@@ -169,7 +174,8 @@ openSignalVisualizer() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                signals: uniqSignals, 
+                signals: uniqSignals,
+                tables: tables,
                 code: codeStr,
                 visualizer_state: visualizerState  // НОВОЕ: передаём состояние
             })

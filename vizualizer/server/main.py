@@ -726,6 +726,34 @@ def api_signals(q: str = "", limit: int = 50):
         }
     )
 
+@app.get("/api/table/file/{name}")
+def api_table_file(name: str):
+    settings = STATE["settings"] or {}
+    folder = settings.get("tablesFolder")
+    if not folder:
+        raise HTTPException(status_code=500, detail="tablesFolder not configured")
+
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    if not os.path.isdir(folder_abs):
+        raise HTTPException(status_code=500, detail=f"tablesFolder not found: {folder_abs}")
+
+    # защита от path traversal
+    if ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid table name")
+
+    path = os.path.join(folder_abs, f"{name}.xlsx")
+    if not path.startswith(folder_abs):
+        raise HTTPException(status_code=400, detail="Path traversal attempt")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Table file not found")
+
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"{name}.xlsx",
+        headers={"Cache-Control": "no-cache"}
+    )
+
 
 @app.get("/api/formula-templates")
 def api_formula_templates():
@@ -977,6 +1005,7 @@ async def create_visualize_session(request: Request):
     try:
         data = await request.json()
         signals = data.get("signals", [])
+        tables = data.get("tables", [])
         code = data.get("code", "")
         visualizer_state = data.get("visualizer_state")
         
@@ -987,6 +1016,7 @@ async def create_visualize_session(request: Request):
         
         visualize_sessions[token] = {
             "signals": signals,
+            "tables": tables,
             "code": code,
             "visualizer_state": visualizer_state
         }
@@ -1012,6 +1042,7 @@ async def get_visualize_session(token: str):
     
     return {
         "signals": session.get("signals", []),
+        "tables": session.get("tables", []),
         "code": session.get("code", ""),
         "visualizer_state": session.get("visualizer_state")
     }

@@ -6,6 +6,40 @@ from typing import List, Tuple, Dict
 import numpy as np
 import pandas as pd
 
+TABLE_REGISTRY: Dict[str, pd.DataFrame] = {}
+
+def register_tables(tables: Dict[str, pd.DataFrame]):
+    TABLE_REGISTRY.clear()
+    TABLE_REGISTRY.update(tables or {})
+
+
+def _get_xy_from_table(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    cols = list(df.columns)
+    if len(cols) < 2:
+        raise CodeEvaluationError("GETPOINT: таблица должна иметь минимум 2 колонки (X и Y).")
+
+    # если есть колонки X/Y (без учёта регистра) — используем их
+    lower = {str(c).strip().lower(): c for c in cols}
+    if "x" in lower and "y" in lower:
+        cx, cy = lower["x"], lower["y"]
+    else:
+        cx, cy = cols[0], cols[1]
+
+    x = sanitize_numeric_column(df[cx]).to_numpy(dtype=np.float64)
+    y = sanitize_numeric_column(df[cy]).to_numpy(dtype=np.float64)
+
+    mask = ~np.isnan(x) & ~np.isnan(y)
+    x, y = x[mask], y[mask]
+    if x.size < 2:
+        raise CodeEvaluationError("GETPOINT: недостаточно точек для интерполяции (нужно >= 2).")
+    return x, y
+
+def _interp_1d(x: np.ndarray, y: np.ndarray, xq: np.ndarray) -> np.ndarray:
+    order = np.argsort(x)
+    xs = x[order]
+    ys = y[order]
+    return np.interp(xq, xs, ys)  # линейная интерполяция, clamp по краям
+
 
 class CodeEvaluationError(Exception):
     """Ошибка во время вычисления выражения CODE."""
@@ -111,9 +145,35 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         stacked = np.vstack([_ensure_series(arg).values for arg in args])
         return pd.Series(func(stacked, axis=0), index=index)
 
-    def GETPOINT(*_):
+    def GETPOINT(curveName, pointX, pointY, axisToFind):
+        curve_name = str(curveName)
+        axis = str(axisToFind).strip().upper()
+
+        df_tbl = TABLE_REGISTRY.get(curve_name)
+        if df_tbl is None:
+            if "GETPOINT" not in warnings:
+                warnings.append(f"GETPOINT: таблица '{curve_name}' не загружена — NaN.")
+            return pd.Series(np.nan, index=index)
+
+        try:
+            x, y = _get_xy_from_table(df_tbl)
+        except Exception as e:
+            if "GETPOINT" not in warnings:
+                warnings.append(f"GETPOINT: ошибка таблицы '{curve_name}': {e}")
+            return pd.Series(np.nan, index=index)
+
+        if axis == "Y":
+            xq = _ensure_series(pointX).values.astype(np.float64)
+            out = _interp_1d(x, y, xq)
+            return pd.Series(out, index=index)
+
+        if axis == "X":
+            yq = _ensure_series(pointY).values.astype(np.float64)
+            out = _interp_1d(y, x, yq)
+            return pd.Series(out, index=index)
+
         if "GETPOINT" not in warnings:
-            warnings.append("GETPOINT пока не поддержан — возвращается NaN.")
+            warnings.append("GETPOINT: axisToFind должен быть 'X' или 'Y' — NaN.")
         return pd.Series(np.nan, index=index)
 
     def PREV(param):
@@ -281,9 +341,16 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         "HISTORYGRADIENT": HISTORYGRADIENT,
         "GETPOINT": GETPOINT,
     }
+    env["X"] = "X"
+    env["Y"] = "Y"
 
     for original_name, safe_name in safe_name_map.items():
         env[safe_name] = series_map[original_name]
+
+    for tbl_name in TABLE_REGISTRY.keys():
+        # если вдруг совпало с safe-именем сигнала — не перетираем сигнал
+        if tbl_name not in env:
+            env[tbl_name] = tbl_name
 
     def _normalize_expression(expr: str) -> str:
         expr = re.sub(r"\bAND\b", "&", expr, flags=re.IGNORECASE)
