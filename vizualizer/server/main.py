@@ -682,7 +682,21 @@ def api_settings():
 
 @app.get("/api/tables")
 def api_tables(q: str = "", limit: int = 50):
-    tables = STATE["tables"] or []
+    settings = STATE["settings"] or {}
+    folder = settings.get("tablesFolder")
+    if not folder:
+        return {"items": [], "total": 0}
+
+    # каждый запрос перечитываем
+    base_list = load_tables_from_folder(folder)
+    meta = load_tables_meta(folder)
+    for item in base_list:
+        name = item["Name"]
+        if name in meta:
+            item["Description"] = meta[name]
+
+    tables = base_list
+
     if not q:
         items = tables[:limit]
         total = len(tables)
@@ -690,16 +704,13 @@ def api_tables(q: str = "", limit: int = 50):
         import re
         escaped = re.escape(q).replace(r"\*", ".*")
         rx = re.compile("^" + escaped + "$", re.IGNORECASE)
-        items = [t for t in tables if rx.match(t["Name"])]
-        total = len(items)
-        items = items[:max(1, min(limit, 500))]
+        filtered = [t for t in tables if rx.match(t["Name"])]
+        total = len(filtered)
+        items = filtered[:max(1, min(limit, 500))]
+
     return JSONResponse(
         content={"items": items, "total": total},
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
 
