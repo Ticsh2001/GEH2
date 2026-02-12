@@ -59,8 +59,61 @@ STATE = {
     "settings": None,
     "signals": None,
     "signal_index": None,
-    "templates": None
+    "templates": None,
+    "tables": None,
 }
+
+
+def load_tables_from_folder(folder: str) -> List[Dict]:
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    if not os.path.isdir(folder_abs):
+        return []
+    items = []
+    for name in os.listdir(folder_abs):
+        if not name.lower().endswith(".xlsx"):
+            continue
+        base = os.path.splitext(name)[0]
+        items.append({"Name": base, "Description": ""})
+    items.sort(key=lambda x: x["Name"].lower())
+    return items
+
+def load_tables_meta(folder: str) -> Dict[str, str]:
+    # читаем tables.json, если есть
+    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+    meta_path = os.path.join(folder_abs, "tables.json")
+    if not os.path.isfile(meta_path):
+        return {}
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        meta = {}
+        if isinstance(data, list):
+            for obj in data:
+                if isinstance(obj, dict) and obj:
+                    # берём первую пару
+                    k, v = next(iter(obj.items()))
+                    meta[str(k)] = str(v)
+        elif isinstance(data, dict):
+            meta = {str(k): str(v) for k, v in data.items()}
+        return meta
+    except Exception as e:
+        print(f"[WARN] failed to read tables.json: {e}")
+        return {}
+
+def refresh_tables_cache():
+    settings = STATE["settings"] or {}
+    folder = settings.get("tablesFolder")
+    if not folder:
+        STATE["tables"] = []
+        return
+    base_list = load_tables_from_folder(folder)
+    meta = load_tables_meta(folder)
+    # мержим описания
+    for item in base_list:
+        name = item["Name"]
+        if name in meta:
+            item["Description"] = meta[name]
+    STATE["tables"] = base_list
 
 # Хранилище сессий визуализатора (в памяти)
 visualize_sessions: Dict[str, Dict[str, Any]] = {}
@@ -596,6 +649,7 @@ def startup():
         project_dir=project_dir,
         templates_path=TEMPLATES_PATH
     )
+    refresh_tables_cache()
     
     folder = settings.get("signalDataFolder")
     if not folder:
@@ -613,6 +667,7 @@ def startup():
     print(f"[OK] Loaded signals: {len(STATE['signals'])}")
     print(f"[OK] Signal index has {len(STATE['signal_index'])} unique signals")
     print(f"[OK] Loaded templates: {len(STATE['templates'].get('templates', []))}")
+    print(f"[OK] Loaded tables: {len(STATE['tables'] or [])}")
 
 
 # =============================================================================
@@ -623,6 +678,29 @@ def startup():
 def api_settings():
     """Возвращает настройки приложения"""
     return STATE["settings"]
+
+
+@app.get("/api/tables")
+def api_tables(q: str = "", limit: int = 50):
+    tables = STATE["tables"] or []
+    if not q:
+        items = tables[:limit]
+        total = len(tables)
+    else:
+        import re
+        escaped = re.escape(q).replace(r"\*", ".*")
+        rx = re.compile("^" + escaped + "$", re.IGNORECASE)
+        items = [t for t in tables if rx.match(t["Name"])]
+        total = len(items)
+        items = items[:max(1, min(limit, 500))]
+    return JSONResponse(
+        content={"items": items, "total": total},
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 
 @app.get("/api/signals")

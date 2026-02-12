@@ -346,6 +346,8 @@ const CodeGen = {
             case 'input-signal':
                 // Имя сигнала или id как Var(...)
                 return this.toExpr(elem.props.name || id);
+            case 'table':
+                return this.toExpr(elem.props.name || id);
 
             case 'const':
                 return Optimizer.Const(Number(elem.props.value) || 0);

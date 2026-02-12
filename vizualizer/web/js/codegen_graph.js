@@ -304,6 +304,8 @@ const CodeGenGraph = {
         switch (elem.type) {
             case 'input-signal':
                 return Optimizer.Var(elem.props.name || graph.nodeId);
+            case 'table':
+                return Optimizer.Var(elem.props.name || graph.nodeId);
 
             case 'const':
                 return Optimizer.Const(Number(elem.props.value) || 0);

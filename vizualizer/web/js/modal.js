@@ -24,6 +24,8 @@ function getSignalNameForPort(elemId, portIndex) {
       return String(src.props?.value ?? 0);
     case 'formula':
       return src.props?.expression || src.id;
+    case 'table':
+      return src.props?.name || src.id;
     case 'output':
       return src.props?.label || src.id;
     default:
@@ -176,7 +178,25 @@ const Modal = {
                     <input type="number" id="prop-value" value="${props.value ?? 0}" step="any">
                 </div>
             `;
-        } 
+        } else if (elemType === 'table') {
+            contentHTML = `
+            <div class="modal-row">
+                <label>Название таблицы:</label>
+                <input type="text" id="prop-name" value="${props.name || ''}" placeholder="Например: MyTable или *Plan*" />
+                <small style="color:#999;">
+                Используйте * для маски (пример: *Plan*)
+                </small>
+                <div id="table-filter-results"
+                    style="max-height:160px; overflow-y:auto; background:#0f3460; border-radius:5px; margin-top:6px; display:none;">
+                </div>
+            </div>
+            <div class="modal-row">
+                <label>Комментарий:</label>
+                <textarea id="prop-comment" placeholder="Комментарий к элементу...">${props.comment || ''}</textarea>
+            </div>
+            `;
+        }
+         
         else if (elemType === 'group') {
             contentHTML = `
             <div class="modal-row">
@@ -570,6 +590,71 @@ const Modal = {
                 }
             }, { once: true });
         }
+
+                if (elemType === 'table') {
+            const input = document.getElementById('prop-name');
+            const results = document.getElementById('table-filter-results');
+            const commentField = document.getElementById('prop-comment');
+            let timer = null;
+
+            const renderList = (items) => {
+                if (!items || !items.length) {
+                    results.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
+                    results.style.display = 'block';
+                    return;
+                }
+                results.innerHTML = items.map(t => `
+                    <div class="signal-result-item"
+                        style="padding:6px 8px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.08);">
+                        <div style="font-weight:600;">${t.Name}</div>
+                        <div style="color:#aaa; font-size:11px;">${t.Description || ''}</div>
+                    </div>
+                `).join('');
+                results.style.display = 'block';
+
+                results.querySelectorAll('.signal-result-item').forEach((div, i) => {
+                    div.addEventListener('click', () => {
+                        const chosen = items[i];
+                        input.value = chosen.Name;
+                        if (commentField) commentField.value = chosen.Description || '';
+                        results.style.display = 'none';
+                    });
+                });
+            };
+
+            const search = async () => {
+                const mask = (input.value || '').trim();
+                if (!mask.includes('*')) {
+                    results.style.display = 'none';
+                    return;
+                }
+                results.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
+                results.style.display = 'block';
+                try {
+                    const data = await Settings.fetchTables(mask, 50);
+                    renderList(data.items || []);
+                } catch (e) {
+                    results.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки таблиц</div>';
+                    results.style.display = 'block';
+                    console.error(e);
+                }
+            };
+
+            input.addEventListener('input', () => {
+                clearTimeout(timer);
+                timer = setTimeout(search, 200);
+            });
+
+            document.addEventListener('mousedown', (e) => {
+                if (!results.contains(e.target) && e.target !== input) {
+                    results.style.display = 'none';
+                }
+            }, { once: true });
+        }
+
+
+
+
         modalOverlay.dataset.elementId = elemId;
         this.showModal('modal-overlay');
 
@@ -778,6 +863,16 @@ const Modal = {
 
                 const symbol = elem.querySelector('.element-symbol');
                 if (symbol) symbol.textContent = label;
+            } else if (elemType === 'table') {
+                const name = document.getElementById('prop-name').value || 'Таблица';
+                elemData.props.name = name;
+
+                const { html } = Elements.createElementHTML(
+                    elemType, elemId, elemData.x, elemData.y, elemData.props, elemData.width, elemData.height
+                );
+                elem.outerHTML = html;
+                Elements.setupElementHandlers(elemId);
+                Connections.drawConnections();
             }
             else if (elemType === 'group') {
                 const title = document.getElementById('prop-title').value || 'Группа';

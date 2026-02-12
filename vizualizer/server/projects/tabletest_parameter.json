@@ -1,0 +1,140 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "tabletest",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "visualizer_state": null,
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-02-12T07:09:41.983Z"
+  },
+  "elements": {
+    "table_2": {
+      "id": "table_2",
+      "type": "table",
+      "x": 219,
+      "y": 1139,
+      "width": 167,
+      "height": 76,
+      "props": {
+        "name": "YHDGD",
+        "comment": ""
+      }
+    },
+    "formula_3": {
+      "id": "formula_3",
+      "type": "formula",
+      "x": 573,
+      "y": 1068,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "Сигнал+YHDGD",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "formula_5": {
+      "id": "formula_5",
+      "type": "formula",
+      "x": 860,
+      "y": 1206,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "Сигнал2+formula_3",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "output_7": {
+      "id": "output_7",
+      "type": "output",
+      "x": 1042,
+      "y": 1258,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 219,
+      "y": 1041,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Сигнал",
+        "signalType": "numeric"
+      }
+    },
+    "input_signal_6": {
+      "id": "input_signal_6",
+      "type": "input-signal",
+      "x": 237,
+      "y": 1378,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Сигнал2",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "table_2",
+      "fromPort": "out-0",
+      "toElement": "formula_3",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_3",
+      "fromPort": "out-0",
+      "toElement": "formula_5",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_6",
+      "fromPort": "out-0",
+      "toElement": "formula_5",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_5",
+      "fromPort": "out-0",
+      "toElement": "output_7",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 7,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "Сигнал2+(Сигнал+YHDGD)",
+  "visualizer_state": null
+}

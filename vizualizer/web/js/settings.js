@@ -81,6 +81,14 @@ const Settings = {
     return await r.json();
   },
 
+  async fetchTables(mask, limit = 50) {
+    const timestamp = Date.now();
+    const url = `${this.apiUrl}/api/tables?q=${encodeURIComponent(mask || '')}&limit=${limit}&_t=${timestamp}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Failed to fetch tables');
+    return await r.json();
+  },
+
   async loadProject(filename, source = 'projects') {
     if (!filename.endsWith('.json')) {
       filename += '.json';

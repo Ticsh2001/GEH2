@@ -3,5 +3,6 @@
   "projectDataFolder": "projects",
   "templateDataFolder": "templates",
   "signalArchiveFolder": "archive",
+  "tablesFolder": "tables",
   "visualizerPort": 8501
 }

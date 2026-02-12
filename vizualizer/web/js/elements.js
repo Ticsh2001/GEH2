@@ -321,6 +321,21 @@ const Elements = {
                     <div class="group-title">${title}</div>
                     </div>`;
             }
+            else if (elemType === 'table') {
+                const name = safe(props.name, 'Таблица');
+                innerHTML = `
+                    <div class="element-header" style="background:${config.color};">Таблица</div>
+                    <div class="element-body">
+                        <div class="element-symbol">
+                            <span class="input-signal-icon">📊</span>
+                            <span class="input-signal-name">${name}</span>
+                        </div>
+                        <div class="ports-right">
+                            ${buildOutputPorts(1, [SIGNAL_TYPE.NUMERIC], ['Выход'])}
+                        </div>
+                    </div>`;
+            }
+
             
             else { // Для любых других (fallback)
                 innerHTML = `

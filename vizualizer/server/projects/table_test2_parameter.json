@@ -1,0 +1,97 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "table_test2",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "visualizer_state": null,
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-02-12T07:30:49.214Z"
+  },
+  "elements": {
+    "table_1": {
+      "id": "table_1",
+      "type": "table",
+      "x": 247,
+      "y": 1096,
+      "width": 190,
+      "height": 80,
+      "props": {
+        "name": "table1",
+        "comment": "dhjsdhfhds"
+      }
+    },
+    "formula_2": {
+      "id": "formula_2",
+      "type": "formula",
+      "x": 629,
+      "y": 1156,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "table1+const_3",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "const_3": {
+      "id": "const_3",
+      "type": "const",
+      "x": 296,
+      "y": 1310,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "output_4": {
+      "id": "output_4",
+      "type": "output",
+      "x": 847,
+      "y": 1222,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "table_1",
+      "fromPort": "out-0",
+      "toElement": "formula_2",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_3",
+      "fromPort": "out-0",
+      "toElement": "formula_2",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_2",
+      "fromPort": "out-0",
+      "toElement": "output_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 4,
+  "viewport": {
+    "zoom": 1,
+    "panX": 41,
+    "panY": -816
+  },
+  "code": "table1+const_3",
+  "visualizer_state": null
+}

@@ -220,6 +220,22 @@ const ELEMENT_TYPES = {
         minWidth: 150,
         minHeight: 60,
     },  // ← важно, если предыдущий элемент не заканчивается запятой
+    'table': {
+        name: 'Таблица',
+        inputs: 0,
+        outputs: 1,
+        outputLabels: ['out'],
+        outputTypes: [SIGNAL_TYPE.NUMERIC],
+        color: '#60a5fa',
+        hasProperties: true,
+        defaultProps: { name: 'Таблица' },
+        resizable: true,
+        minWidth: 190,
+        minHeight: 120
+
+
+    },
+
     'group': {
         name: 'Группа',
         inputs: 0,
