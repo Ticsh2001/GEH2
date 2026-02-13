@@ -144,6 +144,8 @@ def compute_streaming_signal(
     """
     import re
     from code_signal import sanitize_numeric_column
+    from code_signal import TABLE_REGISTRY
+    from code_signal import _get_xy_from_table, _interp_1d
 
     df_work = df_base.copy()
     df_work[signal_name] = np.nan

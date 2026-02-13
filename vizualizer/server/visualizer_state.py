@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set
 import pandas as pd
 
 
+
 # Версия формата состояния (для обратной совместимости в будущем)
 STATE_VERSION = 1
 
