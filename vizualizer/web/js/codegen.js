@@ -543,7 +543,8 @@ const CodeGen = {
 
             const simplified = Optimizer.simplifyExpr(result);
             const finalCode = Optimizer.printExpr(simplified);
-            return cleanupParentheses(finalCode);
+            return finalCode
+            //return cleanupParentheses(finalCode);
 
         } catch (err) {
             console.error('Ошибка:', err);
