@@ -1,91 +1,182 @@
 // js/codegen.js
 
+
+// js/codegen.js
+
 /**
- * Косметическая чистка лишних скобок в готовом выражении.
- * Работает ТОЛЬКО со строкой, не влияет на генерацию.
- *
- * Убирает:
- *  1. Двойные скобки:        ((x + y))        → (x + y)
- *  2. Скобки вокруг атомов:  (Сигнал)         → Сигнал
- *                             (42)             → 42
- *                             (3.14)           → 3.14
- *  3. Скобки вокруг атома    func((x))        → func(x)
- *     внутри вызова функции
- *  4. Внешние скобки вокруг   ((a + b) - c)   → (a + b) - c
- *     всего выражения целиком
+ * Безопасная очистка избыточных скобок в готовом коде.
+ * Понимает контекст функций и не ломает синтаксис.
  */
-/**
- * Косметическая чистка лишних скобок в готовом выражении.
- * Работает ТОЛЬКО со строкой, не влияет на генерацию.
- *
- * Убирает:
- *  1. Двойные скобки:        ((x + y))        → (x + y)
- *     НО НЕ после имён функций: WHEN((x > 0), ...) — не трогаем
- *  2. Скобки вокруг атомов:  (Сигнал) + Y     → Сигнал + Y
- *     НО НЕ аргументы функций:  ABS(Сигнал)   — не трогаем
- *  3. Скобки вокруг числа:   (42) + Y         → 42 + Y
- *     НО НЕ аргументы функций:  ROUND(0)      — не трогаем
- *  4. Внешние скобки вокруг всего выражения
- */
+// Полностью заменить cleanupParentheses и его хелперы на это
+
 function cleanupParentheses(code) {
     if (typeof code !== 'string') return code;
+    let s = code;
+    let prev = null;
 
-    let prev;
-    for (let pass = 0; pass < 20; pass++) {
-        prev = code;
-
-        // 1. Двойные скобки: (( … )) → ( … )
-        //    Пропускаем (( после идентификатора — это func((...))
-        code = stripBalanced(code);
-
-        // 2. Скобки вокруг «атома» — идентификатора
-        //    НО НЕ трогаем func(X) — если перед ( стоит буква/цифра/)
-        code = code.replace(
-            /\((\s*[\w\u0400-\u04FF][\w\u0400-\u04FF.]*\s*)\)/g,
-            (match, inner, offset) => {
-                if (offset > 0 && /[\w\u0400-\u04FF)]/.test(code[offset - 1])) {
-                    return match; // func(X) или )(X) — не трогаем
-                }
-                return inner.trim();
-            }
-        );
-
-        // 3. Скобки вокруг числа
-        //    НО НЕ трогаем func(42)
-        code = code.replace(
-            /\((\s*\d+\.?\d*\s*)\)/g,
-            (match, n, offset) => {
-                if (offset > 0 && /[\w\u0400-\u04FF)]/.test(code[offset - 1])) {
-                    return match; // func(42) — не трогаем
-                }
-                return n.trim();
-            }
-        );
-
-        if (code === prev) break;
+    // Многократные безопасные проходы, пока есть изменения
+    for (let pass = 0; pass < 10; pass++) {
+        if (s === prev) break;
+        prev = s;
+        s = cleanupPass(s);
     }
 
-    // 4. Убираем внешние скобки, если обрамляют ВСЁ выражение
-    code = stripOuterParens(code.trim());
-
-    return code;
+    // Наружные скобки вокруг ВСЕГО выражения
+    s = stripOuterParens(s.trim());
+    return s;
 }
 
+function cleanupPass(s) {
+    const n = s.length;
+    if (n === 0 || s.indexOf('(') === -1) return s;
 
-/* ── Вспомогательные функции ─────────────────────────── */
+    // Построим пары скобок
+    const stack = [];
+    const openToClose = new Array(n).fill(-1);
+    const pairs = []; // {open, close}
+
+    for (let i = 0; i < n; i++) {
+        const ch = s[i];
+        if (ch === '(') {
+            stack.push(i);
+        } else if (ch === ')') {
+            if (stack.length === 0) continue;
+            const open = stack.pop();
+            openToClose[open] = i;
+            pairs.push({ open, close: i });
+        }
+    }
+    // Несбалансированные — не трогаем
+    if (stack.length > 0) return s;
+
+    // Утилиты
+    const isIdentChar = (c) => /[A-Za-z0-9_\u0400-\u04FF.§]/.test(c || '');
+    const isAtomicIdent = (t) => /^[A-Za-z0-9_\u0400-\u04FF.§][A-Za-z0-9_\u0400-\u04FF.§.]*$/.test(t);
+    const isAtomicNumber = (t) => /^-?\d+(?:[.,]\d+)?$/.test(t);
+    const isAtomic = (t) => {
+        const tt = t.trim();
+        return isAtomicIdent(tt) || isAtomicNumber(tt);
+    };
+
+    function isWholeFunctionCall(str) {
+        const tt = str.trim();
+        if (!tt) return false;
+        const p = tt.indexOf('(');
+        if (p <= 0) return false;
+        const name = tt.slice(0, p).trim();
+        if (!isAtomicIdent(name)) return false;
+        if (tt[tt.length - 1] !== ')') return false;
+        let depth = 0;
+        for (let i = p; i < tt.length; i++) {
+            const ch = tt[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+                depth--;
+                if (depth === 0 && i !== tt.length - 1) return false;
+            }
+            if (depth < 0) return false;
+        }
+        return depth === 0;
+    }
+
+    // Разметка к удалению
+    const drop = new Array(n).fill(false);
+
+    // Обрабатываем пары изнутри наружу
+    pairs.sort((a, b) => (a.close - a.open) - (b.close - a.open));
+
+    // 1) Базовые безопасные правила: атомы и двойные скобки (НЕ скобки вызова функции)
+    for (const { open, close } of pairs) {
+        if (drop[open] || drop[close]) continue;
+        const before = s[open - 1] || '';
+        const isCallParens = isIdentChar(before) && openToClose[open] === close; // собственные скобки вызова функции
+        const inner = s.slice(open + 1, close);
+        const innerTrim = inner.trim();
+
+        // (ATOM) → ATOM, если это не скобки вызова функции
+        if (!isCallParens && isAtomic(innerTrim)) {
+            drop[open] = true;
+            drop[close] = true;
+            continue;
+        }
+
+        // ((…)) → (…), если это не скобки вызова функции
+        if (!isCallParens) {
+            const innerStart = open + 1;
+            const innerEnd = close - 1;
+            if (s[innerStart] === '(' && openToClose[innerStart] === innerEnd) {
+                drop[open] = true;
+                drop[close] = true;
+                continue;
+            }
+        }
+    }
+
+    // 2) Внутри вызовов функций: снимаем лишние скобки вокруг аргументов,
+    //    НО только если аргумент — атом или целый вызов функции.
+    for (const { open, close } of pairs) {
+        if (drop[open] || drop[close]) continue;
+        const before = s[open - 1] || '';
+        const isCallParens = isIdentChar(before) && openToClose[open] === close;
+        if (!isCallParens) continue;
+
+        // Разбираем аргументы по верхнеуровневым запятым
+        const args = [];
+        let depth = 0;
+        let start = open + 1;
+        for (let i = open + 1; i < close; i++) {
+            const ch = s[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') depth--;
+            else if (ch === ',' && depth === 0) {
+                args.push([start, i - 1]);
+                start = i + 1;
+            }
+        }
+        if (start <= close - 1) {
+            args.push([start, close - 1]);
+        }
+
+        for (const [aStart, aEnd] of args) {
+            // Снимаем только если аргумент завернут целиком в одну пару скобок
+            if (s[aStart] === '(' && openToClose[aStart] === aEnd) {
+                const inner = s.slice(aStart + 1, aEnd).trim();
+                if (isAtomic(inner) || isWholeFunctionCall(inner)) {
+                    drop[aStart] = true;
+                    drop[aEnd] = true;
+                }
+            } else {
+                // Дополнительно: если аргумент — ((…)) на верхнем уровне, снимаем один лишний слой
+                if (s[aStart] === '(' && openToClose[aStart] === aEnd &&
+                    s[aStart + 1] === '(' && openToClose[aStart + 1] === aEnd - 1) {
+                    drop[aStart] = true;
+                    drop[aEnd] = true;
+                }
+            }
+        }
+    }
+
+    // Собираем строку
+    let out = '';
+    for (let i = 0; i < n; i++) {
+        if (!drop[i]) out += s[i];
+    }
+    return out;
+}
 
 /**
  * Убирает внешние скобки, только если они обрамляют ВСЁ выражение.
- *  "(a + b)"   → "a + b"
- *  "(a) + (b)" → без изменений
+ * "(a + b)"   → "a + b"
+ * "(a) + (b)" → без изменений
  */
 function stripOuterParens(s) {
     while (s.length > 2 && s[0] === '(' && s[s.length - 1] === ')') {
         let depth = 0;
         let closesAtEnd = true;
         for (let i = 0; i < s.length; i++) {
-            if (s[i] === '(') depth++;
-            else if (s[i] === ')') depth--;
+            const ch = s[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') depth--;
             if (depth === 0 && i < s.length - 1) {
                 closesAtEnd = false;
                 break;
@@ -100,59 +191,9 @@ function stripOuterParens(s) {
     return s;
 }
 
-/**
- * Находит (( … )) со сбалансированным содержимым и заменяет на ( … ).
- * КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: пропускает (( после идентификаторов,
- * чтобы не ломать func((arg), ...) → func(arg), ...)
- */
-function stripBalanced(code) {
-    let result = code;
-    let idx = 0;
 
-    while (idx < result.length - 1) {
-        const pos = result.indexOf('((', idx);
-        if (pos === -1) break;
 
-        // ★ Главная защита: если перед (( стоит буква/цифра/_/кириллица,
-        //   значит это func(( — НЕ трогаем
-        if (pos > 0 && /[\w\u0400-\u04FF]/.test(result[pos - 1])) {
-            idx = pos + 1;
-            continue;
-        }
 
-        // Находим конец выражения от первой (
-        let depth = 0;
-        let end = -1;
-        for (let i = pos; i < result.length; i++) {
-            if (result[i] === '(') depth++;
-            else if (result[i] === ')') depth--;
-            if (depth === 0) {
-                end = i;
-                break;
-            }
-        }
-        if (end === -1) { idx = pos + 1; continue; }
-
-        const inner = result.slice(pos, end + 1); // включая внешние скобки
-
-        // Проверяем что это действительно (( … ))
-        if (inner.length >= 4 && inner[1] === '(' && inner[inner.length - 2] === ')') {
-            const candidate = inner.slice(1, -1);
-            let d = 0, ok = true;
-            for (let i = 0; i < candidate.length; i++) {
-                if (candidate[i] === '(') d++;
-                else if (candidate[i] === ')') d--;
-                if (d < 0) { ok = false; break; }
-            }
-            if (ok && d === 0) {
-                result = result.slice(0, pos) + candidate + result.slice(end + 1);
-                continue; // не сдвигаем idx — вдруг ещё слой
-            }
-        }
-        idx = pos + 1;
-    }
-    return result;
-}
 
 
 
@@ -543,8 +584,8 @@ const CodeGen = {
 
             const simplified = Optimizer.simplifyExpr(result);
             const finalCode = Optimizer.printExpr(simplified);
-            return finalCode
-            //return cleanupParentheses(finalCode);
+            //return finalCode
+            return cleanupParentheses(finalCode);
 
         } catch (err) {
             console.error('Ошибка:', err);
