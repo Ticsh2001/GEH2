@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Создать подобный проект</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+    .row label { min-width: 220px; font-weight: 600; }
+    input[type="text"], textarea { width: 100%; padding: 6px 8px; font-family: inherit; }
+    .signals { margin-top: 16px; }
+    .signals .row label { font-weight: 500; min-width: 280px; }
+    .buttons { margin-top: 20px; display: flex; gap: 12px; }
+    .btn { padding: 8px 12px; cursor: pointer; }
+    .btn.primary { background: #2c7; border: 1px solid #2a5; color: #042; }
+    .btn.secondary { background: #ddd; border: 1px solid #bbb; }
+    .hint { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Создать подобный проект</h2>
+
+  <div id="meta">
+    <div class="row">
+      <label for="new-code">Новое имя сигнала (Tagname):</label>
+      <input type="text" id="new-code" placeholder="Например: KKS_NEW_TAG">
+    </div>
+
+    <div class="row">
+      <label>Тип проекта:</label>
+      <span id="project-type"></span>
+    </div>
+
+    <div id="type-fields"></div>
+  </div>
+
+  <h3>Замена входных сигналов</h3>
+  <p class="hint">Слева — исходные входные сигналы из проекта, справа — KKS, на который заменить в новом проекте.</p>
+
+  <div id="signals" class="signals"></div>
+
+  <div class="buttons">
+    <button class="btn primary" id="btn-save-similar">Сохранить новый проект</button>
+    <button class="btn secondary" id="btn-cancel">Отмена</button>
+  </div>
+
+  <!-- ВАЖНО: абсолютный путь от корня /, т.к. StaticFiles монтирует web как корень -->
+  <script src="/js/similar.js"></script>
+</body>
+</html>

@@ -33,6 +33,18 @@ init() {
         const code = CodeGen.generate();
         document.getElementById('code-output').value = code;
         document.getElementById('code-modal-overlay').style.display = 'flex';
+
+        const srcEl = document.getElementById('code-output');
+        const dstEl = document.getElementById('code-output-system');
+        const originalCode = (srcEl && typeof srcEl.value === 'string') ? srcEl.value : '';
+
+        const processed = App.prepareCodeForSystem(originalCode);
+        if (dstEl) {
+            dstEl.value = processed || '';
+        } else {
+            // fallback: если второе поле не добавили — покажем в исходном
+            if (srcEl) srcEl.value = processed || '';
+        }
     });
 
     document.getElementById('code-modal-close').addEventListener('click', () => {
@@ -42,6 +54,51 @@ init() {
     document.getElementById('btn-visualize').addEventListener('click', () => {
         App.openSignalVisualizer();
     });
+
+    document.getElementById('btn-create-similar').addEventListener('click', async () => {
+    try {
+        const proj = AppState.project || {};
+        const code = (proj.code || '').trim();
+        const type = (proj.type || 'parameter').trim();
+
+        if (!code) {
+            alert('Сначала укажите код проекта в свойствах и сохраните проект.');
+            return;
+        }
+
+        const filename = `${code}_${type}.json`;
+        const source = (type === 'template') ? 'templates' : 'projects';
+
+        // Проверяем, что проект реально сохранён на диск
+        const resp = await fetch(`/api/project/load/${encodeURIComponent(filename)}?source=${encodeURIComponent(source)}`);
+        if (!resp.ok) {
+            alert('Проект не найден на сервере. Пожалуйста, сохраните проект перед созданием подобного.');
+            return;
+        }
+
+        // Открываем мастер в новой вкладке
+        const url = `/similar.html?filename=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}`;
+        window.open(url, '_blank');
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка при открытии мастера: ' + e.message);
+    }
+});
+
+
+    //document.getElementById('code-modal-to-system').addEventListener('click', () => {
+    //    const srcEl = document.getElementById('code-output');
+    //    const dstEl = document.getElementById('code-output-system');
+    //    const originalCode = (srcEl && typeof srcEl.value === 'string') ? srcEl.value : '';
+    //
+    //    const processed = App.prepareCodeForSystem(originalCode);
+    //    if (dstEl) {
+    //        dstEl.value = processed || '';
+    //    } else {
+    //        // fallback: если второе поле не добавили — покажем в исходном
+    //        if (srcEl) srcEl.value = processed || '';
+    //    }
+    //});
 
     // ===== Автозагрузка проекта из URL =====
     this.autoLoadFromURL();
@@ -207,6 +264,50 @@ openSignalVisualizer() {
         console.error(e);
         alert('Ошибка при подготовке визуализации: ' + e.message);
     }
+},
+
+prepareCodeForSystem(codeStr) {
+    if (!codeStr || typeof codeStr !== 'string') return codeStr;
+
+    let out = codeStr;
+
+    // 1) Логические операторы ТОЛЬКО как отдельные слова
+    // Пример: (A AND B) → (A && B); NOT(X) → !(X)
+    out = out.replace(/\bAND\b/g, '&&')
+             .replace(/\bOR\b/g, '||')
+             .replace(/\bNOT\b/g, '!');
+
+    // 2) Добавляем 'P' перед именами input-signal, начинающимися с цифры
+    // Берём имена из AppState, чтобы не гадать.
+    try {
+        const usedSignals = Object.values(AppState.elements || {})
+            .filter(e => e && e.type === 'input-signal')
+            .map(e => (e.props?.name || e.id || '').trim())
+            .filter(name => !!name);
+
+        // Уникальные
+        const unique = Array.from(new Set(usedSignals));
+
+        // Только те, что начинаются с цифры
+        const startsWithDigit = unique.filter(name => /^\d/.test(name));
+
+        // Для каждого такого имени — заменить по "границам токена"
+        // Токен = последовательность идентична правилам: буквы/цифры/кириллица/_/§ и точки.
+        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF§\\.'; // класс разрешённых символов имени
+        const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        for (const sig of startsWithDigit) {
+            const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
+            out = out.replace(re, `$1P$2`);
+        }
+    } catch (e) {
+        console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
+    }
+
+    // 3) § → _
+    out = out.replace(/§/g, '_');
+
+    return out;
 },
 
 /**
