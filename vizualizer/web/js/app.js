@@ -54,6 +54,8 @@ init() {
     document.getElementById('btn-visualize').addEventListener('click', () => {
         App.openSignalVisualizer();
     });
+    document.getElementById('btn-map').addEventListener('click', () => 
+        {window.open('/map.html', '_blank');});
 
     document.getElementById('btn-create-similar').addEventListener('click', async () => {
     try {
@@ -83,6 +85,7 @@ init() {
         console.error(e);
         alert('Ошибка при открытии мастера: ' + e.message);
     }
+    
 });
 
 
