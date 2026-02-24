@@ -277,8 +277,9 @@
     const input = document.getElementById('new-code');
     if (!input) return;
 
-    // Создаём контейнер для результатов автокомплита
     const resultsDiv = document.createElement('div');
+    resultsDiv.id = 'new-code-results';
+    resultsDiv.className = 'autocomplete-results';
     resultsDiv.id = 'new-code-results';
     resultsDiv.style.cssText = `
       position:absolute; top:100%; left:0; right:0; max-height:160px; overflow-y:auto; 
@@ -372,85 +373,77 @@
     });
   }
 
-  // --- НОВАЯ ФУНКЦИЯ: Автокомплит для замены сигналов ---
   function setupSignalMappingAutocomplete(uniqSignals) {
-    // НОВОЕ: Глобальное хранилище данных выбранных сигналов
-    window.selectedSignalsData = window.selectedSignalsData || {};
-    
-    uniqSignals.forEach(sig => {
-      const inputId = `map-${sig.replace(/[^A-Za-z0-9_\u0400-\u04FF§.]/g, '_')}`;
-      const input = document.getElementById(inputId);
-      const resultsDiv = document.getElementById(`results-${inputId}`);
-      
-      if (!input || !resultsDiv) return;
+  window.selectedSignalsData = window.selectedSignalsData || {};
 
-      let timer = null;
+  uniqSignals.forEach(sig => {
+    const inputId = `map-${sig.replace(/[^A-Za-z0-9_\u0400-\u04FF§.]/g, '_')}`;
+    const input = document.getElementById(inputId);
+    const resultsDiv = document.getElementById(`results-${inputId}`);
 
-      const renderResults = (items) => {
-        if (!items || items.length === 0) {
-          resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
-          resultsDiv.style.display = 'block';
-          return;
-        }
+    if (!input || !resultsDiv) return;
 
-        resultsDiv.innerHTML = items.map(s => `
-          <div class="signal-result-item"
-              style="padding:6px 8px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.08);">
-              <div style="font-weight:600;">${s.Tagname}</div>
-              <div style="color:#aaa; font-size:11px;">${s.Description || ''}</div>
-          </div>
-        `).join('');
+    let timer = null;
 
+    const renderResults = (items) => {
+      if (!items || items.length === 0) {
+        resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Нет совпадений</div>';
         resultsDiv.style.display = 'block';
+        return;
+      }
 
-        resultsDiv.querySelectorAll('.signal-result-item').forEach((div, i) => {
-          div.addEventListener('click', () => {
-            const chosen = items[i];
-            input.value = chosen.Tagname;
-            
-            // НОВОЕ: Сохраняем данные для последующего использования при создании элементов
-            window.selectedSignalsData[chosen.Tagname] = chosen;
-            
-            resultsDiv.style.display = 'none';
-          });
+      resultsDiv.innerHTML = items.map(s => `
+        <div class="signal-result-item">
+          <div style="font-weight:600;">${s.Tagname}</div>
+          <div style="color:#aaa;font-size:11px;">${s.Description || ''}</div>
+        </div>
+      `).join('');
+
+      resultsDiv.style.display = 'block';
+
+      resultsDiv.querySelectorAll('.signal-result-item').forEach((div, i) => {
+        div.addEventListener('click', () => {
+          const chosen = items[i];
+          input.value = chosen.Tagname;
+          window.selectedSignalsData[chosen.Tagname] = chosen;
+          resultsDiv.style.display = 'none';
         });
-      };
-
-      const search = async () => {
-        const mask = input.value.trim();
-
-        if (!mask.includes('*')) {
-          resultsDiv.style.display = 'none';
-          return;
-        }
-
-        resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
-        resultsDiv.style.display = 'block';
-
-        try {
-          const response = await fetch(`/api/signals?q=${encodeURIComponent(mask)}&limit=50`);
-          const data = await response.json();
-          renderResults(data.items || []);
-        } catch (e) {
-          resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки сигналов</div>';
-          resultsDiv.style.display = 'block';
-          console.error(e);
-        }
-      };
-
-      input.addEventListener('input', () => {
-        clearTimeout(timer);
-        timer = setTimeout(search, 200);
       });
+    };
 
-      // Закрытие списка при клике вне
-      document.addEventListener('click', (e) => {
-        if (!input.parentNode.contains(e.target)) {
-          resultsDiv.style.display = 'none';
-        }
-      });
+    const search = async () => {
+      const mask = input.value.trim();
+
+      if (!mask.includes('*')) {
+        resultsDiv.style.display = 'none';
+        return;
+      }
+
+      resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Поиск...</div>';
+      resultsDiv.style.display = 'block';
+
+      try {
+        const response = await fetch(`/api/signals?q=${encodeURIComponent(mask)}&limit=50`);
+        const data = await response.json();
+        renderResults(data.items || []);
+      } catch (e) {
+        console.error(e);
+        resultsDiv.innerHTML = '<div style="color:#666;padding:6px;">Ошибка загрузки</div>';
+      }
+    };
+
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(search, 200);
     });
-  }
+
+    document.addEventListener('click', (e) => {
+      if (!input.parentNode.contains(e.target)) {
+        resultsDiv.style.display = 'none';
+      }
+    });
+  });
+}
 
   // --- Вход в скрипт ---
   (async function main() {

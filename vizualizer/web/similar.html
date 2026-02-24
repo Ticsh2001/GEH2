@@ -5,55 +5,337 @@
   <title>Создать подобный проект</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; }
-    .row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
-    .row label { min-width: 220px; font-weight: 600; padding-top: 6px; }
-    input[type="text"], textarea { width: 100%; padding: 6px 8px; font-family: inherit; }
-    textarea { min-height: 60px; resize: vertical; }
-    .signals { margin-top: 16px; }
-    .signals .row label { font-weight: 500; min-width: 280px; }
-    .buttons { margin-top: 20px; display: flex; gap: 12px; }
-    .btn { padding: 8px 12px; cursor: pointer; }
-    .btn.primary { background: #2c7; border: 1px solid #2a5; color: #042; }
-    .btn.secondary { background: #ddd; border: 1px solid #bbb; }
-    .hint { color: #666; font-size: 12px; }
-    
-    /* Стили для автокомплита */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #16213e;
+      border: 2px solid #0f3460;
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    h2 {
+      color: #e94560;
+      margin-bottom: 20px;
+      text-align: center;
+      font-size: 24px;
+    }
+
+    h3 {
+      color: #e94560;
+      margin: 20px 0 10px 0;
+      font-size: 18px;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 15px;
+    }
+
+    .row label {
+      min-width: 220px;
+      font-weight: 600;
+      padding-top: 8px;
+      color: #aaa;
+      font-size: 13px;
+    }
+
+    .signals .row label {
+      font-weight: 500;
+      min-width: 280px;
+    }
+
+    input[type="text"], textarea, select {
+      width: 100%;
+      padding: 10px;
+      background: #0f3460;
+      border: 1px solid #4a90d9;
+      border-radius: 5px;
+      color: #eee;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    input[type="text"]:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    textarea {
+      min-height: 60px;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .hint {
+      color: #888;
+      font-size: 12px;
+      line-height: 1.4;
+      margin-bottom: 10px;
+    }
+
+    .signals {
+      margin-top: 16px;
+    }
+
+    .buttons {
+      margin-top: 20px;
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 10px 25px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: inherit;
+      transition: background 0.3s;
+    }
+
+    .btn.primary {
+      background: #4ade80;
+      color: #000;
+      font-weight: 600;
+    }
+
+    .btn.primary:hover {
+      background: #22c55e;
+    }
+
+    .btn.secondary {
+      background: #6b7280;
+      color: #fff;
+    }
+
+    .btn.secondary:hover {
+      background: #4b5563;
+    }
+
+    /* Автокомплит */
+    .signal-result-item {
+      padding: 8px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      transition: background 0.2s;
+      font-size: 12px;
+    }
+
     .signal-result-item:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(74, 144, 217, 0.3);
+    }
+
+    .signal-result-item:last-child {
+      border-bottom: none;
+    }
+
+    .signal-result-item div:first-child {
+      font-weight: 600;
+      color: #eee;
+    }
+
+    .signal-result-item div:last-child {
+      color: #aaa;
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    /* Стили для полей в зависимости от типа проекта */
+    .project-type-display {
+      background: #0f3460;
+      padding: 8px 12px;
+      border-radius: 5px;
+      color: #4a90d9;
+      font-weight: 600;
+      display: inline-block;
+    }
+
+    /* Поля автокомплита */
+    .autocomplete-wrapper {
+      position: relative;
+      flex: 1;
+    }
+
+    .autocomplete-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 160px;
+      overflow-y: auto;
+      background: #0f3460;
+      border: 1px solid #4a90d9;
+      border-radius: 5px;
+      margin-top: 2px;
+      display: none;
+      z-index: 1000;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+    }
+
+    .autocomplete-results.visible {
+      display: block;
+    }
+
+    .autocomplete-hint {
+      color: #888;
+      font-size: 12px;
+      margin-top: 4px;
+      display: block;
+    }
+
+    /* Скроллбар */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #0a0a1a;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #4a90d9;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #e94560;
+    }
+
+    /* Дополнительные стили для лучшего восприятия */
+    .meta-section {
+      background: #0a0a1a;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+
+    .signals-section {
+      background: #0a0a1a;
+      border-radius: 8px;
+      padding: 15px;
+    }
+
+    .no-signals {
+      color: #888;
+      font-style: italic;
+      padding: 20px;
+      text-align: center;
+      background: rgba(74, 144, 217, 0.1);
+      border-radius: 5px;
+    }
+
+    /* Анимация для результатов поиска */
+    .autocomplete-results {
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Состояние загрузки */
+    .loading-state {
+      color: #888;
+      padding: 10px;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .error-state {
+      color: #f87171;
+      padding: 10px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container {
+        margin: 10px;
+        padding: 15px;
+      }
+
+      .row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .row label {
+        min-width: auto;
+        padding-top: 0;
+        margin-bottom: 5px;
+      }
+
+      .signals .row label {
+        min-width: auto;
+      }
+
+      .buttons {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
-  <h2>Создать подобный проект</h2>
+  <div class="container">
+    <h2>Создать подобный проект</h2>
 
-  <div id="meta">
-    <div class="row">
-      <label for="new-code">Новое имя сигнала (Tagname):</label>
-      <div style="flex:1;">
-        <input type="text" id="new-code" placeholder="Например: KKS_NEW_TAG или используйте * для поиска">
-        <small style="color:#999; display:block; margin-top:4px;">
-          Поиск по маске через * (например: *MAA*CP*). При выборе из списка поля проекта заполнятся автоматически.
-        </small>
+    <div class="meta-section">
+      <div class="row">
+        <label for="new-code">Новое имя сигнала (Tagname):</label>
+        <div class="autocomplete-wrapper">
+          <input type="text" id="new-code" placeholder="Например: KKS_NEW_TAG или используйте * для поиска">
+          <small class="autocomplete-hint">
+            Поиск по маске через * (например: *MAA*CP*). При выборе из списка поля проекта заполнятся автоматически.
+          </small>
+        </div>
       </div>
+
+      <div class="row">
+        <label>Тип проекта:</label>
+        <div class="project-type-display" id="project-type"></div>
+      </div>
+
+      <div id="type-fields"></div>
     </div>
 
-    <div class="row">
-      <label>Тип проекта:</label>
-      <span id="project-type"></span>
+    <h3>Замена входных сигналов</h3>
+    <p class="hint">Слева — исходные входные сигналы из проекта, справа — KKS, на который заменить в новом проекте. Используйте * для поиска по маске.</p>
+
+    <div class="signals-section">
+      <div id="signals" class="signals"></div>
     </div>
 
-    <div id="type-fields"></div>
-  </div>
-
-  <h3>Замена входных сигналов</h3>
-  <p class="hint">Слева — исходные входные сигналы из проекта, справа — KKS, на который заменить в новом проекте. Используйте * для поиска.</p>
-
-  <div id="signals" class="signals"></div>
-
-  <div class="buttons">
-    <button class="btn primary" id="btn-save-similar">Сохранить новый проект</button>
-    <button class="btn secondary" id="btn-cancel">Отмена</button>
+    <div class="buttons">
+      <button class="btn primary" id="btn-save-similar">Сохранить новый проект</button>
+      <button class="btn secondary" id="btn-cancel">Отмена</button>
+    </div>
   </div>
 
   <script src="/js/similar.js"></script>
