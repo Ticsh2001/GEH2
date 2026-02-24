@@ -6,9 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: system-ui, sans-serif; margin: 16px; }
-    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
-    .row label { min-width: 220px; font-weight: 600; }
+    .row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+    .row label { min-width: 220px; font-weight: 600; padding-top: 6px; }
     input[type="text"], textarea { width: 100%; padding: 6px 8px; font-family: inherit; }
+    textarea { min-height: 60px; resize: vertical; }
     .signals { margin-top: 16px; }
     .signals .row label { font-weight: 500; min-width: 280px; }
     .buttons { margin-top: 20px; display: flex; gap: 12px; }
@@ -16,6 +17,11 @@
     .btn.primary { background: #2c7; border: 1px solid #2a5; color: #042; }
     .btn.secondary { background: #ddd; border: 1px solid #bbb; }
     .hint { color: #666; font-size: 12px; }
+    
+    /* Стили для автокомплита */
+    .signal-result-item:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
   </style>
 </head>
 <body>
@@ -24,7 +30,12 @@
   <div id="meta">
     <div class="row">
       <label for="new-code">Новое имя сигнала (Tagname):</label>
-      <input type="text" id="new-code" placeholder="Например: KKS_NEW_TAG">
+      <div style="flex:1;">
+        <input type="text" id="new-code" placeholder="Например: KKS_NEW_TAG или используйте * для поиска">
+        <small style="color:#999; display:block; margin-top:4px;">
+          Поиск по маске через * (например: *MAA*CP*). При выборе из списка поля проекта заполнятся автоматически.
+        </small>
+      </div>
     </div>
 
     <div class="row">
@@ -36,7 +47,7 @@
   </div>
 
   <h3>Замена входных сигналов</h3>
-  <p class="hint">Слева — исходные входные сигналы из проекта, справа — KKS, на который заменить в новом проекте.</p>
+  <p class="hint">Слева — исходные входные сигналы из проекта, справа — KKS, на который заменить в новом проекте. Используйте * для поиска.</p>
 
   <div id="signals" class="signals"></div>
 
@@ -45,7 +56,6 @@
     <button class="btn secondary" id="btn-cancel">Отмена</button>
   </div>
 
-  <!-- ВАЖНО: абсолютный путь от корня /, т.к. StaticFiles монтирует web как корень -->
   <script src="/js/similar.js"></script>
 </body>
 </html>
