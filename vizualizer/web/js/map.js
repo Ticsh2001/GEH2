@@ -1,3 +1,4 @@
+//map.js
 class ProjectMap {
     constructor() {
         this.canvas = document.getElementById('map-canvas');
