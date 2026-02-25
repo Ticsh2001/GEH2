@@ -54,8 +54,21 @@ init() {
     document.getElementById('btn-visualize').addEventListener('click', () => {
         App.openSignalVisualizer();
     });
-    document.getElementById('btn-map').addEventListener('click', () => 
-        {window.open('/map.html', '_blank');});
+    document.getElementById('btn-map').addEventListener('click', () => {
+        const proj = AppState.project || {};
+        const code = (proj.code || '').trim();
+        const type = (proj.type || 'parameter').trim();
+
+        if (!code || !type) {
+            alert('Сначала откройте или сохраните проект');
+            return;
+        }
+
+        // Формируем имя файла так же, как при сохранении!
+        const filename = `${code}_${type}.json`;
+        const url = `/map.html?project=${encodeURIComponent(filename)}`;
+        window.open(url, '_blank');
+    });
 
     document.getElementById('btn-create-similar').addEventListener('click', async () => {
     try {
