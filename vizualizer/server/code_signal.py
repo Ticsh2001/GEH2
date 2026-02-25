@@ -57,7 +57,7 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         raise CodeEvaluationError("Нет данных для расчёта синтетического сигнала.")
     if not code_str or not code_str.strip():
         raise CodeEvaluationError("Строка CODE пуста.")
-
+    
     index = df_all.index
     numeric_df = df_all.apply(sanitize_numeric_column)
     series_map = {col: numeric_df[col] for col in numeric_df.columns}
@@ -202,12 +202,20 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         return None
 
     def _history_window(period):
+        # ИСПРАВЛЕНИЕ: если period - это pandas Series, берём первое значение
+        if isinstance(period, pd.Series):
+            first_val = period.iloc[0] if len(period) > 0 else np.nan
+            if pd.isna(first_val):
+                return None
+            period = first_val
+        
         try:
             minutes = int(period)
         except (TypeError, ValueError):
             return None
         if minutes <= 0:
             return None
+        print(f"[DEBUG] {minutes}min")
         return f"{minutes}min"
 
     def _history_apply(param, period, fn):
@@ -238,6 +246,33 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
 
 # code_signal.py
 
+    def HISTORYAVG_DEBUG(param, period):
+        print(f"\n[HISTORYAVG] Вызов с param={type(param)}, period={type(period)}")
+        
+        # Показываем что пришло в аргументах
+        if isinstance(param, pd.Series):
+            print(f"[HISTORYAVG] param Series: размер={len(param)}, первые значения={param.head(3).tolist()}")
+        else:
+            print(f"[HISTORYAVG] param не Series: {param}")
+            
+        if isinstance(period, pd.Series):
+            print(f"[HISTORYAVG] period Series: размер={len(period)}, значения={period.unique()}")
+        else:
+            print(f"[HISTORYAVG] period не Series: {period}")
+        
+        # Вызываем исходную логику
+        result = _history_apply(param, period, lambda r: r.mean())
+        
+        if isinstance(result, pd.Series):
+            print(f"[HISTORYAVG] Результат: размер={len(result)}")
+            print(f"[HISTORYAVG] Первые 5 значений: {result.head(5).tolist()}")
+            print(f"[HISTORYAVG] Уникальные значения: {result.dropna().unique()[:10]}")  # первые 10 уникальных
+            print(f"[HISTORYAVG] Есть ли NaN: {result.isna().any()}, количество NaN: {result.isna().sum()}")
+        else:
+            print(f"[HISTORYAVG] Результат не Series: {result}")
+        
+        return result
+
     def HISTORYGRADIENT(param_name, period):
         """
         Возвращает коэффициент наклона (a) линейной регрессии y = a*x + b
@@ -252,6 +287,12 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         s = _history_series(param_name)
         if s is None:
             return pd.Series(np.nan, index=index)
+        
+        period_val = period
+        if isinstance(period, pd.Series):
+            period_val = period.iloc[0] if len(period) > 0 else np.nan
+            if pd.isna(period_val):
+                return pd.Series(np.nan, index=index)
 
         # проверяем period
         try:

@@ -256,85 +256,144 @@ function expandFormulaTemplates(expr, templatesMap) {
     if (!expr) return expr;
     if (!templatesMap) return expr;
 
-    // несколько проходов на случай вложенных шаблонов
     for (let pass = 0; pass < 10; pass++) {
         let changed = false;
+        const originalExpr = expr;
 
-        // Регулярка ищет вызовы функций: funcName(arg1, arg2, ...)
-        expr = expr.replace(/([A-Za-z_]\w*)\s*\(([^()]|\([^()]*\))*\)/g, (match, name) => {
+        // НОВЫЙ АЛГОРИТМ: обрабатываем изнутри наружу
+        expr = processNestedFunctions(expr, templatesMap);
+        
+        if (expr !== originalExpr) {
+            changed = true;
+        }
+        
+        if (!changed) break;
+    }
+
+    return expr;
+}
+
+// Новая функция для обработки вложенных функций
+function processNestedFunctions(expr, templatesMap) {
+    let result = expr;
+    let changed = true;
+    
+    while (changed) {
+        changed = false;
+        const originalResult = result;
+        
+        // Ищем функции без вложенных вызовов внутри (самые глубокие)
+        result = result.replace(/([A-Za-z_]\w*)\s*\(([^()]*)\)/g, (match, name, argsStr) => {
             const tpl = templatesMap[name];
             if (!tpl) return match;
 
-            // 1. Извлекаем аргументы из вызова: h(10, 20, 30) -> ["10", "20", "30"]
-            const open = match.indexOf('(');
-            const close = match.lastIndexOf(')');
-            const inside = match.slice(open + 1, close);
-            const callArgs = splitArgsTopLevel(inside);
+            // Если внутри аргументов есть вызовы функций - пропускаем (обработаем позже)
+            if (/[A-Za-z_]\w*\s*\(/.test(argsStr)) {
+                return match;
+            }
 
-            // 2. Определяем формальные параметры (ключи) и конфиг
+            const callArgs = splitArgsTopLevel(argsStr);
+            
             let formalArgs = [];
             let argsConfig = {};
 
             if (Array.isArray(tpl.args)) {
-                // Старый формат: "args": ["p", "t"]
                 formalArgs = tpl.args;
             } else if (typeof tpl.args === 'object' && tpl.args !== null) {
-                // Новый формат: "args": { "p": {"min":...}, ... }
                 formalArgs = Object.keys(tpl.args);
                 argsConfig = tpl.args;
             }
 
-            // Если количество аргументов не совпало — не трогаем (чтобы не сломать)
             if (callArgs.length !== formalArgs.length) return match;
 
-            // 3. Подготовка тела функции
             let body = String(tpl.body || '0');
-            
-            // 4. Сбор условий валидации (min/max)
             let conditions = [];
 
             formalArgs.forEach((fName, i) => {
-                const actualVal = callArgs[i]; // То, что передали: "10" или "sensor_1"
-                
-                // Подстановка значения в тело: заменяем параметр p на 10
-                const re = new RegExp(`\\b${fName}\\b`, 'g');
-                body = body.replace(re, `(${actualVal})`);
+                const actualVal = callArgs[i];
+                const re = new RegExp('\\b' + fName + '\\b', 'g');
+                body = body.replace(re, '(' + actualVal + ')');
 
-                // Проверка ограничений (только для нового формата)
                 if (argsConfig[fName]) {
                     const conf = argsConfig[fName];
-                    
-                    // Проверка min
                     if (conf.min !== undefined && conf.min !== null) {
-                        conditions.push(`(${actualVal} >= ${conf.min})`);
+                        conditions.push('(' + actualVal + ' >= ' + conf.min + ')');
                     }
-                    // Проверка max
                     if (conf.max !== undefined && conf.max !== null) {
-                        conditions.push(`(${actualVal} <= ${conf.max})`);
+                        conditions.push('(' + actualVal + ' <= ' + conf.max + ')');
                     }
                 }
             });
 
-            // 5. Формирование результата
-            let resultExpr = `(${body})`;
-
-            // Если есть условия, заворачиваем в WHEN
+            let resultExpr = '(' + body + ')';
             if (conditions.length > 0) {
                 const conditionString = conditions.join(' AND ');
                 const fallbackValue = tpl.return_value !== undefined ? tpl.return_value : 0;
-                
-                // WHEN(условия, формула, значение_по_умолчанию)
-                resultExpr = `WHEN(${conditionString}, ${body}, ${fallbackValue})`;
+                resultExpr = 'WHEN(' + conditionString + ', ' + body + ', ' + fallbackValue + ')';
             }
 
             changed = true;
             return resultExpr;
         });
+        
+        // Если ничего не изменилось, но есть вложенные функции, делаем ещё один проход
+        if (!changed && originalResult === result) {
+            // Обрабатываем функции с одним уровнем вложенности
+            result = result.replace(/([A-Za-z_]\w*)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g, (match, name, argsStr) => {
+                const tpl = templatesMap[name];
+                if (!tpl) return match;
 
-        if (!changed) break;
+                const callArgs = splitArgsTopLevel(argsStr);
+                
+                let formalArgs = [];
+                let argsConfig = {};
+
+                if (Array.isArray(tpl.args)) {
+                    formalArgs = tpl.args;
+                } else if (typeof tpl.args === 'object' && tpl.args !== null) {
+                    formalArgs = Object.keys(tpl.args);
+                    argsConfig = tpl.args;
+                }
+
+                if (callArgs.length !== formalArgs.length) return match;
+
+                let body = String(tpl.body || '0');
+                let conditions = [];
+
+                formalArgs.forEach((fName, i) => {
+                    const actualVal = callArgs[i];
+                    const re = new RegExp('\\b' + fName + '\\b', 'g');
+                    body = body.replace(re, '(' + actualVal + ')');
+
+                    if (argsConfig[fName]) {
+                        const conf = argsConfig[fName];
+                        if (conf.min !== undefined && conf.min !== null) {
+                            conditions.push('(' + actualVal + ' >= ' + conf.min + ')');
+                        }
+                        if (conf.max !== undefined && conf.max !== null) {
+                            conditions.push('(' + actualVal + ' <= ' + conf.max + ')');
+                        }
+                    }
+                });
+
+                let resultExpr = '(' + body + ')';
+                if (conditions.length > 0) {
+                    const conditionString = conditions.join(' AND ');
+                    const fallbackValue = tpl.return_value !== undefined ? tpl.return_value : 0;
+                    resultExpr = 'WHEN(' + conditionString + ', ' + body + ', ' + fallbackValue + ')';
+                }
+
+                changed = true;
+                return resultExpr;
+            });
+        }
+        
+        if (originalResult === result) {
+            break; // Больше нечего обрабатывать
+        }
     }
-
-    return expr;
+    
+    return result;
 }
 
 /**
