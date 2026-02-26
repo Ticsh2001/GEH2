@@ -6,6 +6,49 @@ from typing import List, Tuple, Dict
 import numpy as np
 import pandas as pd
 
+
+def _knn_interpolate(features: np.ndarray, targets: np.ndarray, query_points: np.ndarray, k: int = 5) -> np.ndarray:
+    """
+    KNN-интерполяция для многомерных данных.
+    
+    Args:
+        features: массив признаков размера (n_samples, n_features)
+        targets: массив целевых значений размера (n_samples,)
+        query_points: точки для интерполяции размера (n_queries, n_features)  
+        k: количество ближайших соседей
+        
+    Returns:
+        интерполированные значения размера (n_queries,)
+    """
+    n_samples = features.shape[0]
+    n_queries = query_points.shape[0]
+    k = min(k, n_samples)  # k не может быть больше количества доступных точек
+    
+    results = np.zeros(n_queries)
+    
+    for i, query in enumerate(query_points):
+        # Вычисляем евклидовы расстояния до всех точек
+        distances = np.sqrt(np.sum((features - query) ** 2, axis=1))
+        
+        # Находим k ближайших соседей
+        nearest_indices = np.argpartition(distances, k)[:k]
+        nearest_distances = distances[nearest_indices]
+        nearest_targets = targets[nearest_indices]
+        
+        # Обрабатываем случай нулевых расстояний (точное совпадение)
+        zero_dist_mask = nearest_distances == 0
+        if np.any(zero_dist_mask):
+            # Если есть точные совпадения, используем их среднее
+            results[i] = np.mean(nearest_targets[zero_dist_mask])
+        else:
+            # Взвешенное среднее с весами обратно пропорциональными расстояниям
+            weights = 1.0 / (nearest_distances + 1e-10)  # добавляем малое число для численной стабильности
+            weights = weights / np.sum(weights)  # нормализуем веса
+            results[i] = np.sum(weights * nearest_targets)
+    
+    return results
+
+
 TABLE_REGISTRY: Dict[str, pd.DataFrame] = {}
 
 def register_tables(tables: Dict[str, pd.DataFrame]):
@@ -175,6 +218,115 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         if "GETPOINT" not in warnings:
             warnings.append("GETPOINT: axisToFind должен быть 'X' или 'Y' — NaN.")
         return pd.Series(np.nan, index=index)
+    
+    def INTERPOLATE(interpolationTableName, targetColumnName, *values):
+        """
+        Функция многомерной интерполяции с использованием KNN-регрессии.
+        
+        Args:
+            interpolationTableName: имя интерполяционной таблицы
+            targetColumnName: имя столбца для интерполяции  
+            *values: значения параметров для интерполяции (порядок как в таблице, кроме targetColumnName)
+            
+        Returns:
+            pd.Series с интерполированными значениями
+        """
+        table_name = str(interpolationTableName)
+        target_col = str(targetColumnName)
+        
+        # Получаем таблицу из реестра
+        df_table = TABLE_REGISTRY.get(table_name)
+        if df_table is None:
+            if "INTERPOLATE" not in warnings:
+                warnings.append(f"INTERPOLATE: таблица '{table_name}' не загружена — возвращается NaN.")
+            return pd.Series(np.nan, index=index)
+        
+        try:
+            # Проверяем наличие целевого столбца
+            if target_col not in df_table.columns:
+                available_cols = list(df_table.columns)
+                if "INTERPOLATE" not in warnings:
+                    warnings.append(f"INTERPOLATE: столбец '{target_col}' не найден в таблице '{table_name}'. Доступные: {available_cols}")
+                return pd.Series(np.nan, index=index)
+            
+            # Получаем все столбцы кроме целевого (это будут признаки для интерполяции)
+            feature_columns = [col for col in df_table.columns if col != target_col]
+            
+            if len(feature_columns) == 0:
+                if "INTERPOLATE" not in warnings:
+                    warnings.append(f"INTERPOLATE: в таблице '{table_name}' нет столбцов-признаков (все столбцы кроме '{target_col}').")
+                return pd.Series(np.nan, index=index)
+            
+            # Проверяем соответствие количества параметров
+            if len(values) != len(feature_columns):
+                if "INTERPOLATE" not in warnings:
+                    warnings.append(f"INTERPOLATE: количество параметров ({len(values)}) не совпадает с количеством столбцов-признаков ({len(feature_columns)}) в таблице '{table_name}'. Ожидаемый порядок: {feature_columns}")
+                return pd.Series(np.nan, index=index)
+            
+            # Подготавливаем данные таблицы
+            df_clean = df_table.copy()
+            
+            # Санитизируем все столбцы
+            for col in df_clean.columns:
+                df_clean[col] = sanitize_numeric_column(df_clean[col])
+            
+            # Удаляем строки с NaN значениями
+            df_clean = df_clean.dropna()
+            
+            if len(df_clean) < 2:
+                if "INTERPOLATE" not in warnings:
+                    warnings.append(f"INTERPOLATE: недостаточно валидных строк в таблице '{table_name}' (нужно >= 2).")
+                return pd.Series(np.nan, index=index)
+            
+            # Извлекаем признаки и цели из таблицы
+            features_table = df_clean[feature_columns].values  # shape: (n_samples, n_features)
+            targets_table = df_clean[target_col].values       # shape: (n_samples,)
+            
+            # Преобразуем входные параметры в массивы Series
+            input_series = []
+            for i, val in enumerate(values):
+                series_val = _ensure_series(val)
+                input_series.append(series_val.values)
+            
+            # Создаем матрицу запросов: каждая строка - одна временная точка
+            n_points = len(index)
+            n_features = len(feature_columns)
+            query_matrix = np.zeros((n_points, n_features))
+            
+            for i in range(n_features):
+                query_matrix[:, i] = input_series[i]
+            
+            # Проверяем на NaN в запросах
+            valid_mask = ~np.any(np.isnan(query_matrix), axis=1)
+            
+            # Выполняем интерполяцию
+            results = np.full(n_points, np.nan)
+            
+            if np.any(valid_mask):
+                valid_queries = query_matrix[valid_mask]
+                
+                # Определяем оптимальное k (но не больше 10 для производительности)
+                k = min(5, len(df_clean), max(2, len(df_clean) // 3))
+                
+                try:
+                    interpolated_values = _knn_interpolate(
+                        features_table, 
+                        targets_table, 
+                        valid_queries, 
+                        k=k
+                    )
+                    results[valid_mask] = interpolated_values
+                except Exception as e:
+                    if "INTERPOLATE" not in warnings:
+                        warnings.append(f"INTERPOLATE: ошибка во время интерполяции для таблицы '{table_name}': {e}")
+                    return pd.Series(np.nan, index=index)
+            
+            return pd.Series(results, index=index)
+            
+        except Exception as e:
+            if "INTERPOLATE" not in warnings:
+                warnings.append(f"INTERPOLATE: общая ошибка для таблицы '{table_name}': {e}")
+            return pd.Series(np.nan, index=index)
 
     def PREV(param):
         s = _history_series(param)
@@ -381,6 +533,7 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         "HISTORYDIFF": HISTORYDIFF,
         "HISTORYGRADIENT": HISTORYGRADIENT,
         "GETPOINT": GETPOINT,
+        "INTERPOLATE": INTERPOLATE,
     }
     env["X"] = "X"
     env["Y"] = "Y"
