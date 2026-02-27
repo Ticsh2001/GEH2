@@ -10,6 +10,7 @@ from typing import List
 from datetime import datetime, time
 from io import BytesIO
 from code_signal import register_tables
+import re
 
 from code_signal import compute_code_signal, sanitize_numeric_column, evaluate_code_expression, CodeEvaluationError
 from visualizer_state import (
@@ -94,6 +95,78 @@ def _format_poly_equation(coeffs: np.ndarray, x_name: str, y_name: str) -> str:
         else:
             terms.append(f"{coef}·{x_name}^{k}")
     return f"{y_name} = " + " + ".join(terms)
+
+
+def extract_table_names_from_code(code_str: str) -> set[str]:
+    """
+    Ищет имена таблиц, переданные первым аргументом в INTERPOLATE(...) и GETPOINT(...).
+    Поддерживает:
+      - "NAME" / 'NAME'
+      - NAME (без кавычек, идентификатор: буквы/цифры/подчёркивание, начиная с буквы/подчёркивания)
+    """
+    if not code_str:
+        return set()
+    names = set()
+
+    # Интерполяция: первый аргумент — имя таблицы
+    rx_q_interp = re.compile(r'INTERPOLATE\s*\(\s*([\'"])(?P<n>[^\'"]+)\1', re.IGNORECASE)
+    rx_id_interp = re.compile(r'INTERPOLATE\s*\(\s*(?P<n>[A-Za-z_][A-Za-z0-9_]*)\s*,', re.IGNORECASE)
+
+    # GETPOINT: первый аргумент — имя таблицы
+    rx_q_get = re.compile(r'GETPOINT\s*\(\s*([\'"])(?P<n>[^\'"]+)\1', re.IGNORECASE)
+    rx_id_get = re.compile(r'GETPOINT\s*\(\s*(?P<n>[A-Za-z_][A-Za-z0-9_]*)\s*,', re.IGNORECASE)
+
+    for rx in (rx_q_interp, rx_id_interp, rx_q_get, rx_id_get):
+        for m in rx.finditer(code_str):
+            names.add(m.group('n').strip())
+
+    return names
+
+def normalize_code_tables(code_str: str) -> str:
+    """
+    Оборачивает в кавычки первый аргумент INTERPOLATE/GETPOINT, если он был без кавычек.
+    Пример: INTERPOLATE(h_TABLE, ...) → INTERPOLATE("h_TABLE", ...)
+    """
+    if not code_str:
+        return code_str
+    s = code_str
+
+    # Только случаи без кавычек: (FUNC( IDENT , ...)) → (FUNC("IDENT", ...))
+    s = re.sub(
+        r'(INTERPOLATE\s*\(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*,)',
+        r'\1"\2"\3',
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r'(GETPOINT\s*\(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*,)',
+        r'\1"\2"\3',
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s
+
+def ensure_tables_for_code(code_str: str):
+    """
+    1) Находит имена таблиц в CODE (INTERPOLATE/GETPOINT, с кавычками и без).
+    2) Подгружает отсутствующие таблицы через /api/table/file/{name}.
+    3) Регистрирует актуальный кэш таблиц в вычислителе.
+    """
+    needed = extract_table_names_from_code(code_str)
+    if not needed:
+        return
+    loaded = set(st.session_state.tables_cache.keys())
+    to_load = sorted(needed - loaded)
+    if to_load:
+        st.info(f"📚 Загружаем таблицы из CODE: {', '.join(to_load)}")
+        for t in to_load:
+            try:
+                load_table_df(t)  # кладёт DataFrame в st.session_state.tables_cache[t]
+            except Exception as e:
+                st.warning(f"⚠️ Таблица '{t}' не загружена: {e}")
+
+    # В любом случае регистрируем актуальный кэш — операция идемпотентная
+    register_tables(st.session_state.tables_cache)
 
 
 def compute_streaming_signal_streaming_forward(
@@ -935,6 +1008,8 @@ def make_unique_name(base_name: str) -> str:
 code_signal_name = st.session_state.code_signal_name
 df_for_code = get_all_signals_df(exclude={code_signal_name} if code_signal_name else None)
 code_key = (session_token, CODE)
+if CODE:
+    ensure_tables_for_code(CODE)
 
 already_have_series = (
     st.session_state.code_signal_name is not None
@@ -946,8 +1021,9 @@ if CODE and df_for_code is not None:
 
     if need_recalc:
         try:
+            CODE_FOR_EVAL = normalize_code_tables(CODE)
             synthetic_series = compute_code_signal(
-                CODE,
+                CODE_FOR_EVAL,
                 df_for_code,
                 warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
             )
