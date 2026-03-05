@@ -477,6 +477,10 @@ _processLoadedData(data) {
 
     AppState.elementCounter = Math.max(AppState.elementCounter, maxIdSuffix);
 
+    AppState.project.status ??= 'draft';
+    AppState.project.statusHistory ??= [];
+    AppState.project.statusComment ??= '';
+
     Viewport.updateTransform();
     Connections.drawConnections();
     updateFrameChildren();

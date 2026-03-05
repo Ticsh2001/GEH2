@@ -50,7 +50,10 @@ const AppState = {
         visualizer_state: null,  // НОВОЕ: состояние визуализатора
         author: '',            // НОВОЕ
         lastModifiedBy: '',    // НОВОЕ
-        lastModifiedAt: ''     // НОВОЕ
+        lastModifiedAt: '',     // НОВОЕ
+        status: 'draft',
+        statusComment: '',
+        statusHistory: []
     },
     
     // Выходные сигналы (автоматически определяются)
@@ -97,7 +100,10 @@ function resetState() {
         author: '',            // НОВОЕ
         lastModifiedBy: '',    // НОВОЕ
         lastModifiedAt: '',     // НОВОЕ
-        visualizer_state: null  // НОВОЕ: сбрасываем состояние визуализатора
+        visualizer_state: null,  // НОВОЕ: сбрасываем состояние визуализатора
+        status: 'draft',
+        statusComment: '',
+        statusHistory: []
     };
     
     AppState.outputs = {

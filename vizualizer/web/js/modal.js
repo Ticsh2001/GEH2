@@ -965,6 +965,14 @@ const Modal = {
                 <label>Код проекта:</label>
                 <input type="text" id="project-code" value="${project.code || ''}" placeholder="Уникальный идентификатор">
             </div>
+
+
+            <div class="modal-row">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="project-is-draft" ${project.status !== 'ready' ? 'checked' : ''}>
+                    <span>Черновик</span>
+                </label>
+            </div>
             
             <div class="modal-row">
                 <label>Тип проекта:</label>
@@ -987,6 +995,8 @@ const Modal = {
                     </div>
                 </div>
             </div>
+
+
             
             <div id="parameter-fields" class="conditional-fields ${project.type === PROJECT_TYPE.PARAMETER ? 'visible' : ''}">
                 <div class="modal-row">
@@ -1086,6 +1096,8 @@ const Modal = {
     saveProjectProperties() {
         const activeTypeBtn = document.querySelector('.project-type-btn.active');
         const type = activeTypeBtn ? activeTypeBtn.dataset.type : PROJECT_TYPE.PARAMETER;
+        const isDraft = document.getElementById('project-is-draft')?.checked ?? true;
+        AppState.project.status = isDraft ? 'draft' : 'ready';
         const description = document.getElementById('project-description')?.value || '';
         AppState.project.code = document.getElementById('project-code').value;
         AppState.project.type = type;

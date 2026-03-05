@@ -8,6 +8,7 @@ import tempfile
 from typing import Dict, List, Any, Optional
 from io import BytesIO
 from update_projects import update_projects_if_templates_changed
+from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -16,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import shutil
-
+from fastapi import Body
 
 # =============================================================================
 # КОНФИГУРАЦИЯ
@@ -827,6 +828,10 @@ def list_projects():
                 "type": project_meta.get("type") or "",
                 "author": project_meta.get("author") or "",
                 "possibleCause": project_meta.get("possibleCause") or "",
+                "status": project_meta.get("status") or "draft",
+                "statusComment": project_meta.get("statusComment") or "",
+                "statusHistory": project_meta.get("statusHistory") or [],
+                "lastStatusChangedByAdmin": project_meta.get("lastStatusChangedByAdmin", False),
                 "source": source_label
             })
         return items
@@ -893,6 +898,12 @@ async def save_project(request: Request):
             raise HTTPException(status_code=400, detail="Filename and content are required")
 
         project_meta = content.get("project") or {}
+
+        project_meta.setdefault("status", "draft")
+        project_meta.setdefault("statusComment", "")
+        project_meta.setdefault("statusHistory", [])
+
+
         project_type = project_meta.get("type", "parameter")
 
         # Если проект помечен как шаблон — сохраняем в templates
@@ -1160,6 +1171,61 @@ async def get_visualizer_state(session_token: str) -> VisualizerStateResponse:
         success=True,
         state=state
     )
+
+@app.post("/api/project/status/set")
+async def set_project_status(payload: dict = Body(...)):
+    try:
+        filename = payload.get("filename")
+        new_status = payload.get("status")
+        comment = payload.get("comment", "")
+        user = payload.get("user", "")
+
+        if not filename or new_status not in ("draft", "ready"):
+            raise HTTPException(status_code=400, detail="Invalid filename or status")
+
+        # Проверяем права админа
+        admin_author = STATE["settings"].get("adminAuthor", "")
+        if user != admin_author:
+            raise HTTPException(status_code=403, detail="Only admin can change status")
+
+        # Используем ту же функцию, что и другие эндпоинты
+        file_path = get_storage_path(filename, storage="projects")
+        
+        if not os.path.isfile(file_path):
+            # Отладочная информация
+            print(f"Файл не найден: {file_path}")
+            print(f"Ищем файл: {filename}")
+            raise HTTPException(status_code=404, detail=f"Project file not found: {filename}")
+
+        # Загружаем проект
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+
+        # Обновляем метаданные проекта
+        project_meta = content.setdefault("project", {})
+        project_meta["status"] = new_status
+        project_meta["lastStatusChangedByAdmin"] = True
+        
+        # Добавляем запись в историю
+        history = project_meta.setdefault("statusHistory", [])
+        history.append({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "author": user,
+            "action": "forced_draft" if new_status == "draft" else "forced_ready",
+            "comment": comment.strip()
+        })
+
+        # Сохраняем файл
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+
+        return {"status": "success", "message": "Project status updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating project status: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.delete("/api/project/delete/{filename}")
 async def delete_project(filename: str, request: Request):

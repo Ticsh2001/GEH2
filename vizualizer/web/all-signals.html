@@ -12,18 +12,19 @@
         }
 
         :root {
-            --col-width-id: 2%;
-            --col-width-status: 5%;
+            --col-width-id: 4%;
+            --col-width-status: 8%;
             --col-width-code: 15%;
-            --col-width-type: 12%;
-            --col-width-description: 35%;
-            --col-width-author: 15%;
+            --col-width-type: 10%;
+            --col-width-description: 32%;
+            --col-width-author: 16%;
             --col-width-actions: 15%;
 
             --primary-color: #e94560;
             --secondary-color: #4a90d9;
             --delete-color: #f87171;
             --assign-color: #4ade80;
+            --warn-color: #fbbf24;
             --hover-color: #e94560;
             --border-color: #0f3460;
             --text-color: #eee;
@@ -137,6 +138,11 @@
             color: #0a0a0a;
         }
 
+        .button.warn {
+            background: var(--warn-color);
+            color: #0a0a0a;
+        }
+
         .button:hover {
             transform: translateY(-1px);
             box-shadow: 0 6px 18px rgba(0,0,0,0.25);
@@ -230,20 +236,26 @@
             line-height: 1.2;
         }
 
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
         .author-select {
             padding: 8px 12px;
             border: 1px solid #233860;
             border-radius: 6px;
             background: #0a0a1a;
             color: var(--text-color);
-        }
-
-        .status {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: #4a90d9;
-            margin: 0 auto;
         }
 
         .empty-state {
@@ -316,11 +328,11 @@
             <thead>
                 <tr>
                     <th>№</th>
-                    <th>Статус</th>
+                    <th class="sortable" id="sort-status">Статус</th>
                     <th>Код</th>
                     <th class="sortable" id="sort-type">Тип</th>
                     <th>Описание</th>
-                    <th>Автор</th>
+                    <th class="sortable" id="sort-author">Автор</th>
                     <th>Действия</th>
                 </tr>
             </thead>
@@ -334,6 +346,7 @@
         <ul>
             <li id="ctx-open-project">📂 Открыть проект</li>
             <li id="ctx-copy-code">📋 Копировать код</li>
+            <li id="ctx-show-history">🕓 История статусов</li>
         </ul>
     </div>
 
@@ -351,6 +364,13 @@
         let sortOrder = 'asc';
         let selectedProject = null;
 
+        // Конфигурация статусов
+        const STATUS_CONFIG = {
+            draft:    { color: '#f87171', label: 'Черновик', sort: 0 },
+            ready:    { color: '#34d399', label: 'Готов',    sort: 2 },
+            reverted: { color: '#fbbf24', label: 'Возврат',  sort: 1 }
+        };
+
         function isCurrentUserAdmin() {
             return currentUser === adminAuthor;
         }
@@ -362,6 +382,27 @@
         function getProjectDescription(project) {
             if (project.type === 'rule') return project.possibleCause || '—';
             return project.description || '—';
+        }
+
+        function renderStatusCell(project) {
+            const effectiveStatus = project.status || 'draft';
+            const isAdminRevert = effectiveStatus === 'draft' && project.lastStatusChangedByAdmin;
+            const visual = isAdminRevert ? 'reverted' : effectiveStatus;
+            const config = STATUS_CONFIG[visual];
+
+            return `
+                <div class="status-pill">
+                    <span class="status-dot" style="background:${config.color};"></span>
+                    <span>${config.label}</span>
+                </div>
+            `;
+        }
+
+        function getStatusSortValue(project) {
+            const effectiveStatus = project.status || 'draft';
+            const isAdminRevert = effectiveStatus === 'draft' && project.lastStatusChangedByAdmin;
+            const visual = isAdminRevert ? 'reverted' : effectiveStatus;
+            return STATUS_CONFIG[visual]?.sort ?? 0;
         }
 
         async function loadProjects() {
@@ -389,8 +430,20 @@
 
         function sortProjects() {
             filteredProjects.sort((a, b) => {
-                const av = (a[sortBy] || '').localeCompare(b[sortBy] || '');
-                return sortOrder === 'asc' ? av : -av;
+                let av, bv;
+                if (sortBy === 'status') {
+                    av = getStatusSortValue(a);
+                    bv = getStatusSortValue(b);
+                } else if (sortBy === 'author') {
+                    av = (a.author || '').toLowerCase();
+                    bv = (b.author || '').toLowerCase();
+                } else {
+                    av = (a[sortBy] || '').toLowerCase();
+                    bv = (b[sortBy] || '').toLowerCase();
+                }
+                if (av < bv) return sortOrder === 'asc' ? -1 : 1;
+                if (av > bv) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
             });
         }
 
@@ -405,7 +458,7 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${index + 1}</td>
-                    <td><div class="status"></div></td>
+                    <td>${renderStatusCell(project)}</td>
                     <td title="${project.code || ''}">${project.code || '—'}</td>
                     <td title="${project.type || ''}">${project.type || '—'}</td>
                     <td title="${getProjectDescription(project)}">${getProjectDescription(project)}</td>
@@ -438,6 +491,13 @@
                         <button class="button assign" data-filename="${project.filename}" data-mode="admin">👤 Назначить</button>
                     </span>
                 `);
+                if (project.status === 'ready') {
+                    actions.push(`
+                        <span class="action-item">
+                            <button class="button warn" data-filename="${project.filename}" data-action="force-draft">↩️ В черновик</button>
+                        </span>
+                    `);
+                }
             } else if (!project.author) {
                 actions.push(`
                     <span class="action-item">
@@ -475,6 +535,35 @@
                 btn.onclick = e => {
                     e.stopPropagation();
                     showAuthorSelector(btn);
+                };
+            });
+
+            document.querySelectorAll('[data-action="force-draft"]').forEach(btn => {
+                btn.onclick = async (e) => {
+                    e.stopPropagation();
+                    const reason = prompt('Комментарий для автора (обязательно):');
+                    if (!reason?.trim()) return;
+                    
+                    try {
+                        const payload = { 
+                            filename: btn.dataset.filename, 
+                            status: 'draft',
+                            comment: reason.trim(), 
+                            user: currentUser 
+                        };
+                        const resp = await fetch('/api/project/status/set', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(payload)
+                        });
+                        if (!resp.ok) {
+                            const err = await resp.json();
+                            throw new Error(err.detail || 'Ошибка перевода в черновик');
+                        }
+                        await loadProjects();
+                    } catch (err) {
+                        alert(err.message);
+                    }
                 };
             });
         }
@@ -536,15 +625,18 @@
 
         document.getElementById('refresh-projects').addEventListener('click', loadProjects);
 
-        document.getElementById('sort-type').addEventListener('click', () => {
-            if (sortBy === 'type') {
-                sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-            } else {
-                sortBy = 'type';
-                sortOrder = 'asc';
-            }
-            sortProjects();
-            renderTable();
+        // Сортировка по всем сортируемым столбцам
+        ['status', 'type', 'author'].forEach(key => {
+            document.getElementById(`sort-${key}`).addEventListener('click', () => {
+                if (sortBy === key) {
+                    sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortBy = key;
+                    sortOrder = 'asc';
+                }
+                sortProjects();
+                renderTable();
+            });
         });
 
         function updateSortIndicators() {
@@ -554,33 +646,33 @@
         }
 
         function showContextMenu(event, project) {
-    event.preventDefault();
-    selectedProject = project;
+            event.preventDefault();
+            selectedProject = project;
 
-    const menu = document.getElementById('context-menu');
-    menu.style.display = 'block';
+            const menu = document.getElementById('context-menu');
+            menu.style.display = 'block';
 
-    // Получаем размеры меню (после display:block)
-    const menuRect = menu.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+            // Получаем размеры меню (после display:block)
+            const menuRect = menu.getBoundingClientRect();
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
 
-    let posX = event.clientX;
-    let posY = event.clientY;
+            let posX = event.clientX;
+            let posY = event.clientY;
 
-    // Если меню вылазит за правый или нижний край — подвинем
-    if (posX + menuRect.width > viewportWidth) {
-        posX = viewportWidth - menuRect.width - 10;
-    }
-    if (posY + menuRect.height > viewportHeight) {
-        posY = viewportHeight - menuRect.height - 10;
-    }
+            // Если меню вылазит за правый или нижний край — подвинем
+            if (posX + menuRect.width > viewportWidth) {
+                posX = viewportWidth - menuRect.width - 10;
+            }
+            if (posY + menuRect.height > viewportHeight) {
+                posY = viewportHeight - menuRect.height - 10;
+            }
 
-    menu.style.left = `${posX}px`;
-    menu.style.top = `${posY}px`;
+            menu.style.left = `${posX}px`;
+            menu.style.top = `${posY}px`;
 
-    document.addEventListener('click', hideContextMenu, { once: true });
-}
+            document.addEventListener('click', hideContextMenu, { once: true });
+        }
 
         function hideContextMenu() {
             document.getElementById('context-menu').style.display = 'none';
@@ -598,6 +690,25 @@
             navigator.clipboard.writeText(selectedProject.code)
                 .then(() => alert(`Код "${selectedProject.code}" скопирован.`))
                 .catch(err => alert(`Ошибка копирования: ${err.message}`));
+            hideContextMenu();
+        });
+
+        document.getElementById('ctx-show-history').addEventListener('click', () => {
+            if (!selectedProject?.statusHistory?.length) {
+                alert('История статусов отсутствует или пуста.');
+            } else {
+                const message = selectedProject.statusHistory
+                    .map((entry, idx) => {
+                        const date = new Date(entry.timestamp).toLocaleString();
+                        const action = entry.action === 'forced_draft' ? 'Переведён админом в черновик' :
+                                     entry.action === 'marked_ready' ? 'Помечен как готов' :
+                                     entry.action === 'marked_draft' ? 'Помечен как черновик' : entry.action;
+                        const comment = entry.comment ? `\n    Комментарий: "${entry.comment}"` : '';
+                        return `${idx + 1}. ${date} — ${entry.author}\n    ${action}${comment}`;
+                    })
+                    .join('\n\n');
+                alert(`История статусов для "${selectedProject.code}":\n\n${message}`);
+            }
             hideContextMenu();
         });
 

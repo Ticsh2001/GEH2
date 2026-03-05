@@ -8,10 +8,27 @@
     "possibleCause": "",
     "guidelines": "",
     "templateArgs": {},
-    "visualizer_state": null,
     "author": "Виктор Тищенко",
     "lastModifiedBy": "Виктор Тищенко",
-    "lastModifiedAt": "2026-02-12T10:57:05.942Z"
+    "lastModifiedAt": "2026-03-05T07:14:02.722Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": [
+      {
+        "timestamp": "2026-03-05T07:13:26.923976Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "порппрпопопопр"
+      },
+      {
+        "timestamp": "2026-03-05T07:16:52.032187Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "sasdasdasdasd"
+      }
+    ],
+    "lastStatusChangedByAdmin": true
   },
   "elements": {
     "table_2": {

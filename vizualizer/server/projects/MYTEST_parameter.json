@@ -1,0 +1,188 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "MYTEST",
+    "type": "parameter",
+    "description": "ывы",
+    "dimension": "фывфы",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-03-05T07:18:03.598Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": [
+      {
+        "timestamp": "2026-03-05T07:17:31.200401Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "asdasdasd"
+      },
+      {
+        "timestamp": "2026-03-05T07:18:36.857712Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "sdfsfd"
+      }
+    ],
+    "lastStatusChangedByAdmin": true
+  },
+  "elements": {
+    "if_3": {
+      "id": "if_3",
+      "type": "if",
+      "x": 855,
+      "y": 230,
+      "width": 120,
+      "height": 80,
+      "props": {
+        "operator": ">",
+        "comment": ""
+      }
+    },
+    "separator_4": {
+      "id": "separator_4",
+      "type": "separator",
+      "x": 1078,
+      "y": 230,
+      "width": 120,
+      "height": 80,
+      "props": {}
+    },
+    "const_5": {
+      "id": "const_5",
+      "type": "const",
+      "x": 1441,
+      "y": 349,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "const_6": {
+      "id": "const_6",
+      "type": "const",
+      "x": 1251,
+      "y": 455,
+      "width": 120,
+      "height": 60,
+      "props": {
+        "value": 0
+      }
+    },
+    "output_7": {
+      "id": "output_7",
+      "type": "output",
+      "x": 1412,
+      "y": 491,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "output_8": {
+      "id": "output_8",
+      "type": "output",
+      "x": 1650.1818181818182,
+      "y": 323.1818181818182,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 469,
+      "y": 136,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Сигнал",
+        "signalType": "numeric"
+      }
+    },
+    "input_signal_2": {
+      "id": "input_signal_2",
+      "type": "input-signal",
+      "x": 450,
+      "y": 358,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "Сигнал2",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "if_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_2",
+      "fromPort": "out-0",
+      "toElement": "if_3",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "if_3",
+      "fromPort": "out-0",
+      "toElement": "separator_4",
+      "toPort": "in-0",
+      "signalType": "logic"
+    },
+    {
+      "fromElement": "separator_4",
+      "fromPort": "out-0",
+      "toElement": "const_5",
+      "toPort": "cond-0",
+      "signalType": "true"
+    },
+    {
+      "fromElement": "separator_4",
+      "fromPort": "out-1",
+      "toElement": "const_6",
+      "toPort": "cond-0",
+      "signalType": "false"
+    },
+    {
+      "fromElement": "const_6",
+      "fromPort": "out-0",
+      "toElement": "output_7",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "const_5",
+      "fromPort": "out-0",
+      "toElement": "output_8",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 8,
+  "viewport": {
+    "zoom": 0.9,
+    "panX": -225.45454545454572,
+    "panY": 59.672727272727286
+  },
+  "code": "0",
+  "visualizer_state": null
+}

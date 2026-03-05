@@ -10,8 +10,25 @@
     "templateArgs": {},
     "author": "Виктор Тищенко",
     "lastModifiedBy": "Виктор Тищенко",
-    "lastModifiedAt": "2026-02-06T09:27:48.071Z",
-    "visualizer_state": null
+    "lastModifiedAt": "2026-03-05T07:12:01.224Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": [
+      {
+        "timestamp": "2026-03-05T07:11:13.185650Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "ввввв"
+      },
+      {
+        "timestamp": "2026-03-05T07:12:12.970632Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "вапапа"
+      }
+    ],
+    "lastStatusChangedByAdmin": true
   },
   "elements": {
     "formula_2": {
