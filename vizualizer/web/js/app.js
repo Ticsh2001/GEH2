@@ -16,7 +16,7 @@ init() {
     this.setupGlobalMouseHandlers();
     this.setupContextMenu();
     this.setupWorkspaceClick();
-    this.setupOutputCounter();
+    //this.setupOutputCounter();
     this.setupMultiSelection();
 
     Viewport.init();
@@ -67,6 +67,13 @@ init() {
         // Формируем имя файла так же, как при сохранении!
         const filename = `${code}_${type}.json`;
         const url = `/map.html?project=${encodeURIComponent(filename)}`;
+        window.open(url, '_blank');
+    });
+
+        // Добавить в функцию init() после других обработчиков
+    document.getElementById('btn-all-signals').addEventListener('click', () => {
+        const currentUser = localStorage.getItem('lse_username') || 'Аноним';
+        const url = `/all-signals.html?user=${encodeURIComponent(currentUser)}`;
         window.open(url, '_blank');
     });
 

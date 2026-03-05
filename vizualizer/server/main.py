@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import shutil
 
 
 # =============================================================================
@@ -824,13 +825,60 @@ def list_projects():
                 "code": project_meta.get("code") or project_meta.get("tagname") or "",
                 "description": project_meta.get("description") or "",
                 "type": project_meta.get("type") or "",
+                "author": project_meta.get("author") or "",
+                "possibleCause": project_meta.get("possibleCause") or "",
                 "source": source_label
             })
         return items
 
     projects = collect("projectDataFolder", "projects")
     projects.extend(collect("templateDataFolder", "templates"))
-    return {"projects": projects}
+    authors = sorted(set(project.get("author") for project in projects if project.get("author")))
+    
+    # Получаем админа из настроек
+    admin_author = STATE["settings"].get("adminAuthor", "")
+    return {
+        "projects": projects,
+        "authors": authors,
+        "adminAuthor": admin_author
+    }
+
+@app.post("/api/project/set-author")
+async def set_project_author(request: Request):
+    try:
+        data = await request.json()
+        filename = data.get("filename")
+        new_author = data.get("author")
+        
+        if not filename or not new_author:
+            raise HTTPException(status_code=400, detail="Filename and author are required")
+        
+        # Получаем путь к проекту
+        path = get_storage_path(filename, storage="projects")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Читаем текущее содержимое
+        with open(path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        
+        # Обновляем автора
+        if "project" not in content:
+            content["project"] = {}
+        content["project"]["author"] = new_author
+        
+        # Сохраняем обратно
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+        
+        # Обновляем кэш сигналов
+        refresh_signals_cache()
+        
+        return {"status": "ok", "message": f"Author updated for {filename}"}
+    
+    except Exception as e:
+        print(f"Error updating author: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/project/save")
@@ -1112,6 +1160,55 @@ async def get_visualizer_state(session_token: str) -> VisualizerStateResponse:
         success=True,
         state=state
     )
+
+@app.delete("/api/project/delete/{filename}")
+async def delete_project(filename: str, request: Request):
+    try:
+        data = await request.json()
+        current_user = data.get("user", "")
+        if not current_user:
+            raise HTTPException(status_code=400, detail="User not provided")
+        
+        # Получаем путь к проекту
+        path = get_storage_path(filename, storage="projects")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Читаем автора проекта
+        with open(path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        project_meta = content.get("project", {})
+        project_author = project_meta.get("author", "")
+        
+        # Проверяем права на удаление (админ может удалять любые проекты)
+        admin_author = STATE["settings"].get("adminAuthor", "")
+        if project_author != current_user and current_user != admin_author:
+            raise HTTPException(status_code=403, detail="Only the author or admin can delete this project")
+        
+        # Создаем папку для удаленных проектов
+        deleted_dir = os.path.join(os.path.dirname(path), "..", "deleted_projects")
+        os.makedirs(deleted_dir, exist_ok=True)
+        deleted_path = os.path.join(deleted_dir, filename)
+        
+        # Перемещаем файл в папку удаленных
+        shutil.copy2(path, deleted_path)
+        
+        # Удаляем оригинал
+        os.remove(path)
+        
+        # Обновляем кэш сигналов
+        refresh_signals_cache()
+        
+        return {
+            "status": "ok", 
+            "message": f"Project '{filename}' successfully moved to deleted_projects"
+        }
+    
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Error deleting project: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during deletion")
 
 
 # =============================================================================

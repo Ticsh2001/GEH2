@@ -4,5 +4,6 @@
   "templateDataFolder": "templates",
   "signalArchiveFolder": "archive",
   "tablesFolder": "tables",
-  "visualizerPort": 8501
+  "visualizerPort": 8501,
+  "adminAuthor": "Виктор Тищенко"
 }

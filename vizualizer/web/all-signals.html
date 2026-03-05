@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Все сигналы</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --col-width-id: 2%;
+            --col-width-status: 5%;
+            --col-width-code: 15%;
+            --col-width-type: 12%;
+            --col-width-description: 35%;
+            --col-width-author: 15%;
+            --col-width-actions: 15%;
+
+            --primary-color: #e94560;
+            --secondary-color: #4a90d9;
+            --delete-color: #f87171;
+            --assign-color: #4ade80;
+            --hover-color: #e94560;
+            --border-color: #0f3460;
+            --text-color: #eee;
+            --background-color: #1a1a2e;
+            --card-color: #16213e;
+            --header-bg-color: #0f3460;
+            --alt-row-color: rgba(255,255,255,0.02);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--background-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            width: 95%;
+            margin: 20px auto;
+            padding: 20px;
+            background: var(--card-color);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .user-info {
+            background: rgba(10,10,26,0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #ccc;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        #search-input {
+            flex: 1;
+            min-width: 260px;
+            padding: 12px 15px;
+            border: 1px solid #233860;
+            border-radius: 6px;
+            background: #0a0a1a;
+            color: var(--text-color);
+            font-size: 15px;
+        }
+
+        #search-input:focus {
+            outline: none;
+            border-color: var(--secondary-color);
+            box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.25);
+        }
+
+        .button {
+            background: #0f3460;
+            color: var(--text-color);
+            border: 1px solid #233860;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            transition: all 0.25s;
+        }
+
+        .button.primary {
+            background: var(--secondary-color);
+        }
+
+        .button.primary:hover {
+            background: var(--hover-color);
+        }
+
+        .button.primary.active {
+            background: #e94560;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .button.delete {
+            background: var(--delete-color);
+            color: #0a0a0a;
+        }
+
+        .button.assign {
+            background: var(--assign-color);
+            color: #0a0a0a;
+        }
+
+        .button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        }
+
+        #projects-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #0a0a1a;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            overflow: hidden;
+            table-layout: fixed;
+            min-width: 1000px;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            color: var(--text-color);
+            text-align: left;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #projects-table th:nth-child(1),
+        #projects-table td:nth-child(1) { width: var(--col-width-id); }
+
+        #projects-table th:nth-child(2),
+        #projects-table td:nth-child(2) { width: var(--col-width-status); }
+
+        #projects-table th:nth-child(3),
+        #projects-table td:nth-child(3) { width: var(--col-width-code); }
+
+        #projects-table th:nth-child(4),
+        #projects-table td:nth-child(4) { width: var(--col-width-type); }
+
+        #projects-table th:nth-child(5),
+        #projects-table td:nth-child(5) { width: var(--col-width-description); }
+
+        #projects-table th:nth-child(6),
+        #projects-table td:nth-child(6) { width: var(--col-width-author); }
+
+        #projects-table th:nth-child(7),
+        #projects-table td:nth-child(7) { width: var(--col-width-actions); }
+
+        th {
+            background: var(--header-bg-color);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th.sortable::after {
+            content: "↕";
+            margin-left: 8px;
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+
+        th.sortable.asc::after { content: "↑"; opacity: 1; }
+        th.sortable.desc::after { content: "↓"; opacity: 1; }
+
+        tr:nth-child(even) { background: var(--alt-row-color); }
+        tr:hover { background: rgba(233,69,96,0.08); }
+
+        td.actions-cell {
+            padding: 8px 10px;
+            overflow: visible;
+            white-space: normal;
+        }
+
+        .action-stack {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .action-stack .action-item {
+            display: flex;
+            flex: 0 0 auto;
+        }
+
+        .action-stack .button {
+            font-size: 13px;
+            padding: 8px 14px;
+            line-height: 1.2;
+        }
+
+        .author-select {
+            padding: 8px 12px;
+            border: 1px solid #233860;
+            border-radius: 6px;
+            background: #0a0a1a;
+            color: var(--text-color);
+        }
+
+        .status {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4a90d9;
+            margin: 0 auto;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #99a;
+            font-style: italic;
+            font-size: 16px;
+        }
+
+        .context-menu {
+            position: fixed;
+            z-index: 2000;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            display: none;
+            min-width: 180px;
+        }
+
+        .context-menu ul {
+            list-style: none;
+            padding: 6px 0;
+        }
+
+        .context-menu ul li {
+            padding: 10px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            cursor: pointer;
+            color: var(--text-color);
+            transition: background 0.2s;
+        }
+
+        .context-menu ul li:hover {
+            background: rgba(233,69,96,0.2);
+            color: var(--primary-color);
+        }
+
+        @media (max-width: 768px) {
+            .controls { flex-direction: column; }
+            #search-input { min-width: unset; width: 100%; }
+            th:nth-child(2), td:nth-child(2),
+            th:nth-child(6), td:nth-child(6) {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 Все сигналы</h1>
+            <div class="user-info">
+                <strong>Пользователь:</strong>
+                <span id="current-user">—</span>
+                <span id="user-role"></span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="search-input" placeholder="Поиск по коду...">
+            <button id="my-projects" class="button primary">🔖 Мои проекты</button>
+            <button id="refresh-projects" class="button primary">🔄 Обновить</button>
+        </div>
+
+        <table id="projects-table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Статус</th>
+                    <th>Код</th>
+                    <th class="sortable" id="sort-type">Тип</th>
+                    <th>Описание</th>
+                    <th>Автор</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="projects-body">
+                <tr><td colspan="7" class="empty-state">Загрузка проектов...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="context-menu" class="context-menu">
+        <ul>
+            <li id="ctx-open-project">📂 Открыть проект</li>
+            <li id="ctx-copy-code">📋 Копировать код</li>
+        </ul>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentUser = urlParams.get('user') || 'Аноним';
+        document.getElementById('current-user').textContent = currentUser;
+
+        let allProjects = [];
+        let filteredProjects = [];
+        let availableAuthors = [];
+        let adminAuthor = '';
+        let showMyProjects = false;
+        let sortBy = 'type';
+        let sortOrder = 'asc';
+        let selectedProject = null;
+
+        function isCurrentUserAdmin() {
+            return currentUser === adminAuthor;
+        }
+
+        function isAdminOrOwner(project) {
+            return isCurrentUserAdmin() || project.author === currentUser;
+        }
+
+        function getProjectDescription(project) {
+            if (project.type === 'rule') return project.possibleCause || '—';
+            return project.description || '—';
+        }
+
+        async function loadProjects() {
+            const body = document.getElementById('projects-body');
+            body.innerHTML = `<tr><td colspan="7" class="empty-state">Загрузка проектов...</td></tr>`;
+            try {
+                const resp = await fetch('/api/project/list');
+                if (!resp.ok) throw new Error('Не удалось получить список проектов');
+                const data = await resp.json();
+                adminAuthor = data.adminAuthor || '';
+                availableAuthors = data.authors || [];
+                allProjects = data.projects.filter(p => p.source === 'projects');
+                if (isCurrentUserAdmin()) {
+                    const role = document.getElementById('user-role');
+                    role.textContent = '(Админ)';
+                    role.style.color = '#e94560';
+                }
+                filteredProjects = [...allProjects];
+                sortProjects();
+                renderTable();
+            } catch (err) {
+                body.innerHTML = `<tr><td colspan="7" class="empty-state">❌ ${err.message}</td></tr>`;
+            }
+        }
+
+        function sortProjects() {
+            filteredProjects.sort((a, b) => {
+                const av = (a[sortBy] || '').localeCompare(b[sortBy] || '');
+                return sortOrder === 'asc' ? av : -av;
+            });
+        }
+
+        function renderTable() {
+            const body = document.getElementById('projects-body');
+            if (!filteredProjects.length) {
+                body.innerHTML = `<tr><td colspan="7" class="empty-state">${showMyProjects ? 'У вас нет проектов' : 'Ничего не найдено'}</td></tr>`;
+                return;
+            }
+            body.innerHTML = '';
+            filteredProjects.forEach((project, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td><div class="status"></div></td>
+                    <td title="${project.code || ''}">${project.code || '—'}</td>
+                    <td title="${project.type || ''}">${project.type || '—'}</td>
+                    <td title="${getProjectDescription(project)}">${getProjectDescription(project)}</td>
+                    <td title="${project.author || ''}">${project.author || '—'}</td>
+                    <td class="actions-cell">
+                        <div class="action-stack">
+                            ${getActionButtons(project)}
+                        </div>
+                    </td>
+                `;
+                row.addEventListener('contextmenu', e => showContextMenu(e, project));
+                body.appendChild(row);
+            });
+            setupActionButtonsHandlers();
+            updateSortIndicators();
+        }
+
+        function getActionButtons(project) {
+            const actions = [];
+            if (isAdminOrOwner(project)) {
+                actions.push(`
+                    <span class="action-item">
+                        <button class="button delete" data-filename="${project.filename}">🗑️ Удалить</button>
+                    </span>
+                `);
+            }
+            if (isCurrentUserAdmin()) {
+                actions.push(`
+                    <span class="action-item">
+                        <button class="button assign" data-filename="${project.filename}" data-mode="admin">👤 Назначить</button>
+                    </span>
+                `);
+            } else if (!project.author) {
+                actions.push(`
+                    <span class="action-item">
+                        <button class="button assign" data-filename="${project.filename}" data-mode="user">👤 Назначить</button>
+                    </span>
+                `);
+            }
+            return actions.join('');
+        }
+
+        function setupActionButtonsHandlers() {
+            document.querySelectorAll('.delete').forEach(btn => {
+                btn.onclick = async e => {
+                    e.stopPropagation();
+                    const filename = btn.dataset.filename;
+                    if (!confirm(`Удалить проект "${filename}"?`)) return;
+                    try {
+                        const resp = await fetch(`/api/project/delete/${encodeURIComponent(filename)}`, {
+                            method: 'DELETE',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ user: currentUser })
+                        });
+                        if (!resp.ok) {
+                            const err = await resp.json();
+                            throw new Error(err.detail || 'Ошибка удаления');
+                        }
+                        await loadProjects();
+                    } catch (err) {
+                        alert(err.message);
+                    }
+                };
+            });
+
+            document.querySelectorAll('.assign').forEach(btn => {
+                btn.onclick = e => {
+                    e.stopPropagation();
+                    showAuthorSelector(btn);
+                };
+            });
+        }
+
+        function showAuthorSelector(buttonEl) {
+            const filename = buttonEl.dataset.filename;
+            const holder = buttonEl.closest('.action-item');
+            const select = document.createElement('select');
+            select.className = 'author-select';
+            select.innerHTML = `<option value="">Выберите автора</option>` +
+                availableAuthors.map(a => `<option value="${a}">${a}</option>`).join('');
+            holder.innerHTML = '';
+            holder.appendChild(select);
+            select.focus();
+
+            select.onchange = async () => {
+                const newAuthor = select.value;
+                if (!newAuthor) return renderTable();
+                try {
+                    const resp = await fetch('/api/project/set-author', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ filename, author: newAuthor })
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json();
+                        throw new Error(err.detail || 'Ошибка назначения автора');
+                    }
+                    await loadProjects();
+                } catch (err) {
+                    alert(err.message);
+                    renderTable();
+                }
+            };
+
+            select.onblur = () => setTimeout(renderTable, 150);
+        }
+
+        function filterProjects() {
+            const search = document.getElementById('search-input').value.trim().toLowerCase();
+            filteredProjects = allProjects.filter(project => {
+                const matchesSearch = !search || (project.code || '').toLowerCase().includes(search);
+                const matchesAuthor = !showMyProjects || ((project.author || '').toLowerCase() === currentUser.toLowerCase());
+                return matchesSearch && matchesAuthor;
+            });
+            sortProjects();
+            renderTable();
+        }
+
+        document.getElementById('search-input').addEventListener('input', filterProjects);
+
+        document.getElementById('my-projects').addEventListener('click', () => {
+            showMyProjects = !showMyProjects;
+            const btn = document.getElementById('my-projects');
+            btn.classList.toggle('active', showMyProjects);
+            btn.textContent = showMyProjects ? '🔖 Все проекты' : '🔖 Мои проекты';
+            filterProjects();
+        });
+
+        document.getElementById('refresh-projects').addEventListener('click', loadProjects);
+
+        document.getElementById('sort-type').addEventListener('click', () => {
+            if (sortBy === 'type') {
+                sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortBy = 'type';
+                sortOrder = 'asc';
+            }
+            sortProjects();
+            renderTable();
+        });
+
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('asc', 'desc'));
+            const current = document.getElementById(`sort-${sortBy}`);
+            if (current) current.classList.add(sortOrder);
+        }
+
+        function showContextMenu(event, project) {
+    event.preventDefault();
+    selectedProject = project;
+
+    const menu = document.getElementById('context-menu');
+    menu.style.display = 'block';
+
+    // Получаем размеры меню (после display:block)
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let posX = event.clientX;
+    let posY = event.clientY;
+
+    // Если меню вылазит за правый или нижний край — подвинем
+    if (posX + menuRect.width > viewportWidth) {
+        posX = viewportWidth - menuRect.width - 10;
+    }
+    if (posY + menuRect.height > viewportHeight) {
+        posY = viewportHeight - menuRect.height - 10;
+    }
+
+    menu.style.left = `${posX}px`;
+    menu.style.top = `${posY}px`;
+
+    document.addEventListener('click', hideContextMenu, { once: true });
+}
+
+        function hideContextMenu() {
+            document.getElementById('context-menu').style.display = 'none';
+        }
+
+        document.getElementById('ctx-open-project').addEventListener('click', () => {
+            if (!selectedProject) return;
+            const url = `/?load=${encodeURIComponent(selectedProject.filename)}&source=${encodeURIComponent(selectedProject.source || 'projects')}`;
+            window.open(url, '_blank');
+            hideContextMenu();
+        });
+
+        document.getElementById('ctx-copy-code').addEventListener('click', () => {
+            if (!selectedProject?.code) return;
+            navigator.clipboard.writeText(selectedProject.code)
+                .then(() => alert(`Код "${selectedProject.code}" скопирован.`))
+                .catch(err => alert(`Ошибка копирования: ${err.message}`));
+            hideContextMenu();
+        });
+
+        document.getElementById('projects-table').addEventListener('contextmenu', e => {
+            if (e.target.closest('tbody tr')) e.preventDefault();
+        });
+
+        document.addEventListener('DOMContentLoaded', loadProjects);
+    </script>
+</body>
+</html>
