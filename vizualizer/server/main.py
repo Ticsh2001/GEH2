@@ -65,6 +65,21 @@ STATE = {
     "tables": None,
 }
 
+TAGS_FILE = "tags.json"
+
+def load_tags_data():
+    if not os.path.exists(TAGS_FILE):
+        return {"tags": [], "assignments": {}}
+    try:
+        with open(TAGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"tags": [], "assignments": {}}
+
+def save_tags_data(data):
+    with open(TAGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def load_tables_from_folder(folder: str) -> List[Dict]:
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
@@ -884,6 +899,53 @@ async def set_project_author(request: Request):
     except Exception as e:
         print(f"Error updating author: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+@app.get("/api/tags/list")
+async def get_tags():
+    return load_tags_data()
+
+@app.post("/api/tags/create")
+async def create_tag(payload: dict = Body(...)):
+    user = payload.get("user")
+    name = payload.get("name")
+    color = payload.get("color")
+    
+    # Проверка админа
+    admin_author = STATE["settings"].get("adminAuthor", "")
+    if user != admin_author:
+        raise HTTPException(status_code=403, detail="Только админ может создавать теги")
+        
+    if not name or not color:
+        raise HTTPException(status_code=400, detail="Нужно имя и цвет")
+
+    data = load_tags_data()
+    
+    # Проверка дубликатов
+    if any(t['name'] == name for t in data['tags']):
+         raise HTTPException(status_code=400, detail="Тег с таким именем уже есть")
+
+    new_tag = {
+        "id": f"tag_{int(datetime.utcnow().timestamp())}", 
+        "name": name, 
+        "color": color
+    }
+    data["tags"].append(new_tag)
+    save_tags_data(data)
+    return new_tag
+
+@app.post("/api/tags/assign")
+async def assign_tags(payload: dict = Body(...)):
+    # Назначать теги могут все
+    filename = payload.get("filename")
+    tag_ids = payload.get("tagIds", []) # Список ID тегов
+
+    if not filename:
+        raise HTTPException(status_code=400, detail="Нет имени файла")
+
+    data = load_tags_data()
+    data["assignments"][filename] = tag_ids
+    save_tags_data(data)
+    return {"status": "success"}
 
 
 @app.post("/api/project/save")

@@ -1,0 +1,34 @@
+{
+  "tags": [
+    {
+      "id": "tag_1772690767",
+      "name": "Тттт",
+      "color": "#undefined98undefinedB8"
+    },
+    {
+      "id": "tag_1772690771",
+      "name": "вывыв",
+      "color": "#D9ECundefinedundefined"
+    },
+    {
+      "id": "tag_1772690847",
+      "name": "ываыа",
+      "color": "#undefinedundefinedCundefinedundefinedundefined"
+    },
+    {
+      "id": "tag_1772690909",
+      "name": "ываыв",
+      "color": "#ff0055"
+    },
+    {
+      "id": "tag_1772690912",
+      "name": "ываыва",
+      "color": "#0affc2"
+    }
+  ],
+  "assignments": {
+    "MYTEST_parameter.json": [
+      "tag_1772690909"
+    ]
+  }
+}
