@@ -294,41 +294,60 @@ prepareCodeForSystem(codeStr) {
 
     let out = codeStr;
 
-    // 1) Логические операторы ТОЛЬКО как отдельные слова
-    // Пример: (A AND B) → (A && B); NOT(X) → !(X)
+    // 1) Заменяем логические операторы
     out = out.replace(/\bAND\b/g, '&&')
              .replace(/\bOR\b/g, '||')
              .replace(/\bNOT\b/g, '!');
 
-    // 2) Добавляем 'P' перед именами input-signal, начинающимися с цифры
-    // Берём имена из AppState, чтобы не гадать.
+    // 2) § → _
+    out = out.replace(/§/g, '_');
+
+    // 3) Заменяем одиночное '=' на '==', но не трогаем '>=', '<=', '!=', '=='
+    out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
+
+    // 4) Добавляем 'P' перед именами input-signal, начинающимися с цифры
     try {
         const usedSignals = Object.values(AppState.elements || {})
             .filter(e => e && e.type === 'input-signal')
             .map(e => (e.props?.name || e.id || '').trim())
             .filter(name => !!name);
 
-        // Уникальные
         const unique = Array.from(new Set(usedSignals));
-
-        // Только те, что начинаются с цифры
         const startsWithDigit = unique.filter(name => /^\d/.test(name));
-
-        // Для каждого такого имени — заменить по "границам токена"
-        // Токен = последовательность идентична правилам: буквы/цифры/кириллица/_/§ и точки.
-        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF§\\.'; // класс разрешённых символов имени
-        const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF_\\.'; // § уже заменили на _
+        const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
         for (const sig of startsWithDigit) {
             const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
             out = out.replace(re, `$1P$2`);
         }
+
     } catch (e) {
         console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
     }
 
-    // 3) § → _
-    out = out.replace(/§/g, '_');
+    // 5) Для спецфункций — не добавляем P и оборачиваем первый аргумент в кавычки
+    const fnList = [
+        'PREV', 'GETPOINT', 'INTERPOLATE',
+        'HISTORYAVG', 'HISTORYCOUNT', 'HISTORYSUM',
+        'HISTORYMAX', 'HISTORYMIN', 'HISTORYDIFF', 'HISTORYGRADIENT'
+    ];
+
+    for (const fn of fnList) {
+        // шаблон вызова: FN(первый_аргумент , или )...
+        // первый аргумент = до первой запятой или закрывающей скобки
+        // мы можем безопасно заменить его на `'аргумент'`
+        const re = new RegExp(`\\b${fn}\\s*\\(\\s*([^,\\)]+)`, 'g');
+
+        out = out.replace(re, (match, p1) => {
+            // Проверяем — если п1 уже в кавычках, не трогаем
+            if (/^['"]/.test(p1.trim())) return match;
+            // Убираем возможный префикс P перед таким аргументом
+            let arg = p1.trim().replace(/^P(?=\d)/, '');
+            // Оборачиваем в одинарные кавычки
+            return `${fn}('${arg}'`;
+        });
+    }
 
     return out;
 },
