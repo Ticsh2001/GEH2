@@ -306,25 +306,25 @@ prepareCodeForSystem(codeStr) {
     out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
 
     // 4) Добавляем 'P' перед именами input-signal, начинающимися с цифры
-    try {
-        const usedSignals = Object.values(AppState.elements || {})
-            .filter(e => e && e.type === 'input-signal')
-            .map(e => (e.props?.name || e.id || '').trim())
-            .filter(name => !!name);
+try {
+    const usedSignals = Object.values(AppState.elements || {})
+        .filter(e => e && e.type === 'input-signal')
+        .map(e => (e.props?.name || e.id || '').trim())
+        .filter(name => !!name)
+        .map(name => name.replace(/§/g, '_')); // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
 
-        const unique = Array.from(new Set(usedSignals));
-        const startsWithDigit = unique.filter(name => /^\d/.test(name));
-        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF_\\.'; // § уже заменили на _
-        const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const unique = Array.from(new Set(usedSignals));
+    const startsWithDigit = unique.filter(name => /^\d/.test(name));
+    const identClass = 'A-Za-z0-9_\\u0400-\\u04FF.'; // убрал дублирование _
+    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-        for (const sig of startsWithDigit) {
-            const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
-            out = out.replace(re, `$1P$2`);
-        }
-
-    } catch (e) {
-        console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
+    for (const sig of startsWithDigit) {
+        const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
+        out = out.replace(re, `$1P$2`);
     }
+} catch (e) {
+    console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
+}
 
     // 5) Для спецфункций — не добавляем P и оборачиваем первый аргумент в кавычки
     const fnList = [
