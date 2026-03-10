@@ -306,25 +306,26 @@ prepareCodeForSystem(codeStr) {
     out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
 
     // 4) Добавляем 'P' перед именами input-signal, начинающимися с цифры
-try {
-    const usedSignals = Object.values(AppState.elements || {})
-        .filter(e => e && e.type === 'input-signal')
-        .map(e => (e.props?.name || e.id || '').trim())
-        .filter(name => !!name)
-        .map(name => name.replace(/§/g, '_')); // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+    try {
+        const usedSignals = Object.values(AppState.elements || {})
+            .filter(e => e && e.type === 'input-signal')
+            .map(e => (e.props?.name || e.id || '').trim())
+            .filter(name => !!name)
+            .map(name => name.replace(/§/g, '_')); // Приводим имена к формату после замены § на _
 
-    const unique = Array.from(new Set(usedSignals));
-    const startsWithDigit = unique.filter(name => /^\d/.test(name));
-    const identClass = 'A-Za-z0-9_\\u0400-\\u04FF.'; // убрал дублирование _
-    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const unique = Array.from(new Set(usedSignals));
+        const startsWithDigit = unique.filter(name => /^\d/.test(name));
+        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF_\\.'; 
+        const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    for (const sig of startsWithDigit) {
-        const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
-        out = out.replace(re, `$1P$2`);
+        for (const sig of startsWithDigit) {
+            const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
+            out = out.replace(re, `$1P$2`);
+        }
+
+    } catch (e) {
+        console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
     }
-} catch (e) {
-    console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
-}
 
     // 5) Для спецфункций — не добавляем P и оборачиваем первый аргумент в кавычки
     const fnList = [
@@ -334,20 +335,23 @@ try {
     ];
 
     for (const fn of fnList) {
-        // шаблон вызова: FN(первый_аргумент , или )...
-        // первый аргумент = до первой запятой или закрывающей скобки
-        // мы можем безопасно заменить его на `'аргумент'`
         const re = new RegExp(`\\b${fn}\\s*\\(\\s*([^,\\)]+)`, 'g');
 
         out = out.replace(re, (match, p1) => {
-            // Проверяем — если п1 уже в кавычках, не трогаем
             if (/^['"]/.test(p1.trim())) return match;
-            // Убираем возможный префикс P перед таким аргументом
             let arg = p1.trim().replace(/^P(?=\d)/, '');
-            // Оборачиваем в одинарные кавычки
             return `${fn}('${arg}'`;
         });
     }
+
+    // 6) 🆕 Заменяем унарные минусы на умножение на -1
+    // Унарный минус может стоять после: начала строки, (, операторов, запятой, пробелов
+    
+    // Заменяем унарный минус перед сигналами, начинающимися с P и цифры
+    out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)/g, '$1-1 * ');
+    
+    // Заменяем унарный минус перед выражениями в скобках
+    out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()/g, '$1-1 * ');
 
     return out;
 },
