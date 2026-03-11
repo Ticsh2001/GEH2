@@ -12,12 +12,14 @@ from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import shutil
 from fastapi import Body
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from urllib.parse import quote
+from export import export_selected_projects
 
 # =============================================================================
 # КОНФИГУРАЦИЯ
@@ -1009,6 +1011,39 @@ def load_project(filename: str, source: str = "projects"):
     except Exception as e:
         print(f"Error loading project: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during load")
+    
+
+@app.post("/api/project/export-selected")
+async def api_export_selected_projects(payload: dict = Body(...)):
+    try:
+        filenames = payload.get("filenames", [])
+
+        project_dir = STATE["settings"].get("projectDataFolder")
+        if not project_dir:
+            raise HTTPException(status_code=500, detail="projectDataFolder not configured")
+
+        project_dir_abs = project_dir if os.path.isabs(project_dir) else os.path.normpath(os.path.join(BASE_DIR, project_dir))
+
+        result = export_selected_projects(filenames, project_dir_abs)
+
+        return StreamingResponse(
+            BytesIO(result["content"]),
+            media_type=result["media_type"],
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(result['filename'])}",
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error exporting selected projects: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during export")
 
 
 # =============================================================================
