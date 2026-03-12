@@ -1044,6 +1044,62 @@ async def api_export_selected_projects(payload: dict = Body(...)):
     except Exception as e:
         print(f"Error exporting selected projects: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during export")
+    
+# --- ВСТАВИТЬ в секцию "API — ПРОЕКТЫ" main.py ---
+
+def _collect_all_project_files() -> list[dict]:
+    """Собирает все проекты из projects и templates с базовой метаинфой."""
+    items = []
+    for directory_key, source_label in (("projectDataFolder", "projects"), ("templateDataFolder", "templates")):
+        folder = STATE["settings"].get(directory_key)
+        if not folder:
+            continue
+        base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
+        if not os.path.isdir(base_dir):
+            continue
+        for fname in sorted(os.listdir(base_dir)):
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(base_dir, fname)
+            items.append({"path": path, "filename": fname, "source": source_label, "base_dir": base_dir})
+    return items
+
+@app.get("/api/project/consumers/{code}")
+def api_project_consumers(code: str):
+    """
+    Возвращает список проектов, которые напрямую используют данный параметр (code)
+    в своих входных сигналах. Только прямые зависимости (без косвенных).
+    """
+    results = []
+    for item in _collect_all_project_files():
+        try:
+            with open(item["path"], "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            proj_meta = (payload.get("project") or {})
+            proj_code = (proj_meta.get("code") or proj_meta.get("tagname") or "").strip()
+            elements = payload.get("elements") or {}
+            inputs = []
+            for el in elements.values():
+                if el and el.get("type") == "input-signal":
+                    name = ((el.get("props") or {}).get("name") or "").strip()
+                    if name:
+                        inputs.append(name)
+            # Прямой потребитель, если текущий code встречается в inputSignals
+            if code in set(inputs):
+                results.append({
+                    "code": proj_code or "(без кода)",
+                    "filename": item["filename"],
+                    "source": item["source"],
+                    "description": proj_meta.get("description", ""),
+                    "type": proj_meta.get("type", "")
+                })
+        except Exception as e:
+            print(f"[WARN] Failed to inspect project {item['path']}: {e}")
+            continue
+
+    # Можно отсортировать по коду для стабильности
+    results.sort(key=lambda x: x.get("code", "").lower())
+    return {"consumers": results}
 
 
 # =============================================================================

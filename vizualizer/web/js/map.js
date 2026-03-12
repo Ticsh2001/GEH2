@@ -1,8 +1,16 @@
+/**
+ * Модуль работы с элементами схемы
+ * map.js
+ */
+
+
+
 class ProjectMap {
     constructor() {
         this.canvas = document.getElementById('map-canvas');
         this.ctx = this.canvas.getContext('2d');
         this.loading = document.getElementById('loading');
+        this.viewMode = 'deps';
         
         this.nodes = [];
         this.connections = [];
@@ -65,6 +73,14 @@ class ProjectMap {
                 document.getElementById('context-menu').style.display = 'none';
             }
         });
+        document.getElementById('btn-mode-deps')?.addEventListener('click', () => {
+            this.viewMode = 'deps';
+            this.loadData(); // перезагружаем в новом режиме
+        });
+        document.getElementById('btn-mode-consumers')?.addEventListener('click', () => {
+            this.viewMode = 'consumers';
+            this.loadData(); // перезагружаем в новом режиме
+        });
     }
 
     // =========================================================================
@@ -72,30 +88,136 @@ class ProjectMap {
     // =========================================================================
     async loadData() {
         this.loading.style.display = 'block';
-        
         try {
             const urlParams = new URLSearchParams(window.location.search);
             const projectFilename = urlParams.get('project');
             const projectSource = urlParams.get('source') || 'projects';
             
             if (projectFilename) {
-                await this.loadSingleProject(projectFilename, projectSource);
-                document.querySelector('.header h1').textContent =
-                    `🗺️ Карта проекта: ${this._currentProjectCode || projectFilename}`;
+                // Загружаем сам проект (нам нужен code/inputs)
+                const projResp = await fetch(
+                    `/api/project/load/${encodeURIComponent(projectFilename)}?source=${encodeURIComponent(projectSource)}`
+                );
+                if (!projResp.ok) throw new Error(`Проект "${projectFilename}" не найден`);
+                const projectData = await projResp.json();
+                const currentCode = (projectData.project?.code || '').trim() || 'Unknown';
+                this._currentProjectCode = currentCode;
+
+                if (this.viewMode === 'deps') {
+                    // как раньше — разворачиваем входы
+                    await this.loadSingleProjectUsingResolved(projectData, projectFilename, projectSource);
+                    document.querySelector('.header h1').textContent =
+                        `🗺️ Карта проекта (входы): ${currentCode}`;
+                } else {
+                    // новый режим: кто использует текущий
+                    await this.loadConsumersGraph(projectData, projectFilename, projectSource);
+                    document.querySelector('.header h1').textContent =
+                        `🗺️ Карта проекта (кто использует): ${currentCode}`;
+                }
             } else {
                 await this.loadAllProjects();
-                document.querySelector('.header h1').textContent =
-                    '🗺️ Карта зависимостей проектов';
+                document.querySelector('.header h1').textContent = '🗺️ Карта зависимостей проектов';
             }
-            
+
             this.loading.style.display = 'none';
             this.updateLevelInfo();
             this.fitAll();
-            
         } catch (error) {
             console.error('[map] Error loading data:', error);
             this.loading.textContent = 'Ошибка загрузки данных: ' + error.message;
         }
+    }
+
+        async loadSingleProjectUsingResolved(projectData, projectFilename, projectSource) {
+        // 2) Извлекаем входные сигналы текущего проекта
+        const inputSignals = [];
+        Object.values(projectData.elements || {}).forEach(el => {
+            if (el?.type === 'input-signal' && el.props?.name) {
+                inputSignals.push(el.props.name.trim());
+            }
+        });
+        const uniqueInputs = [...new Set(inputSignals)];
+
+        // 3) Рекурсивно разворачиваем зависимости через бэкенд
+        const resolveResp = await fetch('/api/resolve-signals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signals: uniqueInputs })
+        });
+        if (!resolveResp.ok) throw new Error('Не удалось разрешить зависимости сигналов');
+        const resolved = await resolveResp.json();
+
+        // 4) Загружаем список проектов для метаданных (filename, source)
+        const listResp = await fetch('/api/project/list');
+        const listData = await listResp.json();
+        const projectLookup = new Map();
+        for (const p of (listData.projects || [])) {
+            if (p.code) projectLookup.set(p.code, p);
+        }
+
+        // 5) Строим граф (как было)
+        this.buildSingleProjectGraph(
+            projectData, projectFilename, projectSource,
+            resolved, projectLookup
+        );
+    }
+
+        async loadConsumersGraph(projectData, projectFilename, projectSource) {
+        const currentCode = (projectData.project?.code || '').trim() || 'Unknown';
+        // 1) Запрашиваем у бэкенда прямых потребителей
+        const resp = await fetch(`/api/project/consumers/${encodeURIComponent(currentCode)}`);
+        if (!resp.ok) throw new Error('Не удалось получить список потребителей');
+        const data = await resp.json();
+        const consumers = data.consumers || [];
+
+        // 2) Строим упрощённый граф «звезды»: центр — текущий, лучи — потребители
+        this.nodes = [];
+        this.connections = [];
+        this.levels.clear();
+
+        let nodeId = 0;
+
+        // Текущий проект — уровень 0
+        const currentNode = {
+            id: nodeId++,
+            name: currentCode,
+            type: 'project',
+            level: 0,       // уровень 0 как корень в этом режиме
+            x: 0, y: 0,
+            project: {
+                code: currentCode,
+                filename: projectFilename,
+                source: projectSource
+            },
+            inputSignals: [] // не важно тут
+        };
+        this.nodes.push(currentNode);
+        this.addToLevel(0, currentNode);
+
+        // Потребители — уровень 1
+        for (const c of consumers) {
+            const node = {
+                id: nodeId++,
+                name: c.code || c.filename,
+                type: 'project',
+                level: 1,
+                x: 0, y: 0,
+                project: {
+                    code: c.code || '',
+                    filename: c.filename,
+                    source: c.source || 'projects'
+                },
+                inputSignals: [currentCode] // минимально, для деталей
+            };
+            this.nodes.push(node);
+            this.addToLevel(1, node);
+
+            // Связь от текущего к потребителю
+            this.connections.push({ from: currentNode, to: node });
+        }
+
+        // Раскладываем красиво
+        this.positionNodes();
     }
 
     // =========================================================================
