@@ -31,3 +31,5 @@ v_WATER_STEAM_PROP.xlsx
 y_WATER_STEAM_PROP.xlsx
 vizualizer/server/__pycache__/export.cpython-313.pyc
 vizualizer/server/__pycache__/main.cpython-313.pyc
+formula_templates.json
+output.json
