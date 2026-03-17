@@ -25,21 +25,24 @@ def debug_series(name: str, series: pd.Series, formula: str):
         return
 
     total = len(series)
+
     nan_count = series.isna().sum()
-    valid_count = total - nan_count
+    inf_count = np.isinf(series).sum()
+    valid_mask = ~(series.isna() | np.isinf(series))
+    valid_count = valid_mask.sum()
 
     print(f"\n[DEBUG] ===== {name} =====")
     print(f"[DEBUG] Formula: {formula}")
-    print(f"[DEBUG] Total points: {total}")
-    print(f"[DEBUG] Valid points: {valid_count}")
-    print(f"[DEBUG] NaN points: {nan_count}")
+    print(f"[DEBUG] Total: {total}")
+    print(f"[DEBUG] Valid: {valid_count}")
+    print(f"[DEBUG] NaN: {nan_count}")
+    print(f"[DEBUG] INF: {inf_count}")
 
     if valid_count == 0:
-        print(f"[DEBUG] ❌ ВСЁ NaN — сигнал невалиден")
+        print(f"[DEBUG] ❌ НЕТ валидных значений")
     else:
         print(f"[DEBUG] ✅ Есть валидные значения")
-        print(f"[DEBUG] Sample:")
-        print(series.dropna().head(5))
+        print(series[valid_mask].head(5))
 
 def _compute_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Коэффициент детерминации R^2."""
@@ -886,6 +889,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                             formula, df_all,
                             warn_callback=lambda msg, name=syn_name: st.warning(f"[{name}] {msg}", icon="⚠️")
                         )
+                        syn_series = syn_series.replace([np.inf, -np.inf], np.nan)
                         debug_series(syn_name, syn_series, formula)
                         syn_series.name = syn_name
                         df_all[syn_name] = syn_series
@@ -921,6 +925,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                             df_base=df_all,
                             signal_name=syn_name,
                         )
+                        streaming_series = streaming_series.replace([np.inf, -np.inf], np.nan)
                         debug_series(syn_name, streaming_series, formula)
                         df_all[syn_name] = streaming_series
                         found_signals.append(syn_name)
@@ -1056,6 +1061,7 @@ if CODE and df_for_code is not None:
                 df_for_code,
                 warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
             )
+            synthetic_series = synthetic_series.replace([np.inf, -np.inf], np.nan)
             debug_series("CODE_RESULT", synthetic_series, CODE)
             target_name = code_signal_name or make_unique_name("CODE_RESULT")
             synthetic_series.name = target_name
