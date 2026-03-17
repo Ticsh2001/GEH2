@@ -19,6 +19,28 @@ from visualizer_state import (
     STATE_VERSION
 )
 
+def debug_series(name: str, series: pd.Series, formula: str):
+    if series is None:
+        print(f"[DEBUG] {name}: series is None")
+        return
+
+    total = len(series)
+    nan_count = series.isna().sum()
+    valid_count = total - nan_count
+
+    print(f"\n[DEBUG] ===== {name} =====")
+    print(f"[DEBUG] Formula: {formula}")
+    print(f"[DEBUG] Total points: {total}")
+    print(f"[DEBUG] Valid points: {valid_count}")
+    print(f"[DEBUG] NaN points: {nan_count}")
+
+    if valid_count == 0:
+        print(f"[DEBUG] ❌ ВСЁ NaN — сигнал невалиден")
+    else:
+        print(f"[DEBUG] ✅ Есть валидные значения")
+        print(f"[DEBUG] Sample:")
+        print(series.dropna().head(5))
+
 def _compute_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Коэффициент детерминации R^2."""
     mask = ~np.isnan(y_true) & ~np.isnan(y_pred)
@@ -854,6 +876,9 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                 for idx, syn_name in enumerate(batch_order):
                     syn_data = synthetic_signals[syn_name]
                     formula = syn_data.get("formula", "")
+                    # НОВОЕ: автоподгрузка таблиц для вложенного сигнала
+                    ensure_tables_for_code(formula)
+                    formula = normalize_code_tables(formula)
                     if not formula or df_all.empty:
                         continue
                     try:
@@ -861,6 +886,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                             formula, df_all,
                             warn_callback=lambda msg, name=syn_name: st.warning(f"[{name}] {msg}", icon="⚠️")
                         )
+                        debug_series(syn_name, syn_series, formula)
                         syn_series.name = syn_name
                         df_all[syn_name] = syn_series
                         found_signals.append(syn_name)
@@ -878,6 +904,8 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                 for idx, syn_name in enumerate(streaming_order):
                     syn_data = synthetic_signals[syn_name]
                     formula = syn_data.get("formula", "")
+                    ensure_tables_for_code(formula)
+                    formula = normalize_code_tables(formula)
                     if not formula or df_all.empty:
                         not_found_signals.append(syn_name)
                         progress_bar.progress((idx + 1) / len(streaming_order))
@@ -893,6 +921,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
                             df_base=df_all,
                             signal_name=syn_name,
                         )
+                        debug_series(syn_name, streaming_series, formula)
                         df_all[syn_name] = streaming_series
                         found_signals.append(syn_name)
                         st.session_state.synthetic_computed[syn_name] = formula
@@ -1027,6 +1056,7 @@ if CODE and df_for_code is not None:
                 df_for_code,
                 warn_callback=lambda msg: st.warning(msg, icon="⚠️"),
             )
+            debug_series("CODE_RESULT", synthetic_series, CODE)
             target_name = code_signal_name or make_unique_name("CODE_RESULT")
             synthetic_series.name = target_name
 
