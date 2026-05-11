@@ -11,12 +11,13 @@
             --col-width-select: 4%;
             --col-width-id: 5%;
             --col-width-status: 8%;
+            --col-width-modified: 12%;   /* новая колонка */
             --col-width-tags: 6%;
             --col-width-code: 12%;
-            --col-width-type: 10%;
+            --col-width-type: 8%;         /* было 10% */
             --col-width-description: 25%;
-            --col-width-author: 15%;
-            --col-width-actions: 15%;
+            --col-width-author: 10%;      /* было 15% */
+            --col-width-actions: 10%;     /* было 15% */
 
             --primary-color: #e94560;
             --secondary-color: #4a90d9;
@@ -160,15 +161,17 @@
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
+        /* 10 колонок */
         th:nth-child(1), td:nth-child(1) { width: var(--col-width-select); }
         th:nth-child(2), td:nth-child(2) { width: var(--col-width-id); }
         th:nth-child(3), td:nth-child(3) { width: var(--col-width-status); }
-        th:nth-child(4), td:nth-child(4) { width: var(--col-width-tags); }
-        th:nth-child(5), td:nth-child(5) { width: var(--col-width-code); }
-        th:nth-child(6), td:nth-child(6) { width: var(--col-width-type); }
-        th:nth-child(7), td:nth-child(7) { width: var(--col-width-description); }
-        th:nth-child(8), td:nth-child(8) { width: var(--col-width-author); }
-        th:nth-child(9), td:nth-child(9) { width: var(--col-width-actions); }
+        th:nth-child(4), td:nth-child(4) { width: var(--col-width-modified); }
+        th:nth-child(5), td:nth-child(5) { width: var(--col-width-tags); }
+        th:nth-child(6), td:nth-child(6) { width: var(--col-width-code); }
+        th:nth-child(7), td:nth-child(7) { width: var(--col-width-type); }
+        th:nth-child(8), td:nth-child(8) { width: var(--col-width-description); }
+        th:nth-child(9), td:nth-child(9) { width: var(--col-width-author); }
+        th:nth-child(10), td:nth-child(10) { width: var(--col-width-actions); }
 
         th {
             background: var(--header-bg-color); font-weight: 600;
@@ -278,6 +281,7 @@
                     </th>
                     <th>№</th>
                     <th class="sortable" id="sort-status">Статус</th>
+                    <th class="sortable" id="sort-modified">Дата изменения</th>
                     <th class="sortable" id="sort-tags">Теги</th>
                     <th>Код</th>
                     <th class="sortable" id="sort-type">Тип</th>
@@ -287,7 +291,7 @@
                 </tr>
             </thead>
             <tbody id="projects-body">
-                <tr><td colspan="9" class="empty-state">Загрузка проектов...</td></tr>
+                <tr><td colspan="10" class="empty-state">Загрузка проектов...</td></tr>
             </tbody>
         </table>
     </div>
@@ -312,7 +316,7 @@
         </div>
     </div>
 
-    <script>
+<script>
         const urlParams = new URLSearchParams(window.location.search);
         const currentUser = urlParams.get('user') || 'Аноним';
         document.getElementById('current-user').textContent = currentUser;
@@ -334,6 +338,11 @@
             ready:    { color: '#34d399', label: 'Готов',    sort: 2 },
             reverted: { color: '#fbbf24', label: 'Возврат',  sort: 1 }
         };
+
+        // Универсальное получение даты последнего изменения
+        function getLastModified(project) {
+            return project.lastModifiedAt || (project.project && project.project.lastModifiedAt) || null;
+        }
 
         function isCurrentUserAdmin() { return currentUser === adminAuthor; }
         function isAdminOrOwner(project) { return isCurrentUserAdmin() || project.author === currentUser; }
@@ -419,7 +428,7 @@
 
         async function loadProjects() {
             const body = document.getElementById('projects-body');
-            body.innerHTML = `<tr><td colspan="9" class="empty-state">Загрузка...</td></tr>`;
+            body.innerHTML = `<tr><td colspan="10" class="empty-state">Загрузка...</td></tr>`;
             try {
                 const resp = await fetch('/api/project/list');
                 if (!resp.ok) throw new Error('Не удалось получить список');
@@ -444,7 +453,7 @@
             } catch (err) {
                 allProjects = [];
                 filteredProjects = [];
-                body.innerHTML = `<tr><td colspan="9" class="empty-state">❌ ${err.message}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="10" class="empty-state">❌ ${err.message}</td></tr>`;
                 updateSelectionUI();
             }
         }
@@ -483,6 +492,11 @@
                 } else if (sortBy === 'author') {
                     av = (a.author || '').toLowerCase();
                     bv = (b.author || '').toLowerCase();
+                } else if (sortBy === 'modified') {
+                    const aDate = getLastModified(a);
+                    const bDate = getLastModified(b);
+                    av = aDate ? new Date(aDate).getTime() : 0;
+                    bv = bDate ? new Date(bDate).getTime() : 0;
                 } else {
                     av = (a[sortBy] || '').toLowerCase();
                     bv = (b[sortBy] || '').toLowerCase();
@@ -506,6 +520,21 @@
                     <span>${config.label}</span>
                 </div>
             `;
+        }
+
+        function formatModifiedDate(project) {
+            const dateStr = getLastModified(project);
+            if (!dateStr) return '—';
+            try {
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return '—';
+                return d.toLocaleString('ru-RU', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                }).replace(',', '');
+            } catch {
+                return '—';
+            }
         }
 
         function renderTagsCell(project) {
@@ -601,7 +630,7 @@
         function renderTable() {
             const body = document.getElementById('projects-body');
             if (!filteredProjects.length) {
-                body.innerHTML = `<tr><td colspan="9" class="empty-state">${showMyProjects ? 'У вас нет проектов' : 'Ничего не найдено'}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="10" class="empty-state">${showMyProjects ? 'У вас нет проектов' : 'Ничего не найдено'}</td></tr>`;
                 updateSortIndicators();
                 updateSelectionUI();
                 return;
@@ -619,6 +648,7 @@
                     </td>
                     <td>${index + 1}</td>
                     <td>${renderStatusCell(project)}</td>
+                    <td title="${getLastModified(project) || ''}">${formatModifiedDate(project)}</td>
                     <td>${renderTagsCell(project)}</td>
                     <td title="${project.code || ''}">${project.code || '—'}</td>
                     <td title="${project.type || ''}">${project.type || '—'}</td>
@@ -894,7 +924,7 @@
             }
         };
 
-        ['status', 'tags', 'type', 'author'].forEach(key => {
+        ['status', 'tags', 'type', 'author', 'modified'].forEach(key => {
             document.getElementById(`sort-${key}`).onclick = () => {
                 if (sortBy === key) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
                 else { sortBy = key; sortOrder = 'asc'; }

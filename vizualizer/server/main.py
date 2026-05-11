@@ -849,6 +849,8 @@ def list_projects():
                 "statusComment": project_meta.get("statusComment") or "",
                 "statusHistory": project_meta.get("statusHistory") or [],
                 "lastStatusChangedByAdmin": project_meta.get("lastStatusChangedByAdmin", False),
+                "lastModifiedAt": project_meta.get("lastModifiedAt") or "",
+                "lastModifiedBy": project_meta.get("lastModifiedBy") or "",
                 "source": source_label
             })
         return items
