@@ -1026,7 +1026,9 @@ async def api_export_selected_projects(payload: dict = Body(...)):
 
         project_dir_abs = project_dir if os.path.isabs(project_dir) else os.path.normpath(os.path.join(BASE_DIR, project_dir))
 
-        result = export_selected_projects(filenames, project_dir_abs)
+        param_format = payload.get("param_format", "excel")
+        result = export_selected_projects(filenames, project_dir_abs, param_format)
+
 
         return StreamingResponse(
             BytesIO(result["content"]),

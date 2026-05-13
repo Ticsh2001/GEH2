@@ -296,6 +296,72 @@ def _build_parameters_xlsx_bytes(df: pd.DataFrame) -> bytes:
     wb.save(out)
     return out.getvalue()
 
+def _build_parameters_docx_bytes(df: pd.DataFrame) -> bytes:
+    """Генерирует DOCX-файл с параметрами, каждый параметр на отдельной странице."""
+    doc = Document()
+
+    section = doc.sections[0]
+    section.top_margin = Cm(2)
+    section.bottom_margin = Cm(2)
+    section.left_margin = Cm(3)
+    section.right_margin = Cm(1.5)
+
+    def normalize_text(val):
+        if val is None:
+            return ""
+        try:
+            if isinstance(val, float) and pd.isna(val):
+                return ""
+        except Exception:
+            pass
+        s = str(val)
+        return s.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+
+    def add_paragraph_line(text="", bold=False):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        pf = p.paragraph_format
+        pf.first_line_indent = Cm(1.25)
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(0)
+        pf.line_spacing = 1.5
+
+        run = p.add_run(text)
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(12)
+        run.bold = bold
+        return p
+
+    def add_multiline(text="", bold=False):
+        lines = normalize_text(text).split("\n")
+        if not lines:
+            add_paragraph_line("", bold=bold)
+            return
+        for line in lines:
+            add_paragraph_line(line, bold=bold)
+
+    # Поля из PARAM_EXPORT_COLUMNS
+    fields = [
+        ("KKS код", "KKS код"),
+        ("Описание", "Описание"),
+        ("Ед. изм.", "Ед. изм."),
+        ("Используемые сигналы", "Используемые сигналы"),
+        ("Код", "Код"),
+    ]
+
+    for idx, row in df.iterrows():
+        # Первый параметр — без номера, если нужно, можно добавить "Параметр N"
+        for label, col in fields:
+            add_paragraph_line(f"{label}:", bold=True)
+            add_multiline(normalize_text(row.get(col, "")))
+
+        if idx != len(df) - 1:
+            doc.add_page_break()
+
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
 
 def _build_rules_docx_bytes(df: pd.DataFrame) -> bytes:
     doc = Document()
@@ -388,7 +454,7 @@ def _build_rules_docx_bytes(df: pd.DataFrame) -> bytes:
     return out.getvalue()
 
 
-def export_selected_projects(filenames: list[str], project_dir: str) -> dict:
+def export_selected_projects(filenames: list[str], project_dir: str, param_format: str = "excel") -> dict:
     if not isinstance(filenames, list) or not filenames:
         raise ValueError("Нужно передать непустой список filenames")
 
@@ -407,11 +473,18 @@ def export_selected_projects(filenames: list[str], project_dir: str) -> dict:
 
     if parameter_rows:
         df_param = pd.DataFrame.from_records(parameter_rows).reindex(columns=PARAM_EXPORT_COLUMNS)
-        files_to_send.append({
-            "filename": "Сигналы.xlsx",
-            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "content": _build_parameters_xlsx_bytes(df_param)
-        })
+        if param_format == "word":
+            files_to_send.append({
+                "filename": "Сигналы.docx",
+                "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "content": _build_parameters_docx_bytes(df_param)
+            })
+        else:
+            files_to_send.append({
+                "filename": "Сигналы.xlsx",
+                "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "content": _build_parameters_xlsx_bytes(df_param)
+            })
 
     if rule_rows:
         df_rule = pd.DataFrame.from_records(rule_rows)

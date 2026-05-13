@@ -316,6 +316,18 @@
         </div>
     </div>
 
+    <div id="export-format-modal-overlay" class="tag-modal-overlay">
+        <div class="tag-modal">
+            <h3>Формат экспорта параметров</h3>
+            <p style="margin-bottom: 20px; color: #aaa;">В выбранных проектах есть параметры. Выберите формат:</p>
+            <div class="modal-actions">
+                <button class="button" onclick="closeExportFormatModal()">Отмена</button>
+                <button class="button primary" id="export-excel-btn">📊 Excel</button>
+                <button class="button primary" id="export-word-btn">📝 Word</button>
+            </div>
+        </div>
+    </div>
+
 <script>
         const urlParams = new URLSearchParams(window.location.search);
         const currentUser = urlParams.get('user') || 'Аноним';
@@ -888,14 +900,65 @@
         };
 
         document.getElementById('export-selected').onclick = async () => {
-            const filenames = getSelectedProjectObjects().map(p => p.filename);
-            if (!filenames.length) return;
+            const projects = getSelectedProjectObjects();
+            if (!projects.length) return;
 
+            const filenames = projects.map(p => p.filename);
+            const hasParameter = projects.some(p => p.type === 'parameter');
+
+            if (hasParameter) {
+                // Показать модальное окно выбора формата
+                showExportFormatModal(filenames);
+            } else {
+                // Нет параметров — сразу экспорт (формат не важен, но передадим excel по умолчанию)
+                exportSelectedProjects(filenames, 'excel');
+            }
+        };
+
+        ['status', 'tags', 'type', 'author', 'modified'].forEach(key => {
+            document.getElementById(`sort-${key}`).onclick = () => {
+                if (sortBy === key) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+                else { sortBy = key; sortOrder = 'asc'; }
+                sortProjects();
+                renderTable();
+                updateSortIndicators();
+            };
+        });
+
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('asc', 'desc'));
+            const current = document.getElementById(`sort-${sortBy}`);
+            if (current) current.classList.add(sortOrder);
+        }
+
+        // ---------- Экспорт с выбором формата ----------
+        let pendingExportFilenames = [];
+
+        function showExportFormatModal(filenames) {
+            pendingExportFilenames = filenames;
+            document.getElementById('export-format-modal-overlay').style.display = 'flex';
+        }
+
+        function closeExportFormatModal() {
+            document.getElementById('export-format-modal-overlay').style.display = 'none';
+            pendingExportFilenames = [];
+        }
+
+        function doExport(paramFormat) {
+            const filenames = pendingExportFilenames;
+            closeExportFormatModal();
+            
+            if (!filenames || !filenames.length) return;
+
+            exportSelectedProjects(filenames, paramFormat);
+        }
+
+        async function exportSelectedProjects(filenames, paramFormat) {
             try {
                 const resp = await fetch('/api/project/export-selected', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ filenames })
+                    body: JSON.stringify({ filenames, param_format: paramFormat })
                 });
 
                 if (!resp.ok) {
@@ -922,23 +985,11 @@
             } catch (e) {
                 alert(e.message);
             }
-        };
-
-        ['status', 'tags', 'type', 'author', 'modified'].forEach(key => {
-            document.getElementById(`sort-${key}`).onclick = () => {
-                if (sortBy === key) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-                else { sortBy = key; sortOrder = 'asc'; }
-                sortProjects();
-                renderTable();
-                updateSortIndicators();
-            };
-        });
-
-        function updateSortIndicators() {
-            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('asc', 'desc'));
-            const current = document.getElementById(`sort-${sortBy}`);
-            if (current) current.classList.add(sortOrder);
         }
+
+        // Навешиваем обработчики для кнопок внутри модального окна
+        document.getElementById('export-excel-btn').onclick = () => doExport('excel');
+        document.getElementById('export-word-btn').onclick = () => doExport('word');
 
         loadProjects();
     </script>
