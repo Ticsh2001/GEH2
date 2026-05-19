@@ -1,4 +1,4 @@
-# main.py — чистая версия с поддержкой состояния визуализатора
+# main.py — версия с поддержкой конфигураций
 
 import os
 import json
@@ -11,7 +11,7 @@ from update_projects import update_projects_if_templates_changed
 from datetime import datetime
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,9 +20,7 @@ from fastapi import Body
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from urllib.parse import quote
 from export import export_selected_projects
-
-from export import get_code_length   # <-- добавьте этот импорт в начало
-
+from export import get_code_length
 
 # =============================================================================
 # КОНФИГУРАЦИЯ
@@ -31,32 +29,27 @@ from export import get_code_length   # <-- добавьте этот импор�
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 TEMPLATES_PATH = os.path.join(BASE_DIR, "formula_templates.json")
-SIGNAL_INDEX_PATH = os.path.join(BASE_DIR, ".signal_index.pkl")
-
+SIGNAL_INDEX_CACHE = {}          # кэш индексов сигналов: config -> (folder_state, index)
+SIGNALS_CACHE = {}              # кэш списков сигналов: config -> list
+TABLES_CACHE = {}               # кэш списка таблиц: config -> list
 
 # =============================================================================
 # PYDANTIC МОДЕЛИ
 # =============================================================================
 
 class VisualizerStateRequest(BaseModel):
-    """Запрос на сохранение состояния визуализатора"""
     session_token: str
     state: Dict[str, Any]
 
-
 class VisualizerStateResponse(BaseModel):
-    """Ответ с состоянием визуализатора"""
     success: bool
     state: Optional[Dict[str, Any]] = None
     message: Optional[str] = None
 
-
 class VisualizeSessionRequest(BaseModel):
-    """Запрос на создание сессии визуализации"""
     signals: List[str]
     code: str = ""
     visualizer_state: Optional[Dict[str, Any]] = None
-
 
 # =============================================================================
 # ГЛОБАЛЬНОЕ СОСТОЯНИЕ
@@ -64,10 +57,9 @@ class VisualizeSessionRequest(BaseModel):
 
 STATE = {
     "settings": None,
-    "signals": None,
-    "signal_index": None,
+    "signals": None,          # больше не глобальный, оставлен для обратной совместимости (не используется)
     "templates": None,
-    "tables": None,
+    "configurations": [],     # список имён конфигураций
 }
 
 TAGS_FILE = "tags.json"
@@ -85,6 +77,38 @@ def save_tags_data(data):
     with open(TAGS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# -----------------------------------------------------------------------------
+# Вспомогательные функции для работы с путями конфигураций
+# -----------------------------------------------------------------------------
+
+def _abs_folder(setting_key: str) -> Optional[str]:
+    """Абсолютный путь к базовой папке из настроек (без учёта конфигурации)."""
+    base = STATE["settings"].get(setting_key)
+    if not base:
+        return None
+    if not os.path.isabs(base):
+        base = os.path.normpath(os.path.join(BASE_DIR, base))
+    return base
+
+def config_path(setting_key: str, config: str) -> Optional[str]:
+    """Возвращает абсолютный путь к подпапке <config> внутри базовой папки."""
+    base = _abs_folder(setting_key)
+    if not base:
+        return None
+    return os.path.join(base, config) if config else base
+
+def ensure_config_dirs(config: str):
+    """Создаёт подпапки конфигурации во всех рабочих папках, если их ещё нет."""
+    for key in ("projectDataFolder", "signalDataFolder", "signalArchiveFolder",
+                "tablesFolder", "deletedFolder"):  # добавим deletedFolder
+        base = _abs_folder(key)
+        if base:
+            full = os.path.join(base, config)
+            os.makedirs(full, exist_ok=True)
+
+# -----------------------------------------------------------------------------
+# Работа с таблицами
+# -----------------------------------------------------------------------------
 
 def load_tables_from_folder(folder: str) -> List[Dict]:
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
@@ -94,13 +118,12 @@ def load_tables_from_folder(folder: str) -> List[Dict]:
     for name in os.listdir(folder_abs):
         if not name.lower().endswith(".xlsx"):
             continue
-        base = os.path.splitext(name)[0]
-        items.append({"Name": base, "Description": ""})
+        base_name = os.path.splitext(name)[0]
+        items.append({"Name": base_name, "Description": ""})
     items.sort(key=lambda x: x["Name"].lower())
     return items
 
 def load_tables_meta(folder: str) -> Dict[str, str]:
-    # читаем tables.json, если есть
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
     meta_path = os.path.join(folder_abs, "tables.json")
     if not os.path.isfile(meta_path):
@@ -112,7 +135,6 @@ def load_tables_meta(folder: str) -> Dict[str, str]:
         if isinstance(data, list):
             for obj in data:
                 if isinstance(obj, dict) and obj:
-                    # берём первую пару
                     k, v = next(iter(obj.items()))
                     meta[str(k)] = str(v)
         elif isinstance(data, dict):
@@ -122,53 +144,44 @@ def load_tables_meta(folder: str) -> Dict[str, str]:
         print(f"[WARN] failed to read tables.json: {e}")
         return {}
 
-def refresh_tables_cache():
-    settings = STATE["settings"] or {}
-    folder = settings.get("tablesFolder")
+def get_tables_for_config(config: str) -> List[Dict]:
+    """Возвращает список таблиц для заданной конфигурации, используя кэш."""
+    if config in TABLES_CACHE:
+        return TABLES_CACHE[config]
+    folder = config_path("tablesFolder", config)
     if not folder:
-        STATE["tables"] = []
-        return
-    base_list = load_tables_from_folder(folder)
+        return []
+    items = load_tables_from_folder(folder)
     meta = load_tables_meta(folder)
-    # мержим описания
-    for item in base_list:
+    for item in items:
         name = item["Name"]
         if name in meta:
             item["Description"] = meta[name]
-    STATE["tables"] = base_list
+    TABLES_CACHE[config] = items
+    return items
 
-# Хранилище сессий визуализатора (в памяти)
-visualize_sessions: Dict[str, Dict[str, Any]] = {}
-
-
-# =============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ — ЗАГРУЗКА НАСТРОЕК
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Загрузка настроек и шаблонов
+# -----------------------------------------------------------------------------
 
 def load_settings() -> Dict:
-    """Загружает настройки из settings.json"""
     with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def load_templates() -> Dict:
-    """Загружает шаблоны формул"""
     if not os.path.exists(TEMPLATES_PATH):
         return {"templates": []}
     with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-# =============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ — СИГНАЛЫ
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Сигналы (базовые + проектные)
+# -----------------------------------------------------------------------------
 
 def load_signals_from_folder(folder: str) -> List[Dict]:
-    """Загружает описания сигналов из CSV файлов"""
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
     if not os.path.isdir(folder_abs):
-        raise FileNotFoundError(f"signalDataFolder not found: {folder_abs}")
-
+        return []
     signals_map = {}
     for name in os.listdir(folder_abs):
         if not name.lower().endswith(".csv"):
@@ -180,7 +193,6 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
             except KeyError:
                 df = pd.read_csv(path, sep=';')[['Tagname', 'Description']]
             df = df.dropna(subset=['Tagname'])
-            
             for _, row in df.iterrows():
                 tag = str(row['Tagname']).strip()
                 desc = "" if pd.isna(row['Description']) else str(row['Description']).strip()
@@ -189,7 +201,6 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
                 except KeyError:
                     unit = ""
                 desc_full = ", ".join([x for x in [desc, unit] if x])
-
                 if tag:
                     signals_map[tag] = {
                         "Tagname": tag,
@@ -198,18 +209,14 @@ def load_signals_from_folder(folder: str) -> List[Dict]:
                     }
         except Exception as e:
             print(f"[WARN] failed to read {path}: {e}")
-
     out = list(signals_map.values())
     out.sort(key=lambda x: x["Tagname"])
     return out
 
-
 def load_project_signals(folder: str) -> List[Dict]:
-    """Загружает сигналы из проектов (синтетические сигналы)"""
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
     if not os.path.isdir(folder_abs):
         return []
-
     out = []
     for name in os.listdir(folder_abs):
         if not name.endswith(".json"):
@@ -218,16 +225,12 @@ def load_project_signals(folder: str) -> List[Dict]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
-
             proj = payload.get("project", {}) or {}
             code = (proj.get("code") or "").strip()
-
             if not code:
                 continue
-
             desc = (proj.get("description") or "").strip()
             dim = (proj.get("dimension") or "").strip()
-
             out.append({
                 "Tagname": code,
                 "Description": desc,
@@ -237,142 +240,95 @@ def load_project_signals(folder: str) -> List[Dict]:
         except Exception as e:
             print(f"[WARN] failed to read project {path}: {e}")
             continue
-
     out.sort(key=lambda x: x["Tagname"])
     return out
 
-
-def refresh_signals_cache():
-    """Обновляет кэш сигналов (базовые + из проектов)"""
-    settings = STATE["settings"] or {}
-    base_folder = settings.get("signalDataFolder")
-    proj_folder = settings.get("projectDataFolder")
-
+def get_signals_for_config(config: str) -> List[Dict]:
+    """Возвращает объединённый список сигналов для конфигурации, с кэшированием."""
+    if config in SIGNALS_CACHE:
+        return SIGNALS_CACHE[config]
+    base_folder = config_path("signalDataFolder", config)
+    proj_folder = config_path("projectDataFolder", config)
     base = load_signals_from_folder(base_folder) if base_folder else []
     proj = load_project_signals(proj_folder) if proj_folder else []
-
     merged = {}
     for s in base:
         merged[s["Tagname"]] = s
     for s in proj:
-        merged[s["Tagname"]] = s  # проекты перекрывают CSV
-
+        merged[s["Tagname"]] = s
     out = list(merged.values())
     out.sort(key=lambda x: x["Tagname"])
-    STATE["signals"] = out
+    SIGNALS_CACHE[config] = out
+    return out
 
+def invalidate_signals_cache(config: str):
+    """Сбрасывает кэш сигналов для конкретной конфигурации."""
+    SIGNALS_CACHE.pop(config, None)
 
-# =============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ — ИНДЕКС СИГНАЛОВ
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Индекс сигналов (архив)
+# -----------------------------------------------------------------------------
 
 def build_signal_index(folder: str) -> Dict[str, List[str]]:
-    """Строит индекс: signal_name -> list of files"""
     folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    
     if not os.path.isdir(folder_abs):
-        raise FileNotFoundError(f"Signal data folder not found: {folder_abs}")
-    
+        return {}
     signal_index = {}
     print(f"[INFO] Building signal index from {folder_abs}...")
-    
     for filename in os.listdir(folder_abs):
         if not filename.lower().endswith(".csv"):
             continue
-        
         filepath = os.path.join(folder_abs, filename)
         try:
             df_header = pd.read_csv(filepath, nrows=0, encoding="ISO-8859-2", sep=";")
             columns = df_header.columns.tolist()
             signal_columns = [c for c in columns if c not in ["DATE", "TIME", "datetime"]]
-            
             for signal_name in signal_columns:
-                if signal_name not in signal_index:
-                    signal_index[signal_name] = []
-                signal_index[signal_name].append(filepath)
-            
-            print(f"  ✓ {filename}: {len(signal_columns)} signals")
+                signal_index.setdefault(signal_name, []).append(filepath)
         except Exception as e:
             print(f"  ✗ Failed to index {filename}: {e}")
             continue
-    
-    print(f"[OK] Total unique signals indexed: {len(signal_index)}")
     return signal_index
 
+def get_folder_state(path: str) -> dict:
+    if not os.path.isdir(path):
+        return {}
+    state = {}
+    for name in os.listdir(path):
+        if name.lower().endswith(".csv"):
+            filepath = os.path.join(path, name)
+            state[name] = os.path.getmtime(filepath)
+    return state
 
-def load_signal_index(folder: str) -> Dict[str, List[str]]:
-    """Загружает индекс из кэша или перестраивает"""
-    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    
-    def get_folder_state(path: str) -> dict:
-        if not os.path.isdir(path):
-            return {}
-        state = {}
-        for name in os.listdir(path):
-            if name.lower().endswith(".csv"):
-                filepath = os.path.join(path, name)
-                state[name] = os.path.getmtime(filepath)
-        return state
-    
-    current_state = get_folder_state(folder_abs)
-    
-    # Пробуем загрузить кэш
-    if os.path.exists(SIGNAL_INDEX_PATH):
-        try:
-            with open(SIGNAL_INDEX_PATH, "rb") as f:
-                cached_data = pickle.load(f)
-            
-            if isinstance(cached_data, dict) and "_folder_state" in cached_data:
-                cached_state = cached_data["_folder_state"]
-                cached_index = cached_data["index"]
-                
-                if cached_state == current_state:
-                    print(f"[OK] Signal index loaded from cache ({len(cached_index)} signals)")
-                    return cached_index
-                else:
-                    print(f"[INFO] CSV files changed, rebuilding index...")
-            else:
-                print(f"[INFO] Old cache format, rebuilding index...")
-        except Exception as e:
-            print(f"[WARN] Failed to load cached index: {e}")
-    
-    # Перестраиваем индекс
-    index = build_signal_index(folder)
-    
-    # Сохраняем с метаданными
-    try:
-        cache_data = {"index": index, "_folder_state": current_state}
-        with open(SIGNAL_INDEX_PATH, "wb") as f:
-            pickle.dump(cache_data, f)
-        print(f"[OK] Signal index cached with folder state")
-    except Exception as e:
-        print(f"[WARN] Failed to cache signal index: {e}")
-    
+def load_signal_index(config: str) -> Dict[str, List[str]]:
+    """Загружает индекс сигналов для конфигурации, используя кэш в памяти."""
+    archive = config_path("signalArchiveFolder", config)
+    if not archive:
+        return {}
+    current_state = get_folder_state(archive)
+    cached_entry = SIGNAL_INDEX_CACHE.get(config)
+    if cached_entry:
+        cached_state, cached_index = cached_entry
+        if cached_state == current_state:
+            return cached_index
+    index = build_signal_index(archive)
+    SIGNAL_INDEX_CACHE[config] = (current_state, index)
     return index
 
-
-def load_signal_data_optimized(signal_names: List[str], folder: str) -> Dict[str, pd.DataFrame]:
-    """Загружает только нужные сигналы из только нужных файлов"""
-    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    
-    signal_index = STATE.get("signal_index", {})
-    if not signal_index:
-        raise RuntimeError("Signal index not initialized")
-    
+def load_signal_data_optimized(signal_names: List[str], config: str) -> Dict[str, pd.DataFrame]:
+    archive = config_path("signalArchiveFolder", config)
+    if not archive:
+        raise RuntimeError("signalArchiveFolder not configured")
+    signal_index = load_signal_index(config)
     signal_names_set = set(signal_names)
-    found_signals = {}
     files_to_load = set()
-    
     for signal_name in signal_names_set:
         if signal_name in signal_index:
             files_to_load.update(signal_index[signal_name])
-    
-    print(f"[INFO] Loading {len(signal_names_set)} signals from {len(files_to_load)} files")
-    
+    found_signals = {}
     for filepath in files_to_load:
         try:
             df = pd.read_csv(filepath, encoding="ISO-8859-2", sep=";")
-            
             df["TIME"] = df["TIME"].str.replace(",", ".", regex=False)
             df["TIME"] = df["TIME"].str.split(".").str[0]
             combined = df["DATE"] + " " + df["TIME"]
@@ -380,7 +336,6 @@ def load_signal_data_optimized(signal_names: List[str], folder: str) -> Dict[str
             df = df.dropna(subset=["datetime"])
             df = df.drop(['DATE', 'TIME'], axis=1)
             df = df.sort_values("datetime")
-            
             available_columns = set(df.columns) & signal_names_set
             for signal_name in available_columns:
                 if signal_name not in found_signals:
@@ -389,61 +344,65 @@ def load_signal_data_optimized(signal_names: List[str], folder: str) -> Dict[str
         except Exception as e:
             print(f"[WARN] Failed to read {filepath}: {e}")
             continue
-    
     return found_signals
 
+# -----------------------------------------------------------------------------
+# Проекты и зависимости
+# -----------------------------------------------------------------------------
 
-# =============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ — ПРОЕКТЫ И ЗАВИСИМОСТИ
-# =============================================================================
-
-def get_project_path(filename: str) -> str:
-    """Возвращает абсолютный путь к файлу проекта"""
-    folder = STATE["settings"].get("projectDataFolder")
+def get_project_path(filename: str, config: str) -> str:
+    folder = config_path("projectDataFolder", config)
     if not folder:
         raise RuntimeError("projectDataFolder not configured")
-    
-    project_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    
     if '..' in filename or '/' in filename or '\\' in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
-
-    path = os.path.join(project_dir, filename)
-    if not path.startswith(project_dir):
+    path = os.path.join(folder, filename)
+    if not path.startswith(folder):
         raise HTTPException(status_code=400, detail="Path traversal attempt")
-         
     return path
 
+def get_storage_path(filename: str, storage: str = "projects", config: str = None) -> str:
+    key_map = {
+        "projects": "projectDataFolder",
+        "templates": "templateDataFolder"
+    }
+    key = key_map.get(storage)
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown storage")
+    if storage == "templates":
+        # шаблоны общие, не зависят от конфигурации
+        base_dir = _abs_folder(key)
+    else:
+        base_dir = config_path(key, config)
+    if not base_dir:
+        raise HTTPException(status_code=500, detail=f"{key} not configured")
+    os.makedirs(base_dir, exist_ok=True)
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(base_dir, filename)
+    if not path.startswith(base_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt")
+    return path
 
 def extract_input_signals_from_project(project_data: Dict) -> List[str]:
-    """Извлекает имена входных сигналов из данных проекта"""
     elements = project_data.get("elements", {})
     input_signals = []
-    
     for elem_id, elem_data in elements.items():
         if elem_data.get("type") == "input-signal":
             props = elem_data.get("props", {})
             signal_name = props.get("name")
             if signal_name:
                 input_signals.append(signal_name)
-    
     return input_signals
 
-
-def load_project_by_code(code: str) -> Dict | None:
-    """Загружает проект по его коду (Tagname)"""
-    folder = STATE["settings"].get("projectDataFolder")
-    if not folder:
+def load_project_by_code(code: str, config: str) -> Optional[Dict]:
+    folder = config_path("projectDataFolder", config)
+    if not folder or not os.path.isdir(folder):
         return None
-    
-    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    if not os.path.isdir(folder_abs):
-        return None
-    
-    for name in os.listdir(folder_abs):
+    for name in os.listdir(folder):
         if not name.endswith(".json"):
             continue
-        path = os.path.join(folder_abs, name)
+        path = os.path.join(folder, name)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -457,92 +416,75 @@ def load_project_by_code(code: str) -> Dict | None:
         except Exception as e:
             print(f"[WARN] Error reading project {path}: {e}")
             continue
-    
     return None
 
-
-def is_base_signal(signal_name: str) -> bool:
-    """Проверяет, есть ли сигнал в архиве (базовый сигнал с данными)"""
-    signal_index = STATE.get("signal_index", {})
+def is_base_signal(signal_name: str, config: str) -> bool:
+    signal_index = load_signal_index(config)
     return signal_name in signal_index
-
 
 def resolve_signal_dependencies(
     signal_names: List[str],
+    config: str,
     visited: set = None,
     resolved: Dict[str, Dict] = None
 ) -> tuple[set, Dict[str, Dict]]:
-    """Рекурсивно разворачивает зависимости сигналов"""
     if visited is None:
         visited = set()
     if resolved is None:
         resolved = {}
-    
     base_signals = set()
-    
     for signal_name in signal_names:
         if not signal_name or signal_name in visited:
             continue
         visited.add(signal_name)
-        
-        if is_base_signal(signal_name):
+        if is_base_signal(signal_name, config):
             base_signals.add(signal_name)
             continue
-        
-        project = load_project_by_code(signal_name)
+        project = load_project_by_code(signal_name, config)
         if project is None:
             base_signals.add(signal_name)
-            print(f"[WARN] Signal '{signal_name}' not found in archive or projects")
             continue
-        
         formula = project.get("formula", "")
         dependencies = extract_input_signals_from_project(project)
-        
-        print(f"[INFO] Synthetic signal '{signal_name}' depends on: {dependencies}")
-        
         resolved[signal_name] = {
             "formula": formula,
             "dependencies": dependencies
         }
-        
-        sub_base, _ = resolve_signal_dependencies(dependencies, visited, resolved)
+        sub_base, _ = resolve_signal_dependencies(dependencies, config, visited, resolved)
         base_signals.update(sub_base)
-    
     return base_signals, resolved
 
-def get_storage_path(filename: str, storage: str = "projects") -> str:
-    key_map = {
-        "projects": "projectDataFolder",
-        "templates": "templateDataFolder"
-    }
-    key = key_map.get(storage)
-    if not key:
-        raise HTTPException(status_code=400, detail="Unknown storage")
-    folder = STATE["settings"].get(key)
-    if not folder:
-        raise HTTPException(status_code=500, detail=f"{key} not configured")
-
-    base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    os.makedirs(base_dir, exist_ok=True)
-
-    if '..' in filename or '/' in filename or '\\' in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
-    path = os.path.join(base_dir, filename)
-    if not path.startswith(base_dir):
-        raise HTTPException(status_code=400, detail="Path traversal attempt")
-
-    return path
+def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
+    if not synthetic_signals:
+        return []
+    in_degree = {name: 0 for name in synthetic_signals}
+    graph = {name: [] for name in synthetic_signals}
+    for name, data in synthetic_signals.items():
+        for dep in data.get("dependencies", []):
+            if dep == name:
+                continue
+            if dep in synthetic_signals:
+                graph[dep].append(name)
+                in_degree[name] += 1
+    queue = [name for name, degree in in_degree.items() if degree == 0]
+    result = []
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        for neighbor in graph[node]:
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                queue.append(neighbor)
+    if len(result) != len(synthetic_signals):
+        cyclic = [name for name in synthetic_signals if name not in result]
+        raise ValueError(f"Циклическая зависимость между сигналами: {cyclic}")
+    return result
 
 def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
-    """Обновляет или добавляет шаблон в formula_templates.json на основе сохранённого проекта-шаблона."""
     project_meta = content.get("project") or {}
     template_name = project_meta.get("code", "").strip()
     if not template_name:
-        print("[WARN] Template project saved without code (name) — skip template update.")
         return
-
-    # Определяем список входов
     elements = content.get("elements", {}) or {}
     input_signals = []
     for elem in elements.values():
@@ -550,15 +492,12 @@ def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
             signal_name = (elem.get("props") or {}).get("name")
             if signal_name:
                 input_signals.append(signal_name)
-
-    # Удаляем дубли, сохраняем порядок добавления
     seen = set()
     ordered_inputs = []
     for name in input_signals:
         if name not in seen:
             ordered_inputs.append(name)
             seen.add(name)
-
     args_descriptions = project_meta.get("templateArgs") or {}
     args = {}
     arg_desc_lines = []
@@ -571,7 +510,6 @@ def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
         else:
             arg_desc_lines.append(f"{name} -")
         args[name] = arg_entry
-
     general_description = (project_meta.get("description") or "").strip()
     full_description_parts = []
     if general_description:
@@ -579,14 +517,12 @@ def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
     if arg_desc_lines:
         full_description_parts.extend(arg_desc_lines)
     full_description = "; ".join(full_description_parts)
-
     entry = {
         "name": template_name,
         "args": args,
         "body": content.get("code", ""),
         "description": full_description
     }
-
     templates_data = load_templates()
     templates = templates_data.get("templates", [])
     found = False
@@ -599,48 +535,11 @@ def upsert_formula_template_from_project(content: Dict[str, Any]) -> None:
             updated.append(tpl)
     if not found:
         updated.append(entry)
-
     templates_data["templates"] = updated
     with open(TEMPLATES_PATH, "w", encoding="utf-8") as f:
         json.dump(templates_data, f, ensure_ascii=False, indent=2)
-
     STATE["templates"] = templates_data
     print(f"[OK] Template '{template_name}' saved/updated in formula_templates.json")
-
-
-def topological_sort_signals(synthetic_signals: Dict[str, Dict]) -> List[str]:
-    """Топологическая сортировка (игнорирует самоссылки для корректной сортировки)"""
-    if not synthetic_signals:
-        return []
-    
-    in_degree = {name: 0 for name in synthetic_signals}
-    graph = {name: [] for name in synthetic_signals}
-    
-    for name, data in synthetic_signals.items():
-        for dep in data.get("dependencies", []):
-            if dep == name:  # Пропускаем самоссылку для построения графа
-                continue
-            if dep in synthetic_signals:
-                graph[dep].append(name)
-                in_degree[name] += 1
-    
-    queue = [name for name, degree in in_degree.items() if degree == 0]
-    result = []
-    
-    while queue:
-        node = queue.pop(0)
-        result.append(node)
-        for neighbor in graph[node]:
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
-    
-    if len(result) != len(synthetic_signals):
-        cyclic = [name for name in synthetic_signals if name not in result]
-        raise ValueError(f"Циклическая зависимость между сигналами: {cyclic}")
-    
-    return result
-
 
 # =============================================================================
 # FASTAPI ПРИЛОЖЕНИЕ
@@ -656,91 +555,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Хранилище сессий визуализатора
+visualize_sessions: Dict[str, Dict[str, Any]] = {}
 
 @app.on_event("startup")
 def startup():
-    """Инициализация при запуске"""
     settings = load_settings()
     STATE["settings"] = settings
 
-    project_dir = settings.get("projectDataFolder")
-    if project_dir and not os.path.isabs(project_dir):
-        project_dir = os.path.normpath(os.path.join(BASE_DIR, project_dir))
+    # Определяем список конфигураций по подпапкам в projects
+    project_base = _abs_folder("projectDataFolder")
+    configs = []
+    if project_base and os.path.isdir(project_base):
+        configs = sorted([
+            d for d in os.listdir(project_base)
+            if os.path.isdir(os.path.join(project_base, d))
+        ])
+    STATE["configurations"] = configs
 
-    update_projects_if_templates_changed(
-        project_dir=project_dir,
-        templates_path=TEMPLATES_PATH
-    )
-    refresh_tables_cache()
-    
-    folder = settings.get("signalDataFolder")
-    if not folder:
-        raise RuntimeError("settings.json: signalDataFolder is required")
-    
-    template_dir = settings.get("templateDataFolder")
-    if template_dir and not os.path.isabs(template_dir):
-        template_dir = os.path.normpath(os.path.join(BASE_DIR, template_dir))
-    os.makedirs(template_dir, exist_ok=True)
-    
-    refresh_signals_cache()
+    # Создаём подпапки для каждой конфигурации во всех нужных папках
+    for config in configs:
+        ensure_config_dirs(config)
+        # При необходимости можно прогнать обновление проектов по шаблонам для каждой конфигурации
+        proj_dir = config_path("projectDataFolder", config)
+        if proj_dir:
+            update_projects_if_templates_changed(
+                project_dir=proj_dir,
+                templates_path=TEMPLATES_PATH
+            )
+
+    # Глобальные ресурсы
     STATE["templates"] = load_templates()
-    STATE["signal_index"] = load_signal_index(settings.get("signalArchiveFolder"))
+    os.makedirs(_abs_folder("templateDataFolder") or "", exist_ok=True)
 
-    print(f"[OK] Loaded signals: {len(STATE['signals'])}")
-    print(f"[OK] Signal index has {len(STATE['signal_index'])} unique signals")
+    print(f"[OK] Configurations found: {configs}")
     print(f"[OK] Loaded templates: {len(STATE['templates'].get('templates', []))}")
-    print(f"[OK] Loaded tables: {len(STATE['tables'] or [])}")
 
+# -----------------------------------------------------------------------------
+# API: конфигурации
+# -----------------------------------------------------------------------------
 
-# =============================================================================
-# API — НАСТРОЙКИ И СИГНАЛЫ
-# =============================================================================
+@app.get("/api/configurations")
+def api_configurations():
+    """Возвращает список доступных конфигураций."""
+    return {"configurations": STATE["configurations"]}
+
+# -----------------------------------------------------------------------------
+# API: настройки и сигналы
+# -----------------------------------------------------------------------------
 
 @app.get("/api/settings")
 def api_settings():
-    """Возвращает настройки приложения"""
     return STATE["settings"]
 
-
 @app.get("/api/tables")
-def api_tables(q: str = "", limit: int = 50):
-    settings = STATE["settings"] or {}
-    folder = settings.get("tablesFolder")
-    if not folder:
-        return {"items": [], "total": 0}
-
-    # каждый запрос перечитываем
-    base_list = load_tables_from_folder(folder)
-    meta = load_tables_meta(folder)
-    for item in base_list:
-        name = item["Name"]
-        if name in meta:
-            item["Description"] = meta[name]
-
-    tables = base_list
-
+def api_tables(q: str = "", limit: int = 50, config: str = Query(...)):
+    items = get_tables_for_config(config)
     if not q:
-        items = tables[:limit]
-        total = len(tables)
+        result_items = items[:limit]
+        total = len(items)
     else:
         import re
         escaped = re.escape(q).replace(r"\*", ".*")
         rx = re.compile("^" + escaped + "$", re.IGNORECASE)
-        filtered = [t for t in tables if rx.match(t["Name"])]
+        filtered = [t for t in items if rx.match(t["Name"])]
         total = len(filtered)
-        items = filtered[:max(1, min(limit, 500))]
-
+        result_items = filtered[:max(1, min(limit, 500))]
     return JSONResponse(
-        content={"items": items, "total": total},
+        content={"items": result_items, "total": total},
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
-
 @app.get("/api/signals")
-def api_signals(q: str = "", limit: int = 50):
-    """Поиск сигналов по маске (* — wildcard)"""
-    signals = STATE["signals"] or []
-    
+def api_signals(q: str = "", limit: int = 50, config: str = Query(...)):
+    signals = get_signals_for_config(config)
     if not q:
         result = {"items": signals[:limit], "total": len(signals)}
     else:
@@ -749,37 +637,23 @@ def api_signals(q: str = "", limit: int = 50):
         rx = re.compile("^" + escaped + "$", re.IGNORECASE)
         items = [s for s in signals if rx.match(s["Tagname"])]
         result = {"items": items[:max(1, min(limit, 500))], "total": len(items)}
-    
     return JSONResponse(
         content=result,
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
 @app.get("/api/table/file/{name}")
-def api_table_file(name: str):
-    settings = STATE["settings"] or {}
-    folder = settings.get("tablesFolder")
+def api_table_file(name: str, config: str = Query(...)):
+    folder = config_path("tablesFolder", config)
     if not folder:
         raise HTTPException(status_code=500, detail="tablesFolder not configured")
-
-    folder_abs = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-    if not os.path.isdir(folder_abs):
-        raise HTTPException(status_code=500, detail=f"tablesFolder not found: {folder_abs}")
-
-    # защита от path traversal
     if ".." in name or "/" in name or "\\" in name:
         raise HTTPException(status_code=400, detail="Invalid table name")
-
-    path = os.path.join(folder_abs, f"{name}.xlsx")
-    if not path.startswith(folder_abs):
+    path = os.path.join(folder, f"{name}.xlsx")
+    if not path.startswith(folder):
         raise HTTPException(status_code=400, detail="Path traversal attempt")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Table file not found")
-
     return FileResponse(
         path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -787,16 +661,13 @@ def api_table_file(name: str):
         headers={"Cache-Control": "no-cache"}
     )
 
-
 @app.get("/api/formula-templates")
 def api_formula_templates():
-    """Возвращает шаблоны формул"""
     return STATE.get("templates") or {"templates": []}
 
-
-# =============================================================================
-# API — ПРОЕКТЫ
-# =============================================================================
+# -----------------------------------------------------------------------------
+# API: проекты
+# -----------------------------------------------------------------------------
 
 def collect_projects(directory: str, source_label: str) -> list[dict]:
     items = []
@@ -822,32 +693,26 @@ def collect_projects(directory: str, source_label: str) -> list[dict]:
     return items
 
 @app.get("/api/project/list")
-def list_projects():
+def list_projects(config: str = Query(...)):
     def collect(directory_key: str, source_label: str) -> list[dict]:
-        folder = STATE["settings"].get(directory_key)
-        if not folder:
-            return []
-        base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-        if not os.path.isdir(base_dir):
+        folder = config_path(directory_key, config) if directory_key == "projectDataFolder" else _abs_folder(directory_key)
+        if not folder or not os.path.isdir(folder):
             return []
         items = []
-        for fname in sorted(os.listdir(base_dir)):
+        for fname in sorted(os.listdir(folder)):
             if not fname.endswith(".json"):
                 continue
-            path = os.path.join(base_dir, fname)
+            path = os.path.join(folder, fname)
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     payload = json.load(f)
             except Exception:
                 continue
             project_meta = payload.get("project", {}) or {}
-
-            # Вычисляем длину обработанного кода
             try:
                 code_len = get_code_length(payload)
             except Exception:
                 code_len = 0
-
             items.append({
                 "filename": fname,
                 "code": project_meta.get("code") or project_meta.get("tagname") or "",
@@ -862,7 +727,7 @@ def list_projects():
                 "lastModifiedAt": project_meta.get("lastModifiedAt") or "",
                 "lastModifiedBy": project_meta.get("lastModifiedBy") or "",
                 "source": source_label,
-                "codeLength": code_len          # <-- новое поле
+                "codeLength": code_len
             })
         return items
 
@@ -870,175 +735,85 @@ def list_projects():
     projects.extend(collect("templateDataFolder", "templates"))
     authors = sorted(set(project.get("author") for project in projects if project.get("author")))
     admin_author = STATE["settings"].get("adminAuthor", "")
-    return {
-        "projects": projects,
-        "authors": authors,
-        "adminAuthor": admin_author
-    }
+    return {"projects": projects, "authors": authors, "adminAuthor": admin_author}
 
 @app.post("/api/project/set-author")
-async def set_project_author(request: Request):
+async def set_project_author(request: Request, config: str = Query(...)):
     try:
         data = await request.json()
         filename = data.get("filename")
         new_author = data.get("author")
-        
         if not filename or not new_author:
             raise HTTPException(status_code=400, detail="Filename and author are required")
-        
-        # Получаем путь к проекту
-        path = get_storage_path(filename, storage="projects")
+        path = get_storage_path(filename, storage="projects", config=config)
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Project not found")
-        
-        # Читаем текущее содержимое
         with open(path, "r", encoding="utf-8") as f:
             content = json.load(f)
-        
-        # Обновляем автора
         if "project" not in content:
             content["project"] = {}
         content["project"]["author"] = new_author
-        
-        # Сохраняем обратно
         with open(path, "w", encoding="utf-8") as f:
             json.dump(content, f, ensure_ascii=False, indent=2)
-        
-        # Обновляем кэш сигналов
-        refresh_signals_cache()
-        
+        invalidate_signals_cache(config)
         return {"status": "ok", "message": f"Author updated for {filename}"}
-    
     except Exception as e:
         print(f"Error updating author: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-    
-@app.get("/api/tags/list")
-async def get_tags():
-    return load_tags_data()
-
-@app.post("/api/tags/create")
-async def create_tag(payload: dict = Body(...)):
-    user = payload.get("user")
-    name = payload.get("name")
-    color = payload.get("color")
-    
-    # Проверка админа
-    admin_author = STATE["settings"].get("adminAuthor", "")
-    if user != admin_author:
-        raise HTTPException(status_code=403, detail="Только админ может создавать теги")
-        
-    if not name or not color:
-        raise HTTPException(status_code=400, detail="Нужно имя и цвет")
-
-    data = load_tags_data()
-    
-    # Проверка дубликатов
-    if any(t['name'] == name for t in data['tags']):
-         raise HTTPException(status_code=400, detail="Тег с таким именем уже есть")
-
-    new_tag = {
-        "id": f"tag_{int(datetime.utcnow().timestamp())}", 
-        "name": name, 
-        "color": color
-    }
-    data["tags"].append(new_tag)
-    save_tags_data(data)
-    return new_tag
-
-@app.post("/api/tags/assign")
-async def assign_tags(payload: dict = Body(...)):
-    # Назначать теги могут все
-    filename = payload.get("filename")
-    tag_ids = payload.get("tagIds", []) # Список ID тегов
-
-    if not filename:
-        raise HTTPException(status_code=400, detail="Нет имени файла")
-
-    data = load_tags_data()
-    data["assignments"][filename] = tag_ids
-    save_tags_data(data)
-    return {"status": "success"}
-
 
 @app.post("/api/project/save")
-async def save_project(request: Request):
+async def save_project(request: Request, config: str = Query(...)):
     try:
         data = await request.json()
         filename = data.get("filename")
         content = data.get("content")
-        target = data.get("target", "projects")  # ← новый аргумент
-
+        target = data.get("target", "projects")
         if not filename or not content:
             raise HTTPException(status_code=400, detail="Filename and content are required")
-
         project_meta = content.get("project") or {}
-
         project_meta.setdefault("status", "draft")
         project_meta.setdefault("statusComment", "")
         project_meta.setdefault("statusHistory", [])
-
-
         project_type = project_meta.get("type", "parameter")
-
-        # Если проект помечен как шаблон — сохраняем в templates
         if project_type == "template":
             target = "templates"
-
-        path = get_storage_path(filename, storage=target)  # ← путь в нужную папку
-
+        path = get_storage_path(filename, storage=target, config=config if target == "projects" else None)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(content, f, ensure_ascii=False, indent=2)
-
-        # Если это шаблон, обновляем formula_templates.json
         if project_type == "template":
             upsert_formula_template_from_project(content)
-
-        # Обновляем кэш сигналов (проекты-шаблоны могут тоже появляться в описаниях)
-        refresh_signals_cache()
-
+        invalidate_signals_cache(config)
         return {"status": "ok", "message": f"Project saved to {filename}"}
-
     except HTTPException as e:
         raise e
     except Exception as e:
         print(f"Error saving project: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during save")
 
-
 @app.get("/api/project/load/{filename}")
-def load_project(filename: str, source: str = "projects"):
-    """Загружает проект"""
+def load_project(filename: str, source: str = "projects", config: str = Query(...)):
     try:
-        path = get_storage_path(filename, storage=source)
+        path = get_storage_path(filename, storage=source, config=config if source == "projects" else None)
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Project not found")
         with open(path, "r", encoding="utf-8") as f:
             content = json.load(f)
         return content
-        
     except HTTPException as e:
         raise e
     except Exception as e:
         print(f"Error loading project: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during load")
-    
 
 @app.post("/api/project/export-selected")
-async def api_export_selected_projects(payload: dict = Body(...)):
+async def api_export_selected_projects(payload: dict = Body(...), config: str = Query(...)):
     try:
         filenames = payload.get("filenames", [])
-
-        project_dir = STATE["settings"].get("projectDataFolder")
+        project_dir = config_path("projectDataFolder", config)
         if not project_dir:
             raise HTTPException(status_code=500, detail="projectDataFolder not configured")
-
-        project_dir_abs = project_dir if os.path.isabs(project_dir) else os.path.normpath(os.path.join(BASE_DIR, project_dir))
-
         param_format = payload.get("param_format", "excel")
-        result = export_selected_projects(filenames, project_dir_abs, param_format)
-
-
+        result = export_selected_projects(filenames, project_dir, param_format)
         return StreamingResponse(
             BytesIO(result["content"]),
             media_type=result["media_type"],
@@ -1047,134 +822,225 @@ async def api_export_selected_projects(payload: dict = Body(...)):
                 "Cache-Control": "no-cache, no-store, must-revalidate"
             }
         )
-
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"Error exporting selected projects: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during export")
-    
-# --- ВСТАВИТЬ в секцию "API — ПРОЕКТЫ" main.py ---
-
-def _collect_all_project_files() -> list[dict]:
-    """Собирает все проекты из projects и templates с базовой метаинфой."""
-    items = []
-    for directory_key, source_label in (("projectDataFolder", "projects"), ("templateDataFolder", "templates")):
-        folder = STATE["settings"].get(directory_key)
-        if not folder:
-            continue
-        base_dir = folder if os.path.isabs(folder) else os.path.normpath(os.path.join(BASE_DIR, folder))
-        if not os.path.isdir(base_dir):
-            continue
-        for fname in sorted(os.listdir(base_dir)):
-            if not fname.endswith(".json"):
-                continue
-            path = os.path.join(base_dir, fname)
-            items.append({"path": path, "filename": fname, "source": source_label, "base_dir": base_dir})
-    return items
 
 @app.get("/api/project/consumers/{code}")
-def api_project_consumers(code: str):
-    """
-    Возвращает список проектов, которые напрямую используют данный параметр (code)
-    в своих входных сигналах. Только прямые зависимости (без косвенных).
-    """
+def api_project_consumers(code: str, config: str = Query(...)):
     results = []
-    for item in _collect_all_project_files():
-        try:
-            with open(item["path"], "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            proj_meta = (payload.get("project") or {})
-            proj_code = (proj_meta.get("code") or proj_meta.get("tagname") or "").strip()
-            elements = payload.get("elements") or {}
-            inputs = []
-            for el in elements.values():
-                if el and el.get("type") == "input-signal":
-                    name = ((el.get("props") or {}).get("name") or "").strip()
-                    if name:
-                        inputs.append(name)
-            # Прямой потребитель, если текущий code встречается в inputSignals
-            if code in set(inputs):
-                results.append({
-                    "code": proj_code or "(без кода)",
-                    "filename": item["filename"],
-                    "source": item["source"],
-                    "description": proj_meta.get("description", ""),
-                    "type": proj_meta.get("type", "")
-                })
-        except Exception as e:
-            print(f"[WARN] Failed to inspect project {item['path']}: {e}")
-            continue
-
-    # Можно отсортировать по коду для стабильности
+    # проекты в текущей конфигурации
+    folder = config_path("projectDataFolder", config)
+    if folder and os.path.isdir(folder):
+        for fname in sorted(os.listdir(folder)):
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(folder, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                proj_meta = (payload.get("project") or {})
+                proj_code = (proj_meta.get("code") or proj_meta.get("tagname") or "").strip()
+                elements = payload.get("elements") or {}
+                inputs = []
+                for el in elements.values():
+                    if el and el.get("type") == "input-signal":
+                        name = ((el.get("props") or {}).get("name") or "").strip()
+                        if name:
+                            inputs.append(name)
+                if code in set(inputs):
+                    results.append({
+                        "code": proj_code or "(без кода)",
+                        "filename": fname,
+                        "source": "projects",
+                        "description": proj_meta.get("description", ""),
+                        "type": proj_meta.get("type", "")
+                    })
+            except Exception as e:
+                print(f"[WARN] Failed to inspect project {path}: {e}")
+                continue
+    # шаблоны не привязаны к конфигурации, их тоже можно проверять
+    tmpl_folder = _abs_folder("templateDataFolder")
+    if tmpl_folder and os.path.isdir(tmpl_folder):
+        for fname in sorted(os.listdir(tmpl_folder)):
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(tmpl_folder, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                proj_meta = (payload.get("project") or {})
+                proj_code = (proj_meta.get("code") or proj_meta.get("tagname") or "").strip()
+                elements = payload.get("elements") or {}
+                inputs = []
+                for el in elements.values():
+                    if el and el.get("type") == "input-signal":
+                        name = ((el.get("props") or {}).get("name") or "").strip()
+                        if name:
+                            inputs.append(name)
+                if code in set(inputs):
+                    results.append({
+                        "code": proj_code or "(без кода)",
+                        "filename": fname,
+                        "source": "templates",
+                        "description": proj_meta.get("description", ""),
+                        "type": proj_meta.get("type", "")
+                    })
+            except Exception as e:
+                print(f"[WARN] Failed to inspect template {path}: {e}")
+                continue
     results.sort(key=lambda x: x.get("code", "").lower())
     return {"consumers": results}
 
+@app.post("/api/tags/list")
+async def get_tags(config: str = Query(...)):
+    # тэги глобальные, пока не зависят от конфигурации
+    return load_tags_data()
 
-# =============================================================================
-# API — ДАННЫЕ СИГНАЛОВ
-# =============================================================================
+@app.post("/api/tags/create")
+async def create_tag(payload: dict = Body(...), config: str = Query(...)):
+    user = payload.get("user")
+    name = payload.get("name")
+    color = payload.get("color")
+    admin_author = STATE["settings"].get("adminAuthor", "")
+    if user != admin_author:
+        raise HTTPException(status_code=403, detail="Только админ может создавать теги")
+    if not name or not color:
+        raise HTTPException(status_code=400, detail="Нужно имя и цвет")
+    data = load_tags_data()
+    if any(t['name'] == name for t in data['tags']):
+        raise HTTPException(status_code=400, detail="Тег с таким именем уже есть")
+    new_tag = {"id": f"tag_{int(datetime.utcnow().timestamp())}", "name": name, "color": color}
+    data["tags"].append(new_tag)
+    save_tags_data(data)
+    return new_tag
+
+@app.post("/api/tags/assign")
+async def assign_tags(payload: dict = Body(...), config: str = Query(...)):
+    filename = payload.get("filename")
+    tag_ids = payload.get("tagIds", [])
+    if not filename:
+        raise HTTPException(status_code=400, detail="Нет имени файла")
+    data = load_tags_data()
+    data["assignments"][filename] = tag_ids
+    save_tags_data(data)
+    return {"status": "success"}
+
+@app.post("/api/project/status/set")
+async def set_project_status(payload: dict = Body(...), config: str = Query(...)):
+    try:
+        filename = payload.get("filename")
+        new_status = payload.get("status")
+        comment = payload.get("comment", "")
+        user = payload.get("user", "")
+        if not filename or new_status not in ("draft", "ready"):
+            raise HTTPException(status_code=400, detail="Invalid filename or status")
+        admin_author = STATE["settings"].get("adminAuthor", "")
+        if user != admin_author:
+            raise HTTPException(status_code=403, detail="Only admin can change status")
+        file_path = get_storage_path(filename, storage="projects", config=config)
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail=f"Project file not found: {filename}")
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        project_meta = content.setdefault("project", {})
+        project_meta["status"] = new_status
+        project_meta["lastStatusChangedByAdmin"] = True
+        history = project_meta.setdefault("statusHistory", [])
+        history.append({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "author": user,
+            "action": "forced_draft" if new_status == "draft" else "forced_ready",
+            "comment": comment.strip()
+        })
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+        return {"status": "success", "message": "Project status updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating project status: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.delete("/api/project/delete/{filename}")
+async def delete_project(filename: str, request: Request, config: str = Query(...)):
+    try:
+        data = await request.json()
+        current_user = data.get("user", "")
+        if not current_user:
+            raise HTTPException(status_code=400, detail="User not provided")
+        path = get_storage_path(filename, storage="projects", config=config)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Project not found")
+        with open(path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        project_meta = content.get("project", {})
+        project_author = project_meta.get("author", "")
+        admin_author = STATE["settings"].get("adminAuthor", "")
+        if project_author != current_user and current_user != admin_author:
+            raise HTTPException(status_code=403, detail="Only the author or admin can delete this project")
+        # Перемещаем в deleted_projects/<config>
+        deleted_base = _abs_folder("deletedFolder") or os.path.join(BASE_DIR, "deleted_projects")
+        deleted_dir = os.path.join(deleted_base, config)
+        os.makedirs(deleted_dir, exist_ok=True)
+        deleted_path = os.path.join(deleted_dir, filename)
+        shutil.copy2(path, deleted_path)
+        os.remove(path)
+        invalidate_signals_cache(config)
+        return {"status": "ok", "message": f"Project '{filename}' successfully moved to deleted_projects"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Error deleting project: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during deletion")
+
+# -----------------------------------------------------------------------------
+# API: данные сигналов и зависимости
+# -----------------------------------------------------------------------------
 
 @app.post("/api/signal-data")
-async def api_signal_data(request: Request):
-    """Загружает данные сигналов из архива"""
+async def api_signal_data(request: Request, config: str = Query(...)):
     try:
         data = await request.json()
         signal_names = data.get("signal_names", [])
         output_format = data.get("format", "parquet")
-        
         if not signal_names:
             raise HTTPException(status_code=400, detail="signal_names is required")
-        
-        folder = STATE["settings"].get("signalArchiveFolder")
-        if not folder:
-            raise HTTPException(status_code=500, detail="signalArchiveFolder not configured")
-        
-        signals_data = load_signal_data_optimized(signal_names, folder)
-        
+        signals_data = load_signal_data_optimized(signal_names, config)
         response = {
             "found": list(signals_data.keys()),
             "not_found": [s for s in signal_names if s not in signals_data],
             "format": output_format
         }
-        
         if not signals_data:
             raise HTTPException(status_code=404, detail="No signals found")
-        
         if output_format == "parquet":
             return await _export_parquet(signals_data, response)
         else:
             return await _export_json(signals_data, response)
-    
     except HTTPException as e:
         raise e
     except Exception as e:
         print(f"Error in api_signal_data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 async def _export_parquet(signals_data: Dict[str, pd.DataFrame], meta: Dict):
-    """Экспортирует данные в Parquet"""
     try:
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
             tmp_path = tmp.name
-        
         rows = []
         for signal_name, df in signals_data.items():
             df_copy = df.copy()
             df_copy["signal_name"] = signal_name
             rows.append(df_copy)
-        
         combined = pd.concat(rows, ignore_index=True)
         combined.to_parquet(tmp_path, compression='snappy', index=False)
-        
         file_size = os.path.getsize(tmp_path)
         print(f"[OK] Exported {len(signals_data)} signals to Parquet: {file_size / 1024 / 1024:.2f} MB")
-        
         return FileResponse(
             tmp_path,
             media_type="application/octet-stream",
@@ -1185,97 +1051,68 @@ async def _export_parquet(signals_data: Dict[str, pd.DataFrame], meta: Dict):
         print(f"[ERROR] Parquet export failed: {e}")
         raise
 
-
 async def _export_json(signals_data: Dict[str, pd.DataFrame], meta: Dict):
-    """Экспортирует данные в JSON"""
     try:
         data_dict = {}
         for signal_name, df in signals_data.items():
             df_copy = df.copy()
             df_copy["datetime"] = df_copy["datetime"].astype(str)
             data_dict[signal_name] = df_copy.to_dict(orient="records")
-        
         response_data = {**meta, "data": data_dict}
         return JSONResponse(response_data)
     except Exception as e:
         print(f"[ERROR] JSON export failed: {e}")
         raise
 
-
 @app.post("/api/resolve-signals")
-async def api_resolve_signals(request: Request):
-    """Разворачивает зависимости сигналов (матрёшку)"""
+async def api_resolve_signals(request: Request, config: str = Query(...)):
     try:
         data = await request.json()
         signal_names = data.get("signals", [])
-        
-        print(f"[INFO] Resolving dependencies for signals: {signal_names}")
-        
-        base_signals, synthetic_signals = resolve_signal_dependencies(signal_names)
+        base_signals, synthetic_signals = resolve_signal_dependencies(signal_names, config)
         computation_order = topological_sort_signals(synthetic_signals)
-        
-        print(f"[INFO] Base signals: {base_signals}")
-        print(f"[INFO] Synthetic signals: {list(synthetic_signals.keys())}")
-        print(f"[INFO] Computation order: {computation_order}")
-        
         return {
             "base_signals": list(base_signals),
             "synthetic_signals": synthetic_signals,
             "computation_order": computation_order
         }
-    
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         print(f"[ERROR] resolve-signals failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# =============================================================================
-# API — ВИЗУАЛИЗАТОР
-# =============================================================================
+# -----------------------------------------------------------------------------
+# API: визуализатор (без изменений, не зависит от файловой структуры)
+# -----------------------------------------------------------------------------
 
 @app.post("/api/visualize/session")
 async def create_visualize_session(request: Request):
-    """Создаёт сессию визуализации"""
     try:
         data = await request.json()
         signals = data.get("signals", [])
         tables = data.get("tables", [])
         code = data.get("code", "")
         visualizer_state = data.get("visualizer_state")
-        
         if not isinstance(signals, list):
             raise HTTPException(status_code=400, detail="signals must be a list")
-        
         token = uuid.uuid4().hex
-        
         visualize_sessions[token] = {
             "signals": signals,
             "tables": tables,
             "code": code,
             "visualizer_state": visualizer_state
         }
-        
-        print(f"[OK] Created visualize session: {token}, signals: {len(signals)}, has_state: {visualizer_state is not None}")
-        
         return {"token": token}
-    
-    except HTTPException as e:
-        raise e
     except Exception as e:
         print(f"[ERROR] create_visualize_session failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/visualize/session/{token}")
 async def get_visualize_session(token: str):
-    """Возвращает данные сессии визуализации"""
     session = visualize_sessions.get(token)
-    
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
     return {
         "signals": session.get("signals", []),
         "tables": session.get("tables", []),
@@ -1283,169 +1120,38 @@ async def get_visualize_session(token: str):
         "visualizer_state": session.get("visualizer_state")
     }
 
-
 @app.post("/api/visualize/save-state")
 async def save_visualizer_state(request: VisualizerStateRequest) -> VisualizerStateResponse:
-    """Сохраняет состояние визуализатора (вызывается из Streamlit)"""
     try:
-        # Сохраняем состояние в сессию
         if request.session_token in visualize_sessions:
             visualize_sessions[request.session_token]["visualizer_state"] = request.state
         else:
-            # Создаём новую запись если сессии нет
             visualize_sessions[request.session_token] = {
                 "signals": [],
                 "code": "",
                 "visualizer_state": request.state
             }
-        
-        print(f"[OK] Saved visualizer state for session: {request.session_token}")
-        
-        return VisualizerStateResponse(
-            success=True,
-            state=request.state,
-            message="Состояние сохранено"
-        )
+        return VisualizerStateResponse(success=True, state=request.state, message="Состояние сохранено")
     except Exception as e:
-        print(f"[ERROR] save_visualizer_state failed: {e}")
-        return VisualizerStateResponse(
-            success=False,
-            message=f"Ошибка сохранения: {str(e)}"
-        )
-
+        return VisualizerStateResponse(success=False, message=f"Ошибка сохранения: {str(e)}")
 
 @app.get("/api/visualize/get-state/{session_token}")
 async def get_visualizer_state(session_token: str) -> VisualizerStateResponse:
-    """Возвращает состояние визуализатора (вызывается из редактора)"""
     session = visualize_sessions.get(session_token)
-    
     if session is None:
-        return VisualizerStateResponse(
-            success=False,
-            message="Сессия не найдена"
-        )
-    
+        return VisualizerStateResponse(success=False, message="Сессия не найдена")
     state = session.get("visualizer_state")
-    
     if state is None:
-        return VisualizerStateResponse(
-            success=False,
-            message="Состояние визуализатора не сохранено"
-        )
-    
-    return VisualizerStateResponse(
-        success=True,
-        state=state
-    )
+        return VisualizerStateResponse(success=False, message="Состояние визуализатора не сохранено")
+    return VisualizerStateResponse(success=True, state=state)
 
-@app.post("/api/project/status/set")
-async def set_project_status(payload: dict = Body(...)):
-    try:
-        filename = payload.get("filename")
-        new_status = payload.get("status")
-        comment = payload.get("comment", "")
-        user = payload.get("user", "")
+@app.get("/api/tags/list")
+async def get_tags_list():
+    return load_tags_data()
 
-        if not filename or new_status not in ("draft", "ready"):
-            raise HTTPException(status_code=400, detail="Invalid filename or status")
-
-        # Проверяем права админа
-        admin_author = STATE["settings"].get("adminAuthor", "")
-        if user != admin_author:
-            raise HTTPException(status_code=403, detail="Only admin can change status")
-
-        # Используем ту же функцию, что и другие эндпоинты
-        file_path = get_storage_path(filename, storage="projects")
-        
-        if not os.path.isfile(file_path):
-            # Отладочная информация
-            print(f"Файл не найден: {file_path}")
-            print(f"Ищем файл: {filename}")
-            raise HTTPException(status_code=404, detail=f"Project file not found: {filename}")
-
-        # Загружаем проект
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = json.load(f)
-
-        # Обновляем метаданные проекта
-        project_meta = content.setdefault("project", {})
-        project_meta["status"] = new_status
-        project_meta["lastStatusChangedByAdmin"] = True
-        
-        # Добавляем запись в историю
-        history = project_meta.setdefault("statusHistory", [])
-        history.append({
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "author": user,
-            "action": "forced_draft" if new_status == "draft" else "forced_ready",
-            "comment": comment.strip()
-        })
-
-        # Сохраняем файл
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(content, f, ensure_ascii=False, indent=2)
-
-        return {"status": "success", "message": "Project status updated"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error updating project status: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-@app.delete("/api/project/delete/{filename}")
-async def delete_project(filename: str, request: Request):
-    try:
-        data = await request.json()
-        current_user = data.get("user", "")
-        if not current_user:
-            raise HTTPException(status_code=400, detail="User not provided")
-        
-        # Получаем путь к проекту
-        path = get_storage_path(filename, storage="projects")
-        if not os.path.exists(path):
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        # Читаем автора проекта
-        with open(path, "r", encoding="utf-8") as f:
-            content = json.load(f)
-        project_meta = content.get("project", {})
-        project_author = project_meta.get("author", "")
-        
-        # Проверяем права на удаление (админ может удалять любые проекты)
-        admin_author = STATE["settings"].get("adminAuthor", "")
-        if project_author != current_user and current_user != admin_author:
-            raise HTTPException(status_code=403, detail="Only the author or admin can delete this project")
-        
-        # Создаем папку для удаленных проектов
-        deleted_dir = os.path.join(os.path.dirname(path), "..", "deleted_projects")
-        os.makedirs(deleted_dir, exist_ok=True)
-        deleted_path = os.path.join(deleted_dir, filename)
-        
-        # Перемещаем файл в папку удаленных
-        shutil.copy2(path, deleted_path)
-        
-        # Удаляем оригинал
-        os.remove(path)
-        
-        # Обновляем кэш сигналов
-        refresh_signals_cache()
-        
-        return {
-            "status": "ok", 
-            "message": f"Project '{filename}' successfully moved to deleted_projects"
-        }
-    
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"Error deleting project: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error during deletion")
-
-
-# =============================================================================
-# СТАТИЧЕСКИЕ ФАЙЛЫ (ФРОНТЕНД)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Статические файлы (фронтенд)
+# -----------------------------------------------------------------------------
 
 WEB_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "web"))
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

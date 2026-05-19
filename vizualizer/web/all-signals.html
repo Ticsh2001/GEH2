@@ -247,6 +247,28 @@
         .tag-option:hover { background: rgba(255,255,255,0.05); }
         .tag-option input { transform: scale(1.2); }
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+        /* Стили для селектора конфигурации */
+        .config-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(10,10,26,0.6);
+            padding: 5px 10px;
+            border-radius: 6px;
+        }
+        .config-selector label {
+            font-size: 13px;
+            color: #aaa;
+        }
+        #config-select {
+            background: #0f3460;
+            border: 1px solid #4a90d9;
+            color: #eee;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -254,6 +276,13 @@
         <div class="header">
             <div class="header-top">
                 <h1>📋 Все сигналы</h1>
+                <!-- Блок выбора конфигурации -->
+                <div class="config-selector">
+                    <label for="config-select">Конфигурация:</label>
+                    <select id="config-select">
+                        <option value="">Загрузка...</option>
+                    </select>
+                </div>
                 <div class="user-info">
                     <strong>Пользователь:</strong>
                     <span id="current-user">—</span>
@@ -331,9 +360,10 @@
         </div>
     </div>
 
-<script>
+    <script>
         const urlParams = new URLSearchParams(window.location.search);
         const currentUser = urlParams.get('user') || 'Аноним';
+        let currentConfig = urlParams.get('config') || '';
         document.getElementById('current-user').textContent = currentUser;
 
         let allProjects = [];
@@ -366,14 +396,23 @@
             return project.description || '—';
         }
 
+        // Добавление конфигурации к URL
+        function addConfig(url) {
+            if (!currentConfig) return url;
+            const sep = url.includes('?') ? '&' : '?';
+            return url + sep + 'config=' + encodeURIComponent(currentConfig);
+        }
+
         async function loadTags() {
             try {
                 const resp = await fetch('/api/tags/list');
+                if (!resp.ok) throw new Error('Failed to load tags');
                 tagsData = await resp.json();
-                renderLegend();
             } catch (e) {
-                console.error("Ошибка загрузки тегов", e);
+                console.warn('Теги не загружены, используется пустой список:', e);
+                tagsData = { tags: [], assignments: {} };
             }
+            renderLegend();
         }
 
         function renderLegend() {
@@ -381,7 +420,7 @@
             const addBtn = document.getElementById('btn-add-tag');
             container.innerHTML = `<span class="legend-label">Фильтр по тегам:</span>`;
 
-            tagsData.tags.forEach(tag => {
+            (tagsData.tags || []).forEach(tag => {
                 const el = document.createElement('div');
                 el.className = `tag-chip ${activeTagFilter === tag.id ? 'active' : ''}`;
                 el.innerHTML = `<div class="tag-color-box" style="background:${tag.color}"></div><span>${tag.name}</span>`;
@@ -403,21 +442,17 @@
         async function createNewTag() {
             const name = prompt("Название нового тега:");
             if (!name || !name.trim()) return;
-
             const color = getRandomColor();
-
             try {
                 const resp = await fetch('/api/tags/create', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ user: currentUser, name: name.trim(), color: color })
                 });
-
                 if (!resp.ok) {
                     const err = await resp.json();
                     throw new Error(err.detail || "Ошибка сервера");
                 }
-
                 await loadTags();
             } catch (e) {
                 alert(e.message);
@@ -444,7 +479,7 @@
             const body = document.getElementById('projects-body');
             body.innerHTML = `<tr><td colspan="11" class="empty-state">Загрузка...</td></tr>`;
             try {
-                const resp = await fetch('/api/project/list');
+                const resp = await fetch(addConfig('/api/project/list'));
                 if (!resp.ok) throw new Error('Не удалось получить список');
                 const data = await resp.json();
 
@@ -477,13 +512,11 @@
             filteredProjects = allProjects.filter(project => {
                 const matchesSearch = !search || (project.code || '').toLowerCase().includes(search);
                 const matchesAuthor = !showMyProjects || ((project.author || '').toLowerCase() === currentUser.toLowerCase());
-
                 let matchesTag = true;
                 if (activeTagFilter) {
                     const pTags = tagsData.assignments[project.filename] || [];
                     matchesTag = pTags.includes(activeTagFilter);
                 }
-
                 return matchesSearch && matchesAuthor && matchesTag;
             });
             sortProjects();
@@ -659,7 +692,6 @@
                 const row = document.createElement('tr');
                 if (isSelected) row.classList.add('row-selected');
 
-                // Определяем цвет кружка размера
                 const codeLen = project.codeLength ?? 0;
                 const sizeColor = codeLen > 16000 ? '#f87171' : '#34d399';
 
@@ -701,7 +733,7 @@
                     const filename = btn.dataset.filename;
                     if (!confirm(`Удалить проект?`)) return;
                     try {
-                        await fetch(`/api/project/delete/${encodeURIComponent(filename)}`, {
+                        await fetch(addConfig(`/api/project/delete/${encodeURIComponent(filename)}`), {
                             method: 'DELETE',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ user: currentUser })
@@ -721,7 +753,7 @@
                     if (!reason) return;
                     try {
                         const payload = { filename: btn.dataset.filename, status: 'draft', comment: reason, user: currentUser };
-                        await fetch('/api/project/status/set', {
+                        await fetch(addConfig('/api/project/status/set'), {
                             method:'POST',
                             headers:{'Content-Type':'application/json'},
                             body: JSON.stringify(payload)
@@ -754,7 +786,7 @@
                 const newAuthor = select.value;
                 if (!newAuthor) return renderTable();
                 try {
-                    await fetch('/api/project/set-author', {
+                    await fetch(addConfig('/api/project/set-author'), {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ filename, author: newAuthor })
@@ -783,7 +815,10 @@
         }
 
         document.getElementById('ctx-open-project').onclick = () => {
-            if (selectedProject) window.open(`/?load=${encodeURIComponent(selectedProject.filename)}&source=projects`, '_blank');
+            if (selectedProject) {
+                const url = `/?load=${encodeURIComponent(selectedProject.filename)}&source=projects&config=${encodeURIComponent(currentConfig)}`;
+                window.open(url, '_blank');
+            }
         };
 
         document.getElementById('ctx-copy-code').onclick = () => {
@@ -879,7 +914,7 @@
 
             const results = await Promise.all(deletable.map(async project => {
                 try {
-                    const resp = await fetch(`/api/project/delete/${encodeURIComponent(project.filename)}`, {
+                    const resp = await fetch(addConfig(`/api/project/delete/${encodeURIComponent(project.filename)}`), {
                         method: 'DELETE',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ user: currentUser })
@@ -926,7 +961,6 @@
             if (hasParameter) {
                 showExportFormatModal(filenames);
             } else {
-                // Нет параметров — сразу экспорт (формат excel по умолчанию)
                 exportSelectedProjects(filenames, 'excel');
             }
         };
@@ -942,17 +976,15 @@
         }
 
         function doExport(paramFormat) {
-            // Сначала сохраняем список, потом закрываем модальное окно
             const filenames = pendingExportFilenames;
             closeExportFormatModal();
-
             if (!filenames || !filenames.length) return;
             exportSelectedProjects(filenames, paramFormat);
         }
 
         async function exportSelectedProjects(filenames, paramFormat) {
             try {
-                const resp = await fetch('/api/project/export-selected', {
+                const resp = await fetch(addConfig('/api/project/export-selected'), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ filenames, param_format: paramFormat })
@@ -1004,7 +1036,50 @@
             if (current) current.classList.add(sortOrder);
         }
 
-        loadProjects();
+        // Загрузка конфигураций
+        async function loadConfigurations() {
+            try {
+                const resp = await fetch('/api/configurations');
+                if (!resp.ok) throw new Error('Ошибка загрузки конфигураций');
+                const data = await resp.json();
+                const configs = data.configurations || [];
+                const select = document.getElementById('config-select');
+                select.innerHTML = '';
+                if (configs.length === 0) {
+                    select.innerHTML = '<option value="">Нет конфигураций</option>';
+                    currentConfig = '';
+                    return;
+                }
+                configs.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    select.appendChild(opt);
+                });
+                if (currentConfig && configs.includes(currentConfig)) {
+                    select.value = currentConfig;
+                } else {
+                    select.value = configs[0];
+                    currentConfig = configs[0];
+                }
+                select.addEventListener('change', () => {
+                    currentConfig = select.value;
+                    localStorage.setItem('lse_config_all_signals', currentConfig);
+                    loadProjects();
+                });
+                localStorage.setItem('lse_config_all_signals', currentConfig);
+            } catch (e) {
+                console.error(e);
+                const select = document.getElementById('config-select');
+                select.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        }
+
+        // Старт
+        (async function init() {
+            await loadConfigurations();
+            await loadProjects();
+        })();
     </script>
 </body>
 </html>

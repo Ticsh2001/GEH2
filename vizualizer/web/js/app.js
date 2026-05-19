@@ -11,6 +11,7 @@ init() {
     // Settings.init() вызовется внутри autoLoadFromURL, если есть ?load=
     this.initUser();
     Settings.init().catch(console.error);
+    this.loadConfigurations().catch(console.error);
 
     this.setupPaletteDragDrop();
     this.setupGlobalMouseHandlers();
@@ -66,18 +67,19 @@ init() {
 
         // Формируем имя файла так же, как при сохранении!
         const filename = `${code}_${type}.json`;
-        const url = `/map.html?project=${encodeURIComponent(filename)}`;
+        const url = `/map.html?project=${encodeURIComponent(filename)}&config=${encodeURIComponent(AppState.currentConfig || '')}`;
         window.open(url, '_blank');
     });
 
         // Добавить в функцию init() после других обработчиков
     document.getElementById('btn-all-signals').addEventListener('click', () => {
         const currentUser = localStorage.getItem('lse_username') || 'Аноним';
-        const url = `/all-signals.html?user=${encodeURIComponent(currentUser)}`;
+        const config = AppState.currentConfig || '';
+        const url = `/all-signals.html?user=${encodeURIComponent(currentUser)}&config=${encodeURIComponent(config)}`;
         window.open(url, '_blank');
     });
 
-    document.getElementById('btn-create-similar').addEventListener('click', async () => {
+document.getElementById('btn-create-similar').addEventListener('click', async () => {
     try {
         const proj = AppState.project || {};
         const code = (proj.code || '').trim();
@@ -91,21 +93,16 @@ init() {
         const filename = `${code}_${type}.json`;
         const source = (type === 'template') ? 'templates' : 'projects';
 
-        // Проверяем, что проект реально сохранён на диск
-        const resp = await fetch(`/api/project/load/${encodeURIComponent(filename)}?source=${encodeURIComponent(source)}`);
-        if (!resp.ok) {
-            alert('Проект не найден на сервере. Пожалуйста, сохраните проект перед созданием подобного.');
-            return;
-        }
+        // Проверяем, что проект существует (через Settings.loadProject, которая добавит config)
+        await Settings.loadProject(filename, source);
 
-        // Открываем мастер в новой вкладке
-        const url = `/similar.html?filename=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}`;
+        const config = AppState.currentConfig || '';
+        const url = `/similar.html?filename=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(config)}`;
         window.open(url, '_blank');
     } catch (e) {
         console.error(e);
         alert('Ошибка при открытии мастера: ' + e.message);
     }
-    
 });
 
 
@@ -126,6 +123,48 @@ init() {
     // ===== Автозагрузка проекта из URL =====
     this.autoLoadFromURL();
 },
+
+async loadConfigurations() {
+    try {
+        const resp = await fetch('/api/configurations');
+        if (!resp.ok) throw new Error('Failed to fetch configurations');
+        const data = await resp.json();
+        const configs = data.configurations || [];
+        const select = document.getElementById('config-select');
+        select.innerHTML = '';
+        if (configs.length === 0) {
+            select.innerHTML = '<option value="">Нет конфигураций</option>';
+            AppState.currentConfig = '';
+            return;
+        }
+        configs.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            select.appendChild(opt);
+        });
+        // Восстанавливаем сохранённую конфигурацию или берём первую
+        let savedConfig = localStorage.getItem('lse_config');
+        if (savedConfig && configs.includes(savedConfig)) {
+            select.value = savedConfig;
+        } else {
+            select.value = configs[0];
+        }
+        AppState.currentConfig = select.value;
+        localStorage.setItem('lse_config', AppState.currentConfig);
+
+        // Обработчик смены
+        select.addEventListener('change', () => {
+            AppState.currentConfig = select.value;
+            localStorage.setItem('lse_config', AppState.currentConfig);
+        });
+    } catch (e) {
+        console.error('Ошибка загрузки конфигураций:', e);
+        const select = document.getElementById('config-select');
+        select.innerHTML = '<option value="">Ошибка</option>';
+    }
+},
+
 
 /**
  * Инициализация пользователя.
@@ -273,6 +312,7 @@ openSignalVisualizer() {
             const params = new URLSearchParams();
             params.set('session', token);
             params.set('api_url', apiUrl);
+            params.set('config', AppState.currentConfig || ''); 
             
             const visualizerUrl = `${visualizerBase}/?${params.toString()}`;
             console.log('Opening visualizer:', visualizerUrl);

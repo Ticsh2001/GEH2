@@ -1,0 +1,132 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "tabletest_COPYsssdsd",
+    "type": "parameter",
+    "description": "sdfgsdfsdf",
+    "dimension": "ggfjfgj",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-05-19T11:59:59.714Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": [
+      {
+        "timestamp": "2026-03-05T07:13:26.923976Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "порппрпопопопр"
+      },
+      {
+        "timestamp": "2026-03-05T07:16:52.032187Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "sasdasdasdasd"
+      }
+    ],
+    "lastStatusChangedByAdmin": true
+  },
+  "elements": {
+    "table_2": {
+      "id": "table_2",
+      "type": "table",
+      "x": 126,
+      "y": 1147,
+      "width": 190,
+      "height": 120,
+      "props": {
+        "name": "table1",
+        "comment": "dhjsdhfhds"
+      }
+    },
+    "formula_3": {
+      "id": "formula_3",
+      "type": "formula",
+      "x": 494,
+      "y": 1062,
+      "width": 140,
+      "height": 108,
+      "props": {
+        "expression": "GETPOINT(table1, 21MAA10CT002§§XH52, -1, Y)",
+        "inputCount": 2,
+        "comment": ""
+      }
+    },
+    "output_4": {
+      "id": "output_4",
+      "type": "output",
+      "x": 721,
+      "y": 1128,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 121,
+      "y": 995,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "21MAA10CT002§§XH52",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "T КОМП ХС 2",
+        "comment": ""
+      }
+    },
+    "input_signal_5": {
+      "id": "input_signal_5",
+      "type": "input-signal",
+      "x": 187,
+      "y": 1356,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "23MAB01CP001§ASMON§Q5",
+        "signalType": "numeric",
+        "description": "Limit Signal 5",
+        "dimension": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "table_2",
+      "fromPort": "out-0",
+      "toElement": "formula_3",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_3",
+      "fromPort": "out-0",
+      "toElement": "output_4",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 5,
+  "viewport": {
+    "zoom": 1,
+    "panX": 100,
+    "panY": -804
+  },
+  "code": "GETPOINT(table1, 21MAA10CT002§§XH52, -1, Y)",
+  "visualizer_state": null
+}

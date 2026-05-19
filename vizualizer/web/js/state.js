@@ -8,6 +8,7 @@ const AppState = {
     elements: {},
     connections: [],
     elementCounter: 0,
+    currentConfig: '',
     
     // Выделение
     selectedElement: null,
@@ -71,6 +72,7 @@ const AppState = {
  */
 function resetState() {
     AppState.elements = {};
+
     AppState.connections = [];
     AppState.elementCounter = 0;
     AppState.selectedElement = null;

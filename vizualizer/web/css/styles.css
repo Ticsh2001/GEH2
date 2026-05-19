@@ -806,3 +806,66 @@ body {
     font-weight: 500;
     white-space: nowrap;
 }
+
+/* ---------- Селектор конфигурации ---------- */
+.config-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(10, 10, 26, 0.6);
+    padding: 5px 10px;
+    border-radius: 6px;
+    margin-left: 8px;          /* небольшой отступ от соседних элементов меню */
+}
+
+.config-selector label {
+    font-size: 13px;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+#config-select {
+    background: #0f3460;
+    border: 1px solid #4a90d9;
+    color: #eee;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+}
+
+#config-select:focus {
+    border-color: #e94560;
+}
+
+/* Чтобы в тёмной теме select выглядел прилично */
+#config-select option {
+    background: #16213e;
+    color: #eee;
+}
+
+
+/* Предотвращаем перенос элементов в меню */
+#menu {
+    flex-wrap: nowrap;
+    gap: 8px;               /* единый отступ между кнопками */
+    overflow-x: auto;       /* если всё равно не влезает — появится горизонтальный скролл */
+}
+
+/* Уменьшаем автоматический отступ у user-badge */
+.user-badge {
+    margin-left: 12px;      /* замените auto на фиксированный небольшой отступ */
+    flex-shrink: 0;         /* не даём элементу сжиматься */
+}
+
+/* Кнопка "Проекты" тоже не должна сжиматься */
+#btn-all-signals {
+    flex-shrink: 0;
+}
+
+/* Опционально – можно немного уменьшить паддинги у кнопок меню */
+.menu-btn {
+    padding: 6px 10px;      /* было, например, 8px 14px – подгоните под свой дизайн */
+}

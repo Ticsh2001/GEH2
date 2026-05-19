@@ -668,7 +668,8 @@ def load_table_df(curve_name: str) -> pd.DataFrame:
     if curve_name in cache:
         return cache[curve_name]
 
-    r = requests.get(f"{api_url}/api/table/file/{curve_name}")
+    r = requests.get(make_url(f"{api_url}/api/table/file/{curve_name}"))
+
     r.raise_for_status()
     print(BytesIO(r.content))
 
@@ -704,6 +705,15 @@ st.title("📊 Визуализация сигналов")
 query_params = st.query_params
 session_token = query_params.get("session", None)
 api_url = query_params.get("api_url", "http://localhost:8000")
+config = query_params.get("config", "")   # <-- новая строка
+
+# Вспомогательная функция для добавления config к URL
+def make_url(path):
+    if config:
+        sep = "&" if "?" in path else "?"
+        return f"{path}{sep}config={config}"
+    return path
+
 
 signal_codes = query_params.get("signals", [])
 if isinstance(signal_codes, str):
@@ -764,7 +774,7 @@ def load_base_signals_data(signal_names: List[str]) -> pd.DataFrame | None:
     
     try:
         response = requests.post(
-            f"{api_url}/api/signal-data",
+            make_url(f"{api_url}/api/signal-data"),
             json={"signal_names": signal_names, "format": "json"},
         )
         response.raise_for_status()
@@ -810,7 +820,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
     try:
         with st.spinner("🔍 Разворачиваем зависимости сигналов..."):
             resolve_resp = requests.post(
-                f"{api_url}/api/resolve-signals",
+                make_url(f"{api_url}/api/resolve-signals"),
                 json={"signals": input_signals}
             )
             resolve_resp.raise_for_status()

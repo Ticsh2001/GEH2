@@ -29,6 +29,13 @@ const Settings = {
     }
   },
 
+  _addConfig(url) {
+    const config = AppState.currentConfig;
+    if (!config) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}config=${encodeURIComponent(config)}`;
+},
+
   getTemplatesMap() {
     const map = {};
     (this.templates || []).forEach(t => { if (t?.name) map[t.name] = t; });
@@ -38,42 +45,39 @@ const Settings = {
   // ← ОДНА функция fetchSignals с cache-busting
   async fetchSignals(mask, limit = 50) {
     const timestamp = Date.now();
-    const url = `${this.apiUrl}/api/signals?q=${encodeURIComponent(mask || '')}&limit=${limit}&_t=${timestamp}`;
+    let url = `${this.apiUrl}/api/signals?q=${encodeURIComponent(mask || '')}&limit=${limit}&_t=${timestamp}`;
+    url = this._addConfig(url);
     const r = await fetch(url);
     if (!r.ok) throw new Error('Failed to fetch signals');
     return await r.json();
   },
 
   async saveProject(filename, projectData, target = 'projects') {
-      if (!filename.endsWith('.json')) filename += '.json';
-    const r = await fetch(`${this.apiUrl}/api/project/save`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        filename,
-        target,
-        content: projectData
-      })
+    if (!filename.endsWith('.json')) filename += '.json';
+    let url = `${this.apiUrl}/api/project/save`;
+    url = this._addConfig(url);   // ← добавьте эту строку
+    console.log('[saveProject] url:', url);   // ← добавьте эту строку
+    const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            filename,
+            target,
+            content: projectData
+        })
     });
     if (!r.ok) throw new Error('Failed to save project');
     return r.json();
-  },
+},
   
   async listProjects() {
-    //const r = await fetch(`${this.apiUrl}/api/project/list`);
-    //if (!r.ok) throw new Error('Failed to list projects');
-    //const data = await r.json();
-    //this.templates = data.templates || [];  // <-- обновляем кеш
-    //return data;
-    const r = await fetch(`${this.apiUrl}/api/project/list`);
+    let url = `${this.apiUrl}/api/project/list`;
+    url = this._addConfig(url);   // <-- эта строка обязательна
+    const r = await fetch(url);
     if (!r.ok) throw new Error('Failed to list projects');
     const data = await r.json();
-
-    // ВАЖНО: templates тут НЕ трогаем, потому что /api/project/list их не возвращает
-    // this.templates = data.templates || [];  // <-- УДАЛИТЬ
-
     return data;
-  },
+},
 
   async fetchFormulaTemplates() {
     const r = await fetch(`${this.apiUrl}/api/formula-templates`);
@@ -83,7 +87,8 @@ const Settings = {
 
   async fetchTables(mask, limit = 50) {
     const timestamp = Date.now();
-    const url = `${this.apiUrl}/api/tables?q=${encodeURIComponent(mask || '')}&limit=${limit}&_t=${timestamp}`;
+    let url = `${this.apiUrl}/api/tables?q=${encodeURIComponent(mask || '')}&limit=${limit}&_t=${timestamp}`;
+    url = this._addConfig(url);
     const r = await fetch(url);
     if (!r.ok) throw new Error('Failed to fetch tables');
     return await r.json();
@@ -93,7 +98,9 @@ const Settings = {
     if (!filename.endsWith('.json')) {
       filename += '.json';
     }
-    const r = await fetch(`${this.apiUrl}/api/project/load/${encodeURIComponent(filename)}?source=${source}`);
+    let url = `${this.apiUrl}/api/project/load/${encodeURIComponent(filename)}?source=${source}`;
+    url = this._addConfig(url);
+    const r = await fetch(url);
     if (!r.ok) {
       if (r.status === 404) {
         throw new Error(`Project "${filename}" not found (404)`);

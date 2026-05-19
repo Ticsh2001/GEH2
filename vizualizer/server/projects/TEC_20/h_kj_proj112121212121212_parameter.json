@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "h_kj_proj112121212121212",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-05-19T11:37:48.085Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": [
+      {
+        "timestamp": "2026-03-05T07:11:13.185650Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "ввввв"
+      },
+      {
+        "timestamp": "2026-03-05T07:12:12.970632Z",
+        "author": "Виктор Тищенко",
+        "action": "forced_draft",
+        "comment": "вапапа"
+      }
+    ],
+    "lastStatusChangedByAdmin": true
+  },
+  "elements": {
+    "formula_2": {
+      "id": "formula_2",
+      "type": "formula",
+      "x": 442,
+      "y": 220,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "h_proj/1000",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "output_3": {
+      "id": "output_3",
+      "type": "output",
+      "x": 829,
+      "y": 340,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 194,
+      "y": 266,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "h_proj",
+        "signalType": "undefined",
+        "dimension": "",
+        "description": "",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_2",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_2",
+      "fromPort": "out-0",
+      "toElement": "output_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 3,
+  "viewport": {
+    "zoom": 0.9,
+    "panX": 334.318831168831,
+    "panY": 134.05876623376622
+  },
+  "code": "h_proj/1000",
+  "visualizer_state": null
+}

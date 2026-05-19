@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "sdfsdsdsdsdsdfsdfsdf",
+    "type": "parameter",
+    "description": "",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "author": "Виктор Тищенко",
+    "lastModifiedBy": "Виктор Тищенко",
+    "lastModifiedAt": "2026-05-19T14:07:11.912Z",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": []
+  },
+  "elements": {
+    "formula_2": {
+      "id": "formula_2",
+      "type": "formula",
+      "x": 851,
+      "y": 312,
+      "width": 140,
+      "height": 80,
+      "props": {
+        "expression": "10MAA50CP012§§XQ01*10",
+        "inputCount": 1,
+        "comment": ""
+      }
+    },
+    "output_3": {
+      "id": "output_3",
+      "type": "output",
+      "x": 1045,
+      "y": 362,
+      "width": 150,
+      "height": 60,
+      "props": {
+        "label": "Выход",
+        "outputGroup": ""
+      }
+    },
+    "input_signal_1": {
+      "id": "input_signal_1",
+      "type": "input-signal",
+      "x": 625,
+      "y": 356,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "10MAA50CP012§§XQ01",
+        "signalType": "undefined",
+        "dimension": "bar",
+        "description": "ВД ДИФ ДАВЛЕНИЕ $ HP DIFFERENTIAL PRESSURE, bar",
+        "comment": ""
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "input_signal_1",
+      "fromPort": "out-0",
+      "toElement": "formula_2",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "formula_2",
+      "fromPort": "out-0",
+      "toElement": "output_3",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    }
+  ],
+  "counter": 3,
+  "viewport": {
+    "zoom": 1,
+    "panX": 0,
+    "panY": 0
+  },
+  "code": "10MAA50CP012§§XQ01*10",
+  "visualizer_state": null
+}
