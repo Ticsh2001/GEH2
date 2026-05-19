@@ -11,13 +11,14 @@
             --col-width-select: 4%;
             --col-width-id: 5%;
             --col-width-status: 8%;
-            --col-width-modified: 12%;   /* новая колонка */
+            --col-width-modified: 12%;
             --col-width-tags: 6%;
             --col-width-code: 12%;
-            --col-width-type: 8%;         /* было 10% */
+            --col-width-size: 7%;      /* новая колонка "Размер" */
+            --col-width-type: 8%;
             --col-width-description: 25%;
-            --col-width-author: 10%;      /* было 15% */
-            --col-width-actions: 10%;     /* было 15% */
+            --col-width-author: 10%;
+            --col-width-actions: 10%;
 
             --primary-color: #e94560;
             --secondary-color: #4a90d9;
@@ -152,7 +153,7 @@
         #projects-table {
             width: 100%; border-collapse: collapse; background: #0a0a1a;
             border: 1px solid var(--border-color); border-radius: 10px;
-            overflow: hidden; table-layout: fixed; min-width: 1180px;
+            overflow: hidden; table-layout: fixed; min-width: 1280px; /* чуть шире из-за новой колонки */
         }
 
         th, td {
@@ -161,17 +162,18 @@
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
 
-        /* 10 колонок */
+        /* 11 колонок */
         th:nth-child(1), td:nth-child(1) { width: var(--col-width-select); }
         th:nth-child(2), td:nth-child(2) { width: var(--col-width-id); }
         th:nth-child(3), td:nth-child(3) { width: var(--col-width-status); }
         th:nth-child(4), td:nth-child(4) { width: var(--col-width-modified); }
         th:nth-child(5), td:nth-child(5) { width: var(--col-width-tags); }
         th:nth-child(6), td:nth-child(6) { width: var(--col-width-code); }
-        th:nth-child(7), td:nth-child(7) { width: var(--col-width-type); }
-        th:nth-child(8), td:nth-child(8) { width: var(--col-width-description); }
-        th:nth-child(9), td:nth-child(9) { width: var(--col-width-author); }
-        th:nth-child(10), td:nth-child(10) { width: var(--col-width-actions); }
+        th:nth-child(7), td:nth-child(7) { width: var(--col-width-size); }   /* Размер */
+        th:nth-child(8), td:nth-child(8) { width: var(--col-width-type); }
+        th:nth-child(9), td:nth-child(9) { width: var(--col-width-description); }
+        th:nth-child(10), td:nth-child(10) { width: var(--col-width-author); }
+        th:nth-child(11), td:nth-child(11) { width: var(--col-width-actions); }
 
         th {
             background: var(--header-bg-color); font-weight: 600;
@@ -284,6 +286,7 @@
                     <th class="sortable" id="sort-modified">Дата изменения</th>
                     <th class="sortable" id="sort-tags">Теги</th>
                     <th>Код</th>
+                    <th class="sortable" id="sort-size">Размер</th>   <!-- НОВАЯ КОЛОНКА -->
                     <th class="sortable" id="sort-type">Тип</th>
                     <th>Описание</th>
                     <th class="sortable" id="sort-author">Автор</th>
@@ -291,7 +294,7 @@
                 </tr>
             </thead>
             <tbody id="projects-body">
-                <tr><td colspan="10" class="empty-state">Загрузка проектов...</td></tr>
+                <tr><td colspan="11" class="empty-state">Загрузка проектов...</td></tr>
             </tbody>
         </table>
     </div>
@@ -351,7 +354,6 @@
             reverted: { color: '#fbbf24', label: 'Возврат',  sort: 1 }
         };
 
-        // Универсальное получение даты последнего изменения
         function getLastModified(project) {
             return project.lastModifiedAt || (project.project && project.project.lastModifiedAt) || null;
         }
@@ -440,7 +442,7 @@
 
         async function loadProjects() {
             const body = document.getElementById('projects-body');
-            body.innerHTML = `<tr><td colspan="10" class="empty-state">Загрузка...</td></tr>`;
+            body.innerHTML = `<tr><td colspan="11" class="empty-state">Загрузка...</td></tr>`;
             try {
                 const resp = await fetch('/api/project/list');
                 if (!resp.ok) throw new Error('Не удалось получить список');
@@ -465,7 +467,7 @@
             } catch (err) {
                 allProjects = [];
                 filteredProjects = [];
-                body.innerHTML = `<tr><td colspan="10" class="empty-state">❌ ${err.message}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="11" class="empty-state">❌ ${err.message}</td></tr>`;
                 updateSelectionUI();
             }
         }
@@ -509,6 +511,9 @@
                     const bDate = getLastModified(b);
                     av = aDate ? new Date(aDate).getTime() : 0;
                     bv = bDate ? new Date(bDate).getTime() : 0;
+                } else if (sortBy === 'size') {
+                    av = a.codeLength ?? 0;
+                    bv = b.codeLength ?? 0;
                 } else {
                     av = (a[sortBy] || '').toLowerCase();
                     bv = (b[sortBy] || '').toLowerCase();
@@ -642,7 +647,7 @@
         function renderTable() {
             const body = document.getElementById('projects-body');
             if (!filteredProjects.length) {
-                body.innerHTML = `<tr><td colspan="10" class="empty-state">${showMyProjects ? 'У вас нет проектов' : 'Ничего не найдено'}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="11" class="empty-state">${showMyProjects ? 'У вас нет проектов' : 'Ничего не найдено'}</td></tr>`;
                 updateSortIndicators();
                 updateSelectionUI();
                 return;
@@ -654,6 +659,10 @@
                 const row = document.createElement('tr');
                 if (isSelected) row.classList.add('row-selected');
 
+                // Определяем цвет кружка размера
+                const codeLen = project.codeLength ?? 0;
+                const sizeColor = codeLen > 16000 ? '#f87171' : '#34d399';
+
                 row.innerHTML = `
                     <td class="select-cell">
                         <input type="checkbox" class="project-checkbox" data-filename="${project.filename}" ${isSelected ? 'checked' : ''}>
@@ -663,6 +672,11 @@
                     <td title="${getLastModified(project) || ''}">${formatModifiedDate(project)}</td>
                     <td>${renderTagsCell(project)}</td>
                     <td title="${project.code || ''}">${project.code || '—'}</td>
+                    <td title="Длина кода: ${codeLen} символов">
+                        <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+                            <span class="status-dot" style="background:${sizeColor}; display: inline-block;"></span>
+                        </div>
+                    </td>
                     <td title="${project.type || ''}">${project.type || '—'}</td>
                     <td title="${getProjectDescription(project)}">${getProjectDescription(project)}</td>
                     <td title="${project.author || ''}">${project.author || '—'}</td>
@@ -899,6 +913,9 @@
             alert(message);
         };
 
+        // ---------- Экспорт с выбором формата ----------
+        let pendingExportFilenames = [];
+
         document.getElementById('export-selected').onclick = async () => {
             const projects = getSelectedProjectObjects();
             if (!projects.length) return;
@@ -907,32 +924,12 @@
             const hasParameter = projects.some(p => p.type === 'parameter');
 
             if (hasParameter) {
-                // Показать модальное окно выбора формата
                 showExportFormatModal(filenames);
             } else {
-                // Нет параметров — сразу экспорт (формат не важен, но передадим excel по умолчанию)
+                // Нет параметров — сразу экспорт (формат excel по умолчанию)
                 exportSelectedProjects(filenames, 'excel');
             }
         };
-
-        ['status', 'tags', 'type', 'author', 'modified'].forEach(key => {
-            document.getElementById(`sort-${key}`).onclick = () => {
-                if (sortBy === key) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-                else { sortBy = key; sortOrder = 'asc'; }
-                sortProjects();
-                renderTable();
-                updateSortIndicators();
-            };
-        });
-
-        function updateSortIndicators() {
-            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('asc', 'desc'));
-            const current = document.getElementById(`sort-${sortBy}`);
-            if (current) current.classList.add(sortOrder);
-        }
-
-        // ---------- Экспорт с выбором формата ----------
-        let pendingExportFilenames = [];
 
         function showExportFormatModal(filenames) {
             pendingExportFilenames = filenames;
@@ -945,11 +942,11 @@
         }
 
         function doExport(paramFormat) {
+            // Сначала сохраняем список, потом закрываем модальное окно
             const filenames = pendingExportFilenames;
             closeExportFormatModal();
-            
-            if (!filenames || !filenames.length) return;
 
+            if (!filenames || !filenames.length) return;
             exportSelectedProjects(filenames, paramFormat);
         }
 
@@ -987,9 +984,25 @@
             }
         }
 
-        // Навешиваем обработчики для кнопок внутри модального окна
         document.getElementById('export-excel-btn').onclick = () => doExport('excel');
         document.getElementById('export-word-btn').onclick = () => doExport('word');
+
+        // ---------- Сортировка ----------
+        ['status', 'tags', 'type', 'author', 'modified', 'size'].forEach(key => {
+            document.getElementById(`sort-${key}`).onclick = () => {
+                if (sortBy === key) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+                else { sortBy = key; sortOrder = 'asc'; }
+                sortProjects();
+                renderTable();
+                updateSortIndicators();
+            };
+        });
+
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('asc', 'desc'));
+            const current = document.getElementById(`sort-${sortBy}`);
+            if (current) current.classList.add(sortOrder);
+        }
 
         loadProjects();
     </script>

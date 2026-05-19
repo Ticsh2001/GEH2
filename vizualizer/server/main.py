@@ -21,6 +21,9 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from urllib.parse import quote
 from export import export_selected_projects
 
+from export import get_code_length   # <-- добавьте этот импорт в начало
+
+
 # =============================================================================
 # КОНФИГУРАЦИЯ
 # =============================================================================
@@ -838,6 +841,13 @@ def list_projects():
             except Exception:
                 continue
             project_meta = payload.get("project", {}) or {}
+
+            # Вычисляем длину обработанного кода
+            try:
+                code_len = get_code_length(payload)
+            except Exception:
+                code_len = 0
+
             items.append({
                 "filename": fname,
                 "code": project_meta.get("code") or project_meta.get("tagname") or "",
@@ -851,15 +861,14 @@ def list_projects():
                 "lastStatusChangedByAdmin": project_meta.get("lastStatusChangedByAdmin", False),
                 "lastModifiedAt": project_meta.get("lastModifiedAt") or "",
                 "lastModifiedBy": project_meta.get("lastModifiedBy") or "",
-                "source": source_label
+                "source": source_label,
+                "codeLength": code_len          # <-- новое поле
             })
         return items
 
     projects = collect("projectDataFolder", "projects")
     projects.extend(collect("templateDataFolder", "templates"))
     authors = sorted(set(project.get("author") for project in projects if project.get("author")))
-    
-    # Получаем админа из настроек
     admin_author = STATE["settings"].get("adminAuthor", "")
     return {
         "projects": projects,

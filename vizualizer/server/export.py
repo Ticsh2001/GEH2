@@ -521,3 +521,47 @@ def export_selected_projects(filenames: list[str], project_dir: str, param_forma
         "media_type": "application/zip",
         "content": zip_buffer.getvalue()
     }
+
+def get_code_length(payload: dict) -> int:
+    """
+    Возвращает длину обработанного кода проекта (после prepare_code_for_system),
+    как это будет при экспорте.
+    """
+    project_meta = payload.get("project") or {}
+    ptype = project_meta.get("type", "")
+    raw_code = payload.get("code", "") or ""
+
+    if ptype == "parameter":
+        # Собираем input_signals как в _build_parameter_rows
+        input_signals = []
+        for el in _iter_elements(payload.get("elements") or {}):
+            if isinstance(el, dict) and el.get("type") == "input-signal":
+                name = (el.get("props") or {}).get("name")
+                if isinstance(name, str):
+                    name = name.strip()
+                elif name is not None:
+                    name = str(name)
+                else:
+                    name = ""
+                input_signals.append(name)
+        input_signals = _unique_preserve_order(input_signals)
+        processed = prepare_code_for_system(raw_code, input_signals)
+    elif ptype == "rule":
+        # Собираем input_signal_names как в _build_rule_rows (только input-signal)
+        input_signal_names = []
+        for el in _iter_elements(payload.get("elements") or {}):
+            if isinstance(el, dict) and el.get("type") in ("input-signal", "table"):
+                name = (el.get("props") or {}).get("name", "")
+                if isinstance(name, str):
+                    name = name.strip()
+                else:
+                    name = str(name)
+                if el.get("type") == "input-signal":
+                    input_signal_names.append(name)
+        input_signal_names = _unique_preserve_order(input_signal_names)
+        processed = prepare_code_for_system(raw_code, input_signal_names)
+    else:
+        # Для других типов просто сырой код (или можно возвращать 0)
+        processed = raw_code
+
+    return len(processed)
