@@ -502,7 +502,7 @@ body {
     padding: 20px;
     min-width: 400px;
     max-width: 600px;
-    max-height: 80vh;
+    max-height: 90vh;
     overflow-y: auto;
     border: 2px solid #0f3460;
 }
@@ -868,4 +868,19 @@ body {
 /* Опционально – можно немного уменьшить паддинги у кнопок меню */
 .menu-btn {
     padding: 6px 10px;      /* было, например, 8px 14px – подгоните под свой дизайн */
+}
+
+.project-type-btn {
+    padding: 8px 10px;        /* было 15px */
+    font-size: 12px;
+}
+.project-type-btn .type-icon {
+    font-size: 18px;          /* было 24px */
+    margin-bottom: 2px;
+}
+.project-type-btn .type-name {
+    font-size: 13px;
+}
+.project-type-btn .type-desc {
+    font-size: 10px;
 }

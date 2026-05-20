@@ -14,7 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 PARAM_EXPORT_COLUMNS = ["KKS код", "Описание", "Ед. изм.", "Используемые сигналы", "Код"]
 RULE_EXPORT_COLUMNS = ["KKS код", "Используемые сигналы", "Код", "Описание", "Методические указания"]
-RULE_EXPORT_EXTRA_COLUMNS = ["params_list", "rule_code_raw"]
+RULE_EXPORT_EXTRA_COLUMNS = ["params_list", "rule_code_raw", "possibleCause"]
 
 
 def _validate_filename(filename: str) -> bool:
@@ -249,10 +249,11 @@ def _build_rule_rows(project_payloads):
             "KKS код": project.get("code", ""),
             "Используемые сигналы": "; ".join(display_signals),
             "Код": prepare_code_for_system(data.get("code", ""), input_signal_names),
-            "Описание": project.get("possibleCause", ""),
+            "Описание": project.get("description", ""),
             "Методические указания": project.get("guidelines", ""),
             "params_list": params_list,
             "rule_code_raw": project.get("code", ""),
+            "possibleCause": project.get("possibleCause", ""),   # ← возможная причина
         })
 
     return rows
@@ -412,6 +413,7 @@ def _build_rules_docx_bytes(df: pd.DataFrame) -> bytes:
         code_text = normalize_text(row.get("Код"))
         descr = normalize_text(row.get("Описание"))
         guidelines = normalize_text(row.get("Методические указания"))
+        possible_cause = normalize_text(row.get("possibleCause"))
         params_list = row.get("params_list") or []
 
         add_paragraph_line(f"Правило {n}: ({rule_code})", bold=True)
@@ -420,7 +422,7 @@ def _build_rules_docx_bytes(df: pd.DataFrame) -> bytes:
         add_multiline(descr)
 
         add_paragraph_line("Причина:", bold=True)
-        add_paragraph_line("")
+        add_multiline(possible_cause)
 
         add_paragraph_line("Логика определения:", bold=True)
         add_paragraph_line("")

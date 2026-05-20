@@ -986,7 +986,6 @@ const Modal = {
                         <div class="type-icon">📋</div>
                         <div class="type-name">Правило</div>
                         <div class="type-desc">Логическое условие</div>
-                        <div class="type-desc">Формула для повторного использования</div>
                     </div>
                     <div class="project-type-btn ${project.type === PROJECT_TYPE.TEMPLATE ? 'active' : ''}" data-type="${PROJECT_TYPE.TEMPLATE}">
                         <div class="type-icon">🧩</div>
@@ -1010,6 +1009,10 @@ const Modal = {
             </div>
             
             <div id="rule-fields" class="conditional-fields ${project.type === PROJECT_TYPE.RULE ? 'visible' : ''}">
+                 <div class="modal-row">
+                    <label>Описание:</label>
+                    <textarea id="project-rule-description" placeholder="Описание правила">${project.description || ''}</textarea>
+                </div>
                 <div class="modal-row">
                     <label>Возможная причина:</label>
                     <textarea id="project-possible-cause" placeholder="Описание возможной причины срабатывания правила">${project.possibleCause || ''}</textarea>
@@ -1111,7 +1114,7 @@ const Modal = {
             AppState.project.guidelines = '';
         } else if (type === PROJECT_TYPE.RULE) {
             AppState.project.dimension = '';
-            AppState.project.description = '';
+            AppState.project.description = document.getElementById('project-rule-description')?.value || '';
             AppState.project.possibleCause = document.getElementById('project-possible-cause').value;
             AppState.project.guidelines = document.getElementById('project-guidelines').value;
         } else if (type === PROJECT_TYPE.TEMPLATE) {
