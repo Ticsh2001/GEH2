@@ -120,16 +120,20 @@
         </div>
       `;
     } else if (type === 'rule') {
-      typeFields.innerHTML = `
-        <div class="row">
-          <label for="fld-possible">Возможная причина:</label>
-          <textarea id="fld-possible">${proj.possibleCause || ''}</textarea>
-        </div>
-        <div class="row">
-          <label for="fld-guidelines">Методические указания:</label>
-          <textarea id="fld-guidelines">${proj.guidelines || ''}</textarea>
-        </div>
-      `;
+        typeFields.innerHTML = `
+            <div class="row">
+                <label for="fld-description">Описание:</label>
+                <textarea id="fld-description">${proj.description || ''}</textarea>
+            </div>
+            <div class="row">
+                <label for="fld-possible">Возможная причина:</label>
+                <textarea id="fld-possible">${proj.possibleCause || ''}</textarea>
+            </div>
+            <div class="row">
+                <label for="fld-guidelines">Методические указания:</label>
+                <textarea id="fld-guidelines">${proj.guidelines || ''}</textarea>
+            </div>
+        `;
     } else if (type === 'template') {
       typeFields.innerHTML = `
         <div class="row">
@@ -217,10 +221,10 @@
           newContent.project.possibleCause = '';
           newContent.project.guidelines = '';
         } else if (type === 'rule') {
-          newContent.project.possibleCause = (document.getElementById('fld-possible')?.value || '').trim();
-          newContent.project.guidelines = (document.getElementById('fld-guidelines')?.value || '').trim();
-          newContent.project.description = '';
-          newContent.project.dimension = '';
+            newContent.project.description = (document.getElementById('fld-description')?.value || '').trim();
+            newContent.project.possibleCause = (document.getElementById('fld-possible')?.value || '').trim();
+            newContent.project.guidelines = (document.getElementById('fld-guidelines')?.value || '').trim();
+            newContent.project.dimension = '';
         } else if (type === 'template') {
           newContent.project.description = (document.getElementById('fld-description')?.value || '').trim();
           try {

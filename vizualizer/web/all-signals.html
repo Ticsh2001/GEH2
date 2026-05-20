@@ -261,6 +261,11 @@
             font-size: 13px;
             color: #aaa;
         }
+        .config-selector .button {
+            padding: 4px 12px;
+            font-size: 12px;
+            margin-left: 6px;
+        }
         #config-select {
             background: #0f3460;
             border: 1px solid #4a90d9;
@@ -282,6 +287,8 @@
                     <select id="config-select">
                         <option value="">Загрузка...</option>
                     </select>
+                    <button id="filter-rules" class="button primary">📋 Правила</button>
+                    <button id="filter-params" class="button primary">📊 Параметры</button>
                 </div>
                 <div class="user-info">
                     <strong>Пользователь:</strong>
@@ -302,6 +309,7 @@
             <button id="refresh-projects" class="button primary">🔄 Обновить</button>
             <button id="delete-selected" class="button delete" disabled>🗑️ Удалить выбранные</button>
             <button id="export-selected" class="button primary" disabled>📦 Экспортировать</button>
+            <button id="summary-btn" class="button primary" disabled>📋 Сводка</button>
         </div>
 
         <table id="projects-table">
@@ -475,6 +483,32 @@
             return NEON_PALETTE[randomIndex];
         }
 
+        let filterType = null; // 'rule', 'parameter' или null (все)
+
+        document.getElementById('filter-rules').addEventListener('click', function() {
+            if (filterType === 'rule') {
+                filterType = null;
+                this.classList.remove('active');
+            } else {
+                filterType = 'rule';
+                this.classList.add('active');
+                document.getElementById('filter-params').classList.remove('active');
+            }
+            filterProjects();
+        });
+
+        document.getElementById('filter-params').addEventListener('click', function() {
+            if (filterType === 'parameter') {
+                filterType = null;
+                this.classList.remove('active');
+            } else {
+                filterType = 'parameter';
+                this.classList.add('active');
+                document.getElementById('filter-rules').classList.remove('active');
+            }
+            filterProjects();
+        });
+
         async function loadProjects() {
             const body = document.getElementById('projects-body');
             body.innerHTML = `<tr><td colspan="11" class="empty-state">Загрузка...</td></tr>`;
@@ -517,7 +551,8 @@
                     const pTags = tagsData.assignments[project.filename] || [];
                     matchesTag = pTags.includes(activeTagFilter);
                 }
-                return matchesSearch && matchesAuthor && matchesTag;
+                const matchesType = !filterType || project.type === filterType;
+                return matchesSearch && matchesAuthor && matchesTag && matchesType;
             });
             sortProjects();
             renderTable();
