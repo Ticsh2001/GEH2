@@ -924,6 +924,12 @@
 
             for (const project of selected) {
                 projectIndex++;
+                const tagIds = tagsData.assignments[project.filename] || [];
+                const tagNames = tagIds.map(id => {
+                    const tag = tagsData.tags.find(t => t.id === id);
+                    return tag ? tag.name : '';
+                }).filter(Boolean).join('; ') || '—';
+
                 const proj = await fetchProjectData(project.filename);
                 if (!proj) continue;
 
@@ -948,12 +954,13 @@
 
                 if (inputSignals.length === 0) {
                     // Строка без входных сигналов
-                    rows.push([projectIndex, projectType, projectCode, projectDesc, '', '', '', '']);
+                    rows.push([projectIndex, tagNames, projectType, projectCode, projectDesc, '', '', '', '']);
                 } else {
                     inputSignals.forEach((sig, idx) => {
                         const isCreated = projectCodes.has(sig.name) ? 'созданный' : 'сигнал со станции';
                         rows.push([
                             projectIndex,
+                            tagNames,
                             projectType,
                             projectCode,
                             projectDesc,
@@ -994,7 +1001,7 @@
             let prevKey = null;
             let group = [];
             for (const row of rows) {
-                const key = row.slice(0, 4).join('|');
+                const key = row.slice(0, 5).join('|');
                 if (key !== prevKey) {
                     if (group.length) grouped.push(group);
                     group = [row];
@@ -1008,7 +1015,7 @@
             let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
             <head><meta charset="UTF-8"></head><body><table border="1">`;
             html += `<tr>
-                <th>№</th><th>Тип</th><th>KKS код</th><th>Описание</th>
+                <th>№</th><th>Система</th><th>Тип</th><th>KKS код</th><th>Описание</th>
                 <th>№</th><th>KKS используемого сигнала</th>
                 <th>Описание используемого сигнала</th><th>Тип сигнала</th>
             </tr>`;
@@ -1022,14 +1029,15 @@
                 html += `<td rowspan="${span}">${firstRow[1]}</td>`;
                 html += `<td rowspan="${span}">${firstRow[2]}</td>`;
                 html += `<td rowspan="${span}">${firstRow[3]}</td>`;
+                html += `<td rowspan="${span}">${firstRow[4]}</td>`;
                 // Первая строка сигнала
-                html += `<td>${firstRow[4]}</td><td>${firstRow[5]}</td><td>${firstRow[6]}</td><td>${firstRow[7]}</td>`;
+                html += `<td>${firstRow[5]}</td><td>${firstRow[6]}</td><td>${firstRow[7]}</td><td>${firstRow[8]}</td>`;
                 html += '</tr>';
 
                 for (let i = 1; i < group.length; i++) {
                     const r = group[i];
                     html += '<tr>';
-                    html += `<td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td>`;
+                    html += `<td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${r[8]}</td>`;
                     html += '</tr>';
                 }
             }
