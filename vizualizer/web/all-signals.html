@@ -678,6 +678,7 @@
 
             deleteBtn.disabled = totalSelected === 0;
             exportBtn.disabled = totalSelected === 0;
+            document.getElementById('summary-btn').disabled = (selectedProjects.size === 0);
 
             deleteBtn.textContent = totalSelected ? `🗑️ Удалить выбранные (${totalSelected})` : '🗑️ Удалить выбранные';
             exportBtn.textContent = totalSelected ? `📦 Экспортировать (${totalSelected})` : '📦 Экспортировать';
@@ -912,6 +913,145 @@
                 alert("Ошибка сохранения: " + e.message);
             }
         }
+
+        async function generateSummary() {
+            const selected = getSelectedProjectObjects();
+            if (!selected.length) return;
+
+            // Собираем данные: для каждого проекта загружаем JSON и извлекаем входные сигналы
+            const rows = [];
+            let projectIndex = 0;
+
+            for (const project of selected) {
+                projectIndex++;
+                const proj = await fetchProjectData(project.filename);
+                if (!proj) continue;
+
+                const projectType = proj.project?.type || '';
+                const projectCode = proj.project?.code || '';
+                const projectDesc = proj.project?.description || '';
+                const elements = proj.elements || {};
+
+                // Находим input-signals
+                const inputSignals = [];
+                for (const [id, el] of Object.entries(elements)) {
+                    if (el.type === 'input-signal' && el.props?.name) {
+                        inputSignals.push({
+                            name: el.props.name,
+                            description: el.props.description || ''
+                        });
+                    }
+                }
+
+                // Определяем тип сигнала: ищем в allProjects
+                const projectCodes = new Set(allProjects.map(p => p.code));
+
+                if (inputSignals.length === 0) {
+                    // Строка без входных сигналов
+                    rows.push([projectIndex, projectType, projectCode, projectDesc, '', '', '', '']);
+                } else {
+                    inputSignals.forEach((sig, idx) => {
+                        const isCreated = projectCodes.has(sig.name) ? 'созданный' : 'сигнал со станции';
+                        rows.push([
+                            projectIndex,
+                            projectType,
+                            projectCode,
+                            projectDesc,
+                            idx + 1,
+                            sig.name,
+                            sig.description,
+                            isCreated
+                        ]);
+                    });
+                }
+            }
+
+            if (rows.length === 0) {
+                alert('Нет данных для сводки.');
+                return;
+            }
+
+            // Генерируем Excel-файл через HTML-таблицу с rowspan
+            const html = buildSummaryExcelHtml(rows);
+            downloadAsExcel(html, 'Сводка.xls');
+        }
+
+        async function fetchProjectData(filename) {
+            try {
+                const url = addConfig(`/api/project/load/${encodeURIComponent(filename)}?source=projects`);
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('Failed');
+                return await resp.json();
+            } catch (e) {
+                console.error('Ошибка загрузки', filename, e);
+                return null;
+            }
+        }
+
+        function buildSummaryExcelHtml(rows) {
+            // Группируем строки по первым 4 колонкам, чтобы объединить ячейки
+            const grouped = [];
+            let prevKey = null;
+            let group = [];
+            for (const row of rows) {
+                const key = row.slice(0, 4).join('|');
+                if (key !== prevKey) {
+                    if (group.length) grouped.push(group);
+                    group = [row];
+                    prevKey = key;
+                } else {
+                    group.push(row);
+                }
+            }
+            if (group.length) grouped.push(group);
+
+            let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+            <head><meta charset="UTF-8"></head><body><table border="1">`;
+            html += `<tr>
+                <th>№</th><th>Тип</th><th>KKS код</th><th>Описание</th>
+                <th>№</th><th>KKS используемого сигнала</th>
+                <th>Описание используемого сигнала</th><th>Тип сигнала</th>
+            </tr>`;
+
+            for (const group of grouped) {
+                const firstRow = group[0];
+                const span = group.length;
+                html += '<tr>';
+                // Объединяемые ячейки (первые 4)
+                html += `<td rowspan="${span}">${firstRow[0]}</td>`;
+                html += `<td rowspan="${span}">${firstRow[1]}</td>`;
+                html += `<td rowspan="${span}">${firstRow[2]}</td>`;
+                html += `<td rowspan="${span}">${firstRow[3]}</td>`;
+                // Первая строка сигнала
+                html += `<td>${firstRow[4]}</td><td>${firstRow[5]}</td><td>${firstRow[6]}</td><td>${firstRow[7]}</td>`;
+                html += '</tr>';
+
+                for (let i = 1; i < group.length; i++) {
+                    const r = group[i];
+                    html += '<tr>';
+                    html += `<td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td>`;
+                    html += '</tr>';
+                }
+            }
+
+            html += '</table></body></html>';
+            return html;
+        }
+
+        function downloadAsExcel(html, filename) {
+            const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Обработчик кнопки "Сводка"
+        document.getElementById('summary-btn').addEventListener('click', generateSummary);
 
         document.getElementById('search-input').oninput = filterProjects;
 
