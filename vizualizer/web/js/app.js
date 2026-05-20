@@ -162,6 +162,7 @@ async loadConfigurations() {
         console.error('Ошибка загрузки конфигураций:', e);
         const select = document.getElementById('config-select');
         select.innerHTML = '<option value="">Ошибка</option>';
+        Settings.fetchSignals('*').catch(() => {});
     }
 },
 
