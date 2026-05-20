@@ -920,7 +920,7 @@ async def create_tag(payload: dict = Body(...), config: str = Query(...)):
     return new_tag
 
 @app.post("/api/tags/assign")
-async def assign_tags(payload: dict = Body(...), config: str = Query(...)):
+async def assign_tags(payload: dict = Body(...)):   # убрали config
     filename = payload.get("filename")
     tag_ids = payload.get("tagIds", [])
     if not filename:

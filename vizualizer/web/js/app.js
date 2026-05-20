@@ -131,6 +131,7 @@ async loadConfigurations() {
         const data = await resp.json();
         const configs = data.configurations || [];
         const select = document.getElementById('config-select');
+        if (!select) return;
         select.innerHTML = '';
         if (configs.length === 0) {
             select.innerHTML = '<option value="">Нет конфигураций</option>';
@@ -226,7 +227,16 @@ async autoLoadFromURL() {
     if (!filename) return;
 
     const source = params.get('source') || 'projects';
-    console.log(`[autoLoad] Загрузка: ${filename}, source: ${source}`);
+    const configFromUrl = params.get('config') || '';   // <-- добавить
+    if (configFromUrl) {
+        AppState.currentConfig = configFromUrl;
+        // если на странице есть селектор, обновим его (опционально)
+        const select = document.getElementById('config-select');
+        if (select) select.value = configFromUrl;
+    }
+
+    console.log(`[autoLoad] Загрузка: ${filename}, source: ${source}, config: ${configFromUrl}`);
+
 
     try {
         // Гарантируем что Settings готов

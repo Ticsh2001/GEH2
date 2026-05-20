@@ -416,9 +416,10 @@ async function openSignalProject(signalName) {
             return;
         }
 
-        // Формируем URL и открываем в новой вкладке
+        // Добавляем текущую конфигурацию в URL
         const source = match.source || 'projects';
-        const url = `${window.location.origin}${window.location.pathname}?load=${encodeURIComponent(match.filename)}&source=${encodeURIComponent(source)}`;
+        const config = AppState.currentConfig || '';
+        const url = `${window.location.origin}${window.location.pathname}?load=${encodeURIComponent(match.filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(config)}`;
 
         window.open(url, '_blank');
 
