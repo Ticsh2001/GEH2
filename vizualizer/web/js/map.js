@@ -21,10 +21,16 @@ class ProjectMap {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
 
-        this.nodeWidth = 180;
+        this.nodeMinWidth = 150;
+        this.nodeMaxWidth = 400;
         this.nodeHeight = 65;
         this.levelSpacing = 320;
         this.nodeSpacing = 70;
+
+        // Перетаскивание узлов
+        this.draggingNode = null;
+        this.dragOffsetX = 0;
+        this.dragOffsetY = 0;
 
         // Конфигурация из URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -84,12 +90,52 @@ class ProjectMap {
         const btnCons = document.getElementById('btn-mode-consumers');
         if (btnDeps) btnDeps.addEventListener('click', () => { this.viewMode = 'deps'; this.loadData(); });
         if (btnCons) btnCons.addEventListener('click', () => { this.viewMode = 'consumers'; this.loadData(); });
+
+        const btnFilter = document.getElementById('btn-filter-inputs');
+        if (btnFilter) {
+            btnFilter.addEventListener('click', () => {
+                this.onlyDirectInputs = !this.onlyDirectInputs;
+                btnFilter.classList.toggle('active', this.onlyDirectInputs);
+                this.applyVisibility();
+                this.draw();
+            });
+        }
     }
+
+    applyVisibility() {
+    if (!this.onlyDirectInputs) {
+        // Показываем все узлы и связи
+        this.nodes.forEach(n => n.visible = true);
+        this.connections.forEach(c => c.visible = true);
+        return;
+    }
+
+    // Скрываем все, затем покажем только нужные
+    this.nodes.forEach(n => n.visible = false);
+    this.connections.forEach(c => c.visible = false);
+
+    // Ищем узел текущего проекта (если открыта карта одного проекта)
+    const projectNode = this.nodes.find(n => n.name === this._currentProjectCode);
+    if (!projectNode) return;
+
+    projectNode.visible = true;
+
+    // Прямые входы: все соединения, которые идут ОТ какого-то узла К проекту
+    this.connections.forEach(conn => {
+        if (conn.to === projectNode) {
+            conn.from.visible = true;
+            conn.visible = true;
+        }
+    });
+}
 
     // =========================================================================
     // ЗАГРУЗКА ДАННЫХ
     // =========================================================================
     async loadData() {
+        this.onlyDirectInputs = false;
+        const btnFilter = document.getElementById('btn-filter-inputs');
+        if (btnFilter) btnFilter.classList.remove('active');        
         this.loading.style.display = 'block';
         try {
             const urlParams = new URLSearchParams(window.location.search);
@@ -437,16 +483,49 @@ class ProjectMap {
         this.levels.get(level).push(node);
     }
 
-    positionNodes() {
+positionNodes() {
+        // Вычисляем ширину для каждого узла
+        this.nodes.forEach(node => {
+            node.width = this.calcNodeWidth(node.name);
+            node.height = this.nodeHeight;   // фиксированная высота
+        });
+
+        // Раскладываем по уровням с учётом индивидуальной ширины
         const maxLevel = Math.max(...this.levels.keys(), 0);
         for (let level = 0; level <= maxLevel; level++) {
             const nodes = this.levels.get(level) || [];
-            const startY = -(nodes.length * (this.nodeHeight + this.nodeSpacing)) / 2;
-            nodes.forEach((node, index) => {
-                node.x = level * this.levelSpacing;
-                node.y = startY + index * (this.nodeHeight + this.nodeSpacing);
+            // Вычисляем суммарную высоту для этого уровня
+            const totalHeight = nodes.length * (this.nodeHeight + this.nodeSpacing) - this.nodeSpacing;
+            let y = -totalHeight / 2;
+            nodes.forEach(node => {
+                node.y = y;
+                y += this.nodeHeight + this.nodeSpacing;
             });
+
+            // Размещаем по X: отступ от предыдущего уровня с учётом максимальной ширины узлов на уровне
+            if (level === 0) {
+                nodes.forEach(node => node.x = 0);
+            } else {
+                const prevLevel = this.levels.get(level - 1) || [];
+                const prevMaxRight = prevLevel.length > 0
+                    ? Math.max(...prevLevel.map(n => n.x + n.width))
+                    : 0;
+                nodes.forEach(node => node.x = prevMaxRight + this.levelSpacing);
+            }
         }
+    }
+
+    // Вычисление ширины узла по тексту
+    calcNodeWidth(text) {
+        if (!text) return this.nodeMinWidth;
+        this.ctx.save();
+        this.ctx.font = 'bold 14px "Segoe UI", sans-serif';
+        const textWidth = this.ctx.measureText(text).width;
+        this.ctx.restore();
+        let w = textWidth + 50; // отступы
+        w = Math.max(this.nodeMinWidth, w);
+        w = Math.min(this.nodeMaxWidth, w);
+        return w;
     }
 
     // =========================================================================
@@ -462,8 +541,10 @@ class ProjectMap {
         ctx.scale(this.zoom, this.zoom);
 
         this.drawGrid();
-        this.connections.forEach(conn => this.drawConnection(conn));
-        this.nodes.forEach(node => this.drawNode(node));
+        //this.connections.forEach(conn => this.drawConnection(conn));
+        //this.nodes.forEach(node => this.drawNode(node));
+        this.connections.filter(c => c.visible !== false).forEach(conn => this.drawConnection(conn));
+        this.nodes.filter(n => n.visible !== false).forEach(node => this.drawNode(node));
 
         ctx.restore();
 
@@ -500,8 +581,8 @@ class ProjectMap {
         const ctx = this.ctx;
         const x = node.x;
         const y = node.y;
-        const w = this.nodeWidth;
-        const h = this.nodeHeight;
+        const w = node.width;
+        const h = node.height;
 
         let fillColor = '#0f3460';
         let borderColor = '#4a90d9';
@@ -620,12 +701,14 @@ class ProjectMap {
         ctx.font = 'bold 14px "Segoe UI", sans-serif';
         ctx.fillStyle = textColor;
 
-        let displayName = node.name;
-        const maxChars = node.type === 'base-signal' ? 16 : 18;
-        if (displayName.length > maxChars) {
-            displayName = displayName.substring(0, maxChars - 1) + '…';
-        }
-        ctx.fillText(displayName, x + w / 2, y + h / 2 + 5);
+        //let displayName = node.name;
+        //const maxChars = node.type === 'base-signal' ? 16 : 18;
+        //if (displayName.length > maxChars) {
+        //    displayName = displayName.substring(0, maxChars - 1) + '…';
+        //}
+        //ctx.fillText(displayName, x + w / 2, y + h / 2 + 5);
+        ctx.fillText(node.name, x + w/2, y + h/2 + 5);
+
 
         if (node.type === 'project') {
             ctx.font = '10px "Segoe UI", sans-serif';
@@ -666,10 +749,10 @@ class ProjectMap {
         const from = conn.from;
         const to = conn.to;
 
-        let fromX = from.x + this.nodeWidth;
-        let fromY = from.y + this.nodeHeight / 2;
-        let toX = to.x;
-        let toY = to.y + this.nodeHeight / 2;
+        const fromX = from.x + from.width;
+        const fromY = from.y + from.height / 2;
+        const toX = to.x;
+        const toY = to.y + to.height / 2;
 
         let strokeColor = '#4a90d9';
         let lineWidth = 2;
@@ -710,9 +793,13 @@ class ProjectMap {
         const canvasY = (y - this.offsetY) / this.zoom;
 
         const clickedNode = this.getNodeAt(canvasX, canvasY);
+
         if (clickedNode) {
-            if (e.button === 0) {
-                this.selectedNode = this.selectedNode === clickedNode ? null : clickedNode;
+            if (e.button === 0) { // левая кнопка
+                this.draggingNode = clickedNode;
+                this.dragOffsetX = canvasX - clickedNode.x;
+                this.dragOffsetY = canvasY - clickedNode.y;
+                this.selectedNode = clickedNode; // можно и выделить
                 this._depCacheFor = null;
                 this._depCache = null;
                 this.draw();
@@ -734,6 +821,15 @@ class ProjectMap {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
+        if (this.draggingNode) {
+            const canvasX = (x - this.offsetX) / this.zoom;
+            const canvasY = (y - this.offsetY) / this.zoom;
+            this.draggingNode.x = canvasX - this.dragOffsetX;
+            this.draggingNode.y = canvasY - this.dragOffsetY;
+            this.draw();
+            return;
+        }
+
         if (this.isDragging) {
             const dx = x - this.lastMouseX;
             const dy = y - this.lastMouseY;
@@ -748,15 +844,16 @@ class ProjectMap {
             const hoveredNode = this.getNodeAt(canvasX, canvasY);
             if (hoveredNode !== this.hoveredNode) {
                 this.hoveredNode = hoveredNode;
-                this.canvas.style.cursor = hoveredNode ? 'pointer' : 'grab';
+                this.canvas.style.cursor = hoveredNode ? 'move' : 'grab';
                 this.draw();
             }
         }
     }
 
     handleMouseUp(e) {
+        this.draggingNode = null;
         this.isDragging = false;
-        this.canvas.style.cursor = this.hoveredNode ? 'pointer' : 'grab';
+        this.canvas.style.cursor = this.hoveredNode ? 'move' : 'grab';
     }
 
     handleWheel(e) {
@@ -791,8 +888,10 @@ class ProjectMap {
 
     getNodeAt(x, y) {
         for (const node of this.nodes) {
-            if (x >= node.x && x <= node.x + this.nodeWidth &&
-                y >= node.y && y <= node.y + this.nodeHeight) {
+            const w = node.width || this.nodeMinWidth;
+            const h = node.height || this.nodeHeight;
+            if (x >= node.x && x <= node.x + w &&
+                y >= node.y && y <= node.y + h) {
                 return node;
             }
         }
@@ -812,10 +911,12 @@ class ProjectMap {
         let maxX = -Infinity, maxY = -Infinity;
 
         for (const node of this.nodes) {
+            const w = node.width || this.nodeMinWidth;
+            const h = node.height || this.nodeHeight;
             minX = Math.min(minX, node.x);
             minY = Math.min(minY, node.y);
-            maxX = Math.max(maxX, node.x + this.nodeWidth);
-            maxY = Math.max(maxY, node.y + this.nodeHeight);
+            maxX = Math.max(maxX, node.x + w);
+            maxY = Math.max(maxY, node.y + h);
         }
 
         const padding = 50;
@@ -886,6 +987,9 @@ class ProjectMap {
     }
 
     updateLevelInfo() {
+        const detailsEl = document.getElementById('level-details');
+        if (!detailsEl) return; 
+
         const levelCounts = new Map();
         for (const node of this.nodes) {
             const level = node.level;
