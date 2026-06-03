@@ -230,6 +230,8 @@ async autoLoadFromURL() {
     const configFromUrl = params.get('config') || '';   // <-- добавить
     if (configFromUrl) {
         AppState.currentConfig = configFromUrl;
+        localStorage.setItem('lse_config', configFromUrl);       // ← сохраняем
+
         // если на странице есть селектор, обновим его (опционально)
         const select = document.getElementById('config-select');
         if (select) select.value = configFromUrl;
@@ -323,7 +325,8 @@ openSignalVisualizer() {
             const params = new URLSearchParams();
             params.set('session', token);
             params.set('api_url', apiUrl);
-            params.set('config', AppState.currentConfig || ''); 
+            params.set('config', AppState.currentConfig || '');
+            console.log('Передаём config в визуализатор:', AppState.currentConfig);
             
             const visualizerUrl = `${visualizerBase}/?${params.toString()}`;
             console.log('Opening visualizer:', visualizerUrl);

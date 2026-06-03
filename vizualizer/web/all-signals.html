@@ -310,6 +310,8 @@
             <button id="delete-selected" class="button delete" disabled>🗑️ Удалить выбранные</button>
             <button id="export-selected" class="button primary" disabled>📦 Экспортировать</button>
             <button id="summary-btn" class="button primary" disabled>📋 Сводка</button>
+            <button id="replace-btn" class="button primary" disabled>🔄 Заменить</button>
+
         </div>
 
         <table id="projects-table">
@@ -364,6 +366,24 @@
                 <button class="button" onclick="closeExportFormatModal()">Отмена</button>
                 <button class="button primary" id="export-excel-btn">📊 Excel</button>
                 <button class="button primary" id="export-word-btn">📝 Word</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="replace-modal-overlay" class="tag-modal-overlay">
+        <div class="tag-modal">
+            <h3>Заменить KKS в выделенных проектах</h3>
+            <div class="modal-row">
+                <label for="replace-old">Старый KKS код:</label>
+                <input type="text" id="replace-old" placeholder="Например: ABC123">
+            </div>
+            <div class="modal-row">
+                <label for="replace-new">Новый KKS код:</label>
+                <input type="text" id="replace-new" placeholder="Например: XYZ789">
+            </div>
+            <div class="modal-actions">
+                <button class="button" onclick="closeReplaceModal()">Отмена</button>
+                <button class="button primary" id="replace-execute-btn">Заменить</button>
             </div>
         </div>
     </div>
@@ -679,6 +699,7 @@
             deleteBtn.disabled = totalSelected === 0;
             exportBtn.disabled = totalSelected === 0;
             document.getElementById('summary-btn').disabled = (selectedProjects.size === 0);
+            document.getElementById('replace-btn').disabled = (selectedProjects.size === 0);
 
             deleteBtn.textContent = totalSelected ? `🗑️ Удалить выбранные (${totalSelected})` : '🗑️ Удалить выбранные';
             exportBtn.textContent = totalSelected ? `📦 Экспортировать (${totalSelected})` : '📦 Экспортировать';
@@ -1263,6 +1284,131 @@
             await loadConfigurations();
             await loadProjects();
         })();
+
+        // ---------- Замена KKS ----------
+        function replaceKksInJson(obj, oldCode, newCode) {
+            if (typeof obj === 'string') {
+                // Экранируем oldCode для использования в регулярном выражении
+                const escaped = oldCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Границы: перед oldCode не должно быть буквы/цифры/подчёркивания,
+                // после него – тоже не должно быть буквы/цифры/подчёркивания.
+                const re = new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g');
+                return obj.replace(re, newCode);
+            } else if (Array.isArray(obj)) {
+                return obj.map(item => replaceKksInJson(item, oldCode, newCode));
+            } else if (typeof obj === 'object' && obj !== null) {
+                const result = {};
+                for (const key in obj) {
+                    result[key] = replaceKksInJson(obj[key], oldCode, newCode);
+                }
+                return result;
+            }
+            return obj;
+        }
+
+
+
+        let pendingReplaceFilenames = [];
+
+        function openReplaceModal() {
+            const filenames = [...selectedProjects];
+            if (!filenames.length) return;
+            pendingReplaceFilenames = filenames;
+            document.getElementById('replace-modal-overlay').style.display = 'flex';
+        }
+
+        function closeReplaceModal() {
+            document.getElementById('replace-modal-overlay').style.display = 'none';
+            pendingReplaceFilenames = [];
+        }
+
+        async function executeReplace() {
+            const oldCode = document.getElementById('replace-old').value.trim();
+            const newCode = document.getElementById('replace-new').value.trim();
+            if (!oldCode || !newCode) {
+                alert('Введите старый и новый коды.');
+                return;
+            }
+            if (oldCode === newCode) {
+                alert('Коды совпадают – замена не требуется.');
+                closeReplaceModal();
+                return;
+            }
+
+            const filenames = pendingReplaceFilenames;
+            if (!filenames.length) {
+                closeReplaceModal();
+                return;
+            }
+
+            closeReplaceModal();
+
+            let succeeded = 0;
+            const failed = [];
+            const total = filenames.length;
+            console.log(`Начинаем замену "${oldCode}" → "${newCode}" в ${total} проектах`);
+
+            for (const filename of filenames) {
+                try {
+                    // 1. Загружаем проект как JSON (не как строку)
+                    const loadUrl = addConfig(`/api/project/load/${encodeURIComponent(filename)}?source=projects`);
+                    const resp = await fetch(loadUrl);
+                    if (!resp.ok) throw new Error(`Ошибка загрузки (${resp.status})`);
+                    let content = await resp.json();
+
+                    // 2. Безопасная замена
+                    const newContent = replaceKksInJson(content, oldCode, newCode);
+
+                    // 3. Сохраняем, если были изменения
+                    if (JSON.stringify(content) === JSON.stringify(newContent)) {
+                        console.log(`${filename}: вхождений не найдено`);
+                        succeeded++;
+                        continue;
+                    }
+
+                    const saveUrl = addConfig('/api/project/save');
+                    const saveResp = await fetch(saveUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            filename: filename,
+                            target: 'projects',
+                            content: newContent
+                        })
+                    });
+                    if (!saveResp.ok) {
+                        const err = await saveResp.json().catch(() => ({ detail: saveResp.status }));
+                        throw new Error(err.detail || 'Ошибка сохранения');
+                    }
+
+                    console.log(`${filename}: успешно заменён и сохранён`);
+                    succeeded++;
+                } catch (e) {
+                    console.error(`${filename}: ошибка – ${e.message}`);
+                    failed.push(`${filename}: ${e.message}`);
+                }
+            }
+
+            let msg = `Обработано проектов: ${total}\nУспешно: ${succeeded}`;
+            if (failed.length) {
+                msg += `\n\nОшибки:\n${failed.join('\n')}`;
+            }
+            alert(msg);
+
+            // Обновляем список проектов
+            selectedProjects.clear();
+            await loadProjects();
+        }
+
+        // Привязка кнопок
+        document.getElementById('replace-btn').addEventListener('click', openReplaceModal);
+        document.getElementById('replace-execute-btn').addEventListener('click', executeReplace);
+        document.getElementById('replace-modal-overlay').addEventListener('click', function(e) {
+            if (e.target === this) closeReplaceModal();
+        });
+
+
+
     </script>
 </body>
 </html>

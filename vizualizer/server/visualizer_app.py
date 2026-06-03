@@ -144,6 +144,7 @@ def extract_table_names_from_code(code_str: str) -> set[str]:
     for rx in (rx_q_interp, rx_id_interp, rx_q_get, rx_id_get):
         for m in rx.finditer(code_str):
             names.add(m.group('n').strip())
+    st.info(f"Таблицы из кода: {names}")
 
     return names
 
@@ -975,6 +976,7 @@ if signal_codes and st.session_state.signals_data is None:
         st.warning(f"⚠️ Не найдены: {', '.join(not_found_codes)}")
 
 if TABLES:
+    st.info(f"Конфигурация: {config}, таблицы для загрузки: {TABLES}")
     for t in TABLES:
         try:
             load_table_df(t)
