@@ -310,6 +310,7 @@
             <button id="delete-selected" class="button delete" disabled>🗑️ Удалить выбранные</button>
             <button id="export-selected" class="button primary" disabled>📦 Экспортировать</button>
             <button id="summary-btn" class="button primary" disabled>📋 Сводка</button>
+            <button id="syntax-check-btn" class="button primary">✅ Проверка</button>
             <button id="replace-btn" class="button primary" disabled>🔄 Заменить</button>
 
         </div>
@@ -1406,6 +1407,10 @@
         document.getElementById('replace-modal-overlay').addEventListener('click', function(e) {
             if (e.target === this) closeReplaceModal();
         });
+
+        document.getElementById('syntax-check-btn').addEventListener('click', () => {
+            window.open('/syntax_checker.html', '_blank');
+            });
 
 
 

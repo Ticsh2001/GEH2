@@ -1,6 +1,7 @@
 # main.py — версия с поддержкой конфигураций
 
 import os
+import re
 import json
 import uuid
 import pickle
@@ -9,9 +10,13 @@ from typing import Dict, List, Any, Optional
 from io import BytesIO
 from update_projects import update_projects_if_templates_changed
 from datetime import datetime
+import io
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1149,9 +1154,173 @@ async def get_visualizer_state(session_token: str) -> VisualizerStateResponse:
 async def get_tags_list():
     return load_tags_data()
 
+
+@app.post("/api/check-syntax")
+async def check_syntax(file: UploadFile = File(...)):
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Поддерживаются только файлы Excel (.xlsx, .xls)")
+
+    contents = await file.read()
+    try:
+        df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
+
+    code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code', 'формула']), None)
+    signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'используемые параметры', 'used signals']), None)
+
+    if not code_col:
+        raise HTTPException(status_code=400, detail="В файле не найден столбец 'Код'")
+    if not signals_col:
+        raise HTTPException(status_code=400, detail="В файле не найден столбец 'Используемые сигналы'")
+
+    remarks = []
+    for idx, row in df.iterrows():
+        code = str(row[code_col]) if pd.notna(row[code_col]) else ""
+        signals_str = str(row[signals_col]) if pd.notna(row[signals_col]) else ""
+        input_signals = [s.strip() for s in re.split(r'[;,]', signals_str) if s.strip()]
+
+        row_remarks = []
+        row_num = idx + 2
+
+        if not code:
+            row_remarks.append("Пустой код")
+            remarks.append({"row": row_num, "remarks": row_remarks})
+            continue
+
+        # 1. Скобки и кавычки
+        if code.count('(') != code.count(')'):
+            row_remarks.append("Не совпадает количество открывающих и закрывающих скобок")
+        if code.count("'") % 2 != 0:
+            row_remarks.append("Нечётное количество одинарных кавычек")
+        if code.count('"') % 2 != 0:
+            row_remarks.append("Нечётное количество двойных кавычек")
+
+        # 2. Недопустимые символы
+        allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.,;:!?+-*/%<>=&|^()[]{}§'\"\n\r\t ")
+        invalid_chars = set(code) - allowed_chars
+        if invalid_chars:
+            row_remarks.append(f"Недопустимые символы: {', '.join(repr(c) for c in invalid_chars)}")
+
+        # 3. Унарный минус перед идентификатором (не перед числом и не перед скобкой)
+        if re.search(r'(?<![a-zA-Z0-9_§])\s*-\s*(?=[A-Za-z_§])', code):
+            row_remarks.append("Обнаружен унарный минус перед сигналом. При необходимости замените на '-1*'")
+
+        # 4. Логические операторы
+        for op in ['AND', 'OR', 'NOT']:
+            if re.search(rf'\b{op}\b', code):
+                row_remarks.append(f"Логический оператор {op} – рекомендуется заменить на {'&&' if op=='AND' else '||' if op=='OR' else '!'}")
+
+        # 5. Аргументы HISTORY*/PREV в кавычках
+        history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
+        for fn in history_funcs:
+            pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
+            for m in pattern.finditer(code):
+                arg = m.group('arg').strip()
+                if arg and arg[0].isdigit() and (m.group(1) is None or m.group(1) == ''):
+                    row_remarks.append(f"{fn}: аргумент '{arg}' должен быть в кавычках (начинается с цифры)")
+
+        # 5b. Первый аргумент INTERPOLATE/GETPOINT – проверка наличия в используемых сигналах
+        for fn in ['INTERPOLATE', 'GETPOINT']:
+            pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
+            for m in pattern.finditer(code):
+                arg = m.group('arg').strip()
+                if arg and arg not in input_signals:
+                    row_remarks.append(f"Таблицы '{arg}' нет в используемых параметрах")
+
+        # 6. Неизвестные функции/опечатки (исключаем токены внутри строк)
+        known_functions = {'WHEN','ABS','EXP','POW','LOG','LOG10','MIN','MAX','AVG','MED','ROUND',
+                          'GETPOINT','INTERPOLATE','PREV','HISTORYAVG','HISTORYCOUNT','HISTORYSUM',
+                          'HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT'}
+
+        string_literals = re.findall(r'[\'"].*?[\'"]', code)
+
+        for token in re.findall(r'[A-Z][A-Z0-9_]*', code):
+            if token in known_functions or token in ('AND','OR','NOT','X','Y'):
+                continue
+            if token in input_signals:
+                continue
+            if re.match(r'P\d', token):
+                continue
+            if any(token in s for s in string_literals):
+                continue
+            if any(token in sig.replace('§', '_') for sig in input_signals):
+                continue
+            row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
+
+        # 7. Проверка наличия сигналов
+        for sig in input_signals:
+            sig_underscored = sig.replace('§', '_')
+            found = (sig in code) or (sig_underscored in code)
+            if not found and sig[0].isdigit():
+                found = ('P' + sig in code) or ('P' + sig_underscored in code)
+            if not found:
+                row_remarks.append(f"Сигнал '{sig}' не найден в выражении")
+
+        # 8. Проверка префикса P для сигналов, начинающихся с цифры
+        for sig in input_signals:
+            if not sig[0].isdigit():
+                continue
+            sig_u = sig.replace('§', '_')
+            # Ищем в коде упоминание сигнала без префикса P и не внутри кавычек (внутри функций оборачивается в кавычки)
+            # Для этого удалим из кода все строковые литералы (в кавычках) и будем искать чистый идентификатор
+            code_without_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+            # Составляем регулярку: граница слова, само имя сигнала (с учётом возможного _ вместо §), граница слова
+            # Но нужно учесть, что имя сигнала может содержать цифры, буквы, §, _. Используем re.escape
+            pattern_sig = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(sig_u)}(?![A-Za-z0-9_])')
+            if pattern_sig.search(code_without_strings):
+                row_remarks.append(f"Сигнал '{sig}' начинается с цифры – необходимо добавить префикс P")
+
+        if row_remarks:
+            remarks.append({"row": row_num, "remarks": row_remarks})
+
+    return remarks
+
+@app.post("/api/export-remarks")
+async def export_remarks(data: List[Dict[str, Any]] = Body(...)):
+    """Принимает массив замечаний и возвращает Excel-файл."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Замечания"
+    ws.append(["Строка", "Замечания"])
+    for item in data:
+        remarks_text = "\n".join(item.get("remarks", []))
+        ws.append([item.get("row", ""), remarks_text])
+    # Автоширина и перенос текста
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    lines = str(cell.value).split('\n')
+                    max_line = max(len(line) for line in lines)
+                    if max_line > max_length:
+                        max_length = max_line
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 80)
+        ws.column_dimensions[col_letter].width = adjusted_width
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=syntax_remarks.xlsx"}
+    )
+
+
+
 # -----------------------------------------------------------------------------
 # Статические файлы (фронтенд)
 # -----------------------------------------------------------------------------
 
 WEB_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "web"))
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+print(f"[DEBUG] WEB_DIR: {WEB_DIR}")
+for f in os.listdir(WEB_DIR):
+    print(f"  {repr(f)}  | exists: {os.path.exists(os.path.join(WEB_DIR, f))}")

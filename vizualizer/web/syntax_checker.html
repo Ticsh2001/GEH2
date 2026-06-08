@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Проверка синтаксиса кода</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; padding: 30px; }
+        h1 { color: #e94560; }
+        .upload-area { background: #16213e; border: 2px dashed #4a90d9; border-radius: 10px; padding: 30px; text-align: center; margin: 20px 0; }
+        #result-table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #0a0a1a; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #2a2a4e; text-align: left; }
+        th { background: #0f3460; font-weight: 600; }
+        .error { color: #f87171; }
+        .warning { color: #fbbf24; }
+        button { background: #4a90d9; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; margin-right: 10px; }
+        button:hover { background: #e94560; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .download-btn { background: #4ade80; color: #000; display: none; }
+        .download-btn:hover { background: #22c55e; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Проверка синтаксиса сгенерированного кода</h1>
+    <p>Загрузите Excel-файл, полученный при экспорте параметров/правил.</p>
+    <input type="file" id="fileInput" accept=".xlsx, .xls">
+    <button onclick="checkSyntax()">Проверить</button>
+    <button id="downloadBtn" class="download-btn" onclick="downloadExcel()">📥 Скачать Excel</button>
+
+    <div id="results"></div>
+
+    <script>
+        let currentRemarks = [];
+
+        async function checkSyntax() {
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) {
+                alert('Выберите файл');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            const resp = await fetch('/api/check-syntax', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({detail: resp.statusText}));
+                alert('Ошибка: ' + err.detail);
+                return;
+            }
+
+            currentRemarks = await resp.json();
+            displayResults(currentRemarks);
+        }
+
+        function displayResults(remarks) {
+            const resultsDiv = document.getElementById('results');
+            const downloadBtn = document.getElementById('downloadBtn');
+
+            if (!remarks.length) {
+                resultsDiv.innerHTML = '<p style="color:#4ade80;">✅ Замечаний не найдено.</p>';
+                downloadBtn.style.display = 'none';
+                return;
+            }
+
+            downloadBtn.style.display = 'inline-block';
+
+            let html = '<table id="result-table"><thead><tr><th>Строка</th><th>Замечания</th></tr></thead><tbody>';
+            remarks.forEach(r => {
+                html += `<tr>
+                    <td>${r.row}</td>
+                    <td>${r.remarks.map(rm => `<div class="error">• ${rm}</div>`).join('')}</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            resultsDiv.innerHTML = html;
+        }
+
+async function downloadExcel() {
+    if (!currentRemarks.length) {
+        alert('Нет данных для сохранения');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/export-remarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentRemarks)
+        });
+        if (!resp.ok) throw new Error('Ошибка сервера');
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'syntax_remarks.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Не удалось сохранить файл: ' + e.message);
+    }
+}
+    </script>
+</body>
+</html>
