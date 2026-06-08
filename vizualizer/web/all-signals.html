@@ -936,74 +936,290 @@
             }
         }
 
-        async function generateSummary() {
-            const selected = getSelectedProjectObjects();
-            if (!selected.length) return;
+        let summaryData = [];
+        let maxDepth = 0;
 
-            // Собираем данные: для каждого проекта загружаем JSON и извлекаем входные сигналы
-            const rows = [];
-            let projectIndex = 0;
+async function generateSummary() {
+    const selected = getSelectedProjectObjects();
+    if (!selected.length) return;
 
-            for (const project of selected) {
-                projectIndex++;
-                const tagIds = tagsData.assignments[project.filename] || [];
-                const tagNames = tagIds.map(id => {
-                    const tag = tagsData.tags.find(t => t.id === id);
-                    return tag ? tag.name : '';
-                }).filter(Boolean).join('; ') || '—';
+    const projectCodes = new Set(allProjects.map(p => p.code));
+    const summaryProjects = []; // массив объектов { index, type, code, desc, tags, tree }
 
-                const proj = await fetchProjectData(project.filename);
-                if (!proj) continue;
+    for (const project of selected) {
+        const projData = await fetchProjectData(project.filename);
+        if (!projData) continue;
 
-                const projectType = proj.project?.type || '';
-                const projectCode = proj.project?.code || '';
-                const projectDesc = proj.project?.description || '';
-                const elements = proj.elements || {};
+        const projectType = projData.project?.type || '';
+        const projectCode = projData.project?.code || '';
+        const projectDesc = projData.project?.description || '';
+        const tagIds = tagsData.assignments[project.filename] || [];
+        const tagNames = tagIds.map(id => {
+            const tag = tagsData.tags.find(t => t.id === id);
+            return tag ? tag.name : '';
+        }).filter(Boolean).join('; ') || '—';
 
-                // Находим input-signals
-                const inputSignals = [];
-                for (const [id, el] of Object.entries(elements)) {
-                    if (el.type === 'input-signal' && el.props?.name) {
-                        inputSignals.push({
-                            name: el.props.name,
-                            description: el.props.description || ''
-                        });
+        const elements = projData.elements || {};
+        const inputSignals = [];
+        for (const el of Object.values(elements)) {
+            if (el.type === 'input-signal' && el.props?.name) {
+                inputSignals.push(el.props.name);
+            }
+        }
+
+        // Рекурсивно строим дерево зависимостей
+        const tree = await buildDependencyTree(inputSignals, projectCodes, 0);
+        summaryProjects.push({
+            index: summaryProjects.length + 1,
+            type: projectType,
+            code: projectCode,
+            desc: projectDesc,
+            tags: tagNames,
+            tree: tree
+        });
+    }
+
+    if (!summaryProjects.length) {
+        alert('Нет данных для сводки.');
+        return;
+    }
+
+    // Вычисляем максимальную глубину дерева
+    const getDepth = (nodes) => {
+        if (!nodes || nodes.length === 0) return 0;
+        let maxChildDepth = 0;
+        for (const node of nodes) {
+            if (node.children && node.children.length > 0) {
+                maxChildDepth = Math.max(maxChildDepth, getDepth(node.children));
+            }
+        }
+        return 1 + maxChildDepth;
+    };
+    let maxDepth = 0;
+    summaryProjects.forEach(p => {
+        maxDepth = Math.max(maxDepth, getDepth(p.tree));
+    });
+
+    // Строим HTML-таблицу
+    const html = buildSummaryTableHtml(summaryProjects, maxDepth);
+    downloadAsExcel(html, 'Сводка.xls');
+}
+
+function buildSummaryTableHtml(projects, maxDepth) {
+    // Строим плоские строки так же, как раньше
+    const allRows = [];
+    const headerCols = ['№', 'Тип', 'KKS код', 'Описание', 'Система'];
+    for (let level = 1; level <= maxDepth; level++) {
+        headerCols.push(`KKS уровень ${level}`, `Описание уровень ${level}`, `Тип уровень ${level}`);
+    }
+
+    for (const proj of projects) {
+        const base = [proj.index, proj.type, proj.code, proj.desc, proj.tags];
+        const paths = generatePaths(proj.tree);
+        if (paths.length === 0) {
+            const row = [...base];
+            while (row.length < headerCols.length) row.push('');
+            allRows.push(row);
+        } else {
+            for (const path of paths) {
+                const row = [...base];
+                for (const node of path) {
+                    row.push(node.kks, node.description, node.type);
+                }
+                while (row.length < headerCols.length) {
+                    row.push('');
+                }
+                allRows.push(row);
+            }
+        }
+    }
+
+    // Вычисляем rowspan для всех ячеек с учётом иерархии
+    const spans = [];
+    const numCols = headerCols.length;
+    for (let r = 0; r < allRows.length; r++) {
+        spans[r] = new Array(numCols).fill(0);
+    }
+
+    // Для каждой колонки слева направо
+    for (let c = 0; c < numCols; c++) {
+        let r = 0;
+        while (r < allRows.length) {
+            // Если ячейка уже покрыта сверху – пропускаем
+            if (spans[r][c] !== 0) {
+                r++;
+                continue;
+            }
+            // Считаем, сколько строк подряд имеют одинаковые значения во всех колонках от 0 до c
+            let cnt = 1;
+            while (r + cnt < allRows.length) {
+                let same = true;
+                for (let k = 0; k <= c; k++) {
+                    if (allRows[r][k] !== allRows[r + cnt][k]) {
+                        same = false;
+                        break;
                     }
                 }
+                if (!same) break;
+                cnt++;
+            }
+            spans[r][c] = cnt;
+            for (let i = 1; i < cnt; i++) {
+                spans[r + i][c] = 0; // эти ячейки будут скрыты
+            }
+            r += cnt;
+        }
+    }
 
-                // Определяем тип сигнала: ищем в allProjects
-                const projectCodes = new Set(allProjects.map(p => p.code));
+    // Генерируем HTML с rowspan
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="UTF-8"></head><body><table border="1">`;
+    // Заголовки
+    html += '<tr>';
+    headerCols.forEach(h => html += `<th>${h}</th>`);
+    html += '</tr>';
 
-                if (inputSignals.length === 0) {
-                    // Строка без входных сигналов
-                    rows.push([projectIndex, tagNames, projectType, projectCode, projectDesc, '', '', '', '']);
-                } else {
-                    inputSignals.forEach((sig, idx) => {
-                        const isCreated = projectCodes.has(sig.name) ? 'созданный' : 'сигнал со станции';
-                        rows.push([
-                            projectIndex,
-                            tagNames,
-                            projectType,
-                            projectCode,
-                            projectDesc,
-                            idx + 1,
-                            sig.name,
-                            sig.description,
-                            isCreated
-                        ]);
-                    });
+    // Данные
+    for (let r = 0; r < allRows.length; r++) {
+        html += '<tr>';
+        for (let c = 0; c < numCols; c++) {
+            if (spans[r][c] === 0) continue; // ячейка скрыта из-за rowspan сверху
+            const span = spans[r][c];
+            html += `<td${span > 1 ? ` rowspan="${span}"` : ''}>${allRows[r][c] || ''}</td>`;
+        }
+        html += '</tr>';
+    }
+
+    html += '</table></body></html>';
+    return html;
+}
+
+function generatePaths(nodes) {
+    if (!nodes || nodes.length === 0) return [];
+    const result = [];
+    for (const node of nodes) {
+        if (node.children && node.children.length > 0) {
+            const childPaths = generatePaths(node.children);
+            if (childPaths.length === 0) {
+                result.push([node]);
+            } else {
+                for (const childPath of childPaths) {
+                    result.push([node, ...childPath]);
                 }
             }
-
-            if (rows.length === 0) {
-                alert('Нет данных для сводки.');
-                return;
-            }
-
-            // Генерируем Excel-файл через HTML-таблицу с rowspan
-            const html = buildSummaryExcelHtml(rows);
-            downloadAsExcel(html, 'Сводка.xls');
+        } else {
+            result.push([node]);
         }
+    }
+    return result;
+}
+
+
+function downloadSummaryExcel() {
+    const rows = [];
+    // Заголовки
+    const header = ['№', 'Тип', 'KKS код', 'Описание', 'Система'];
+    for (let i = 1; i <= maxDepth + 1; i++) {
+        header.push(`KKS уровень ${i}`, `Описание уровень ${i}`, `Тип уровень ${i}`);
+    }
+    rows.push(header);
+
+    for (const item of summaryData) {
+        const row = [
+            item.projectIndex,
+            item.projectType,
+            item.projectCode,
+            item.projectDesc,
+            item.tagNames
+        ];
+        // Заполняем до максимальной глубины
+        flattenTree(item.tree, row, 1);
+        // Добиваем пустыми ячейками до полной ширины
+        while (row.length < header.length) {
+            row.push('');
+        }
+        rows.push(row);
+    }
+
+    // Генерируем Excel через HTML
+    let html = `<html><head><meta charset="UTF-8"></head><body><table border="1">`;
+    html += `<tr>${header.map(h => `<th>${h}</th>`).join('')}</tr>`;
+
+    for (let i = 1; i < rows.length; i++) {
+        html += '<tr>';
+        for (let j = 0; j < rows[i].length; j++) {
+            const cell = rows[i][j] !== undefined ? rows[i][j] : '';
+            html += `<td>${cell}</td>`;
+        }
+        html += '</tr>';
+    }
+
+    html += '</table></body></html>';
+    downloadAsExcel(html, 'Сводка.xls');
+}
+
+function flattenTree(tree, row, level) {
+    if (!tree || tree.length === 0) return;
+    const kks = [];
+    const descs = [];
+    const types = [];
+    for (const node of tree) {
+        kks.push(node.kks);
+        descs.push(node.description);
+        types.push(node.type);
+        if (node.children && node.children.length > 0) {
+            flattenTree(node.children, row, level + 1);
+        }
+    }
+    row.push(kks.join(', '), descs.join(', '), types.join(', '));
+}
+
+// Рекурсивное построение дерева зависимостей (без изменений)
+async function buildDependencyTree(signalNames, projectCodes, depth, visited = new Set()) {
+    if (depth > 10) return [];
+    const result = [];
+    for (const sigName of signalNames) {
+        if (visited.has(sigName)) continue;
+        visited.add(sigName);
+        const isCreated = projectCodes.has(sigName);
+        if (!isCreated) {
+            result.push({
+                kks: sigName,
+                description: '',
+                type: 'сигнал со станции',
+                children: []
+            });
+        } else {
+            const projFilename = findProjectFilename(sigName);
+            if (!projFilename) {
+                result.push({ kks: sigName, description: 'Проект не найден', type: 'созданный', children: [] });
+                continue;
+            }
+            const projData = await fetchProjectData(projFilename);
+            if (!projData) {
+                result.push({ kks: sigName, description: 'Ошибка загрузки', type: 'созданный', children: [] });
+                continue;
+            }
+            const desc = projData.project?.description || '';
+            const elements = projData.elements || {};
+            const childSignals = [];
+            for (const el of Object.values(elements)) {
+                if (el.type === 'input-signal' && el.props?.name) {
+                    childSignals.push(el.props.name);
+                }
+            }
+            const children = await buildDependencyTree(childSignals, projectCodes, depth + 1, visited);
+            result.push({ kks: sigName, description: desc, type: 'созданный', children });
+        }
+    }
+    return result;
+}
+
+function findProjectFilename(code) {
+    const proj = allProjects.find(p => p.code === code);
+    return proj ? proj.filename : null;
+}
+
 
         async function fetchProjectData(filename) {
             try {
