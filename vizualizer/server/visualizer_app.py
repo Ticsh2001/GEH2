@@ -123,29 +123,23 @@ def _format_poly_equation(coeffs: np.ndarray, x_name: str, y_name: str) -> str:
 
 
 def extract_table_names_from_code(code_str: str) -> set[str]:
-    """
-    Ищет имена таблиц, переданные первым аргументом в INTERPOLATE(...) и GETPOINT(...).
-    Поддерживает:
-      - "NAME" / 'NAME'
-      - NAME (без кавычек, идентификатор: буквы/цифры/подчёркивание, начиная с буквы/подчёркивания)
-    """
     if not code_str:
         return set()
     names = set()
 
-    # Интерполяция: первый аргумент — имя таблицы
     rx_q_interp = re.compile(r'INTERPOLATE\s*\(\s*([\'"])(?P<n>[^\'"]+)\1', re.IGNORECASE)
-    rx_id_interp = re.compile(r'INTERPOLATE\s*\(\s*(?P<n>[A-Za-z_][A-Za-z0-9_]*)\s*,', re.IGNORECASE)
-
-    # GETPOINT: первый аргумент — имя таблицы
+    rx_id_interp = re.compile(r'INTERPOLATE\s*\(\s*(?P<n>[A-Za-z0-9_]+)\s*,', re.IGNORECASE)
     rx_q_get = re.compile(r'GETPOINT\s*\(\s*([\'"])(?P<n>[^\'"]+)\1', re.IGNORECASE)
-    rx_id_get = re.compile(r'GETPOINT\s*\(\s*(?P<n>[A-Za-z_][A-Za-z0-9_]*)\s*,', re.IGNORECASE)
+    rx_id_get = re.compile(r'GETPOINT\s*\(\s*(?P<n>[A-Za-z0-9_]+)\s*,', re.IGNORECASE)
 
     for rx in (rx_q_interp, rx_id_interp, rx_q_get, rx_id_get):
         for m in rx.finditer(code_str):
             names.add(m.group('n').strip())
-    st.info(f"Таблицы из кода: {names}")
 
+    # Убираем чисто числовые имена (они не могут быть именами таблиц)
+    names = {n for n in names if not n.isdigit()}
+    if names:
+        st.info(f"Таблицы из кода: {names}")
     return names
 
 def normalize_code_tables(code_str: str) -> str:
