@@ -1166,8 +1166,8 @@ async def check_syntax(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
 
-    code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code', 'формула']), None)
-    signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'используемые параметры', 'used signals']), None)
+    code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
+    signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'used signals', 'используемые параметры']), None)
 
     if not code_col:
         raise HTTPException(status_code=400, detail="В файле не найден столбец 'Код'")
@@ -1196,7 +1196,7 @@ async def check_syntax(file: UploadFile = File(...)):
         if code.count('"') % 2 != 0:
             row_remarks.append("Нечётное количество двойных кавычек")
 
-        # 2. Недопустимые символы
+        # 2. Недопустимые символы (кириллица запрещена)
         allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.,;:!?+-*/%<>=&|^()[]{}§'\"\n\r\t ")
         invalid_chars = set(code) - allowed_chars
         if invalid_chars:
@@ -1211,7 +1211,7 @@ async def check_syntax(file: UploadFile = File(...)):
             if re.search(rf'\b{op}\b', code):
                 row_remarks.append(f"Логический оператор {op} – рекомендуется заменить на {'&&' if op=='AND' else '||' if op=='OR' else '!'}")
 
-        # 5. Аргументы HISTORY*/PREV в кавычках
+        # 5. Аргументы HISTORY*/PREV в кавычках, если начинаются с цифры
         history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
         for fn in history_funcs:
             pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
@@ -1248,7 +1248,13 @@ async def check_syntax(file: UploadFile = File(...)):
                 continue
             row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
 
-        # 7. Проверка наличия сигналов
+        # 7. Проверка на пробелы между двумя идентификаторами (разрыв кода)
+        # Удаляем строки, чтобы не захватывать пробелы внутри кавычек
+        code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+        if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings):
+            row_remarks.append("Обнаружен разрыв кода: два идентификатора или значение через пробел")
+
+        # 8. Проверка использования сигналов
         for sig in input_signals:
             sig_underscored = sig.replace('§', '_')
             found = (sig in code) or (sig_underscored in code)
@@ -1257,16 +1263,12 @@ async def check_syntax(file: UploadFile = File(...)):
             if not found:
                 row_remarks.append(f"Сигнал '{sig}' не найден в выражении")
 
-        # 8. Проверка префикса P для сигналов, начинающихся с цифры
+        # 9. Проверка префикса P для сигналов, начинающихся с цифры
         for sig in input_signals:
             if not sig[0].isdigit():
                 continue
             sig_u = sig.replace('§', '_')
-            # Ищем в коде упоминание сигнала без префикса P и не внутри кавычек (внутри функций оборачивается в кавычки)
-            # Для этого удалим из кода все строковые литералы (в кавычках) и будем искать чистый идентификатор
             code_without_strings = re.sub(r'[\'"].*?[\'"]', '', code)
-            # Составляем регулярку: граница слова, само имя сигнала (с учётом возможного _ вместо §), граница слова
-            # Но нужно учесть, что имя сигнала может содержать цифры, буквы, §, _. Используем re.escape
             pattern_sig = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(sig_u)}(?![A-Za-z0-9_])')
             if pattern_sig.search(code_without_strings):
                 row_remarks.append(f"Сигнал '{sig}' начинается с цифры – необходимо добавить префикс P")
