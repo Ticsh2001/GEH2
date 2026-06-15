@@ -1178,7 +1178,7 @@ async def check_syntax(file: UploadFile = File(...)):
     for idx, row in df.iterrows():
         code = str(row[code_col]) if pd.notna(row[code_col]) else ""
         signals_str = str(row[signals_col]) if pd.notna(row[signals_col]) else ""
-        input_signals = [s.strip() for s in re.split(r'[;,]', signals_str) if s.strip()]
+        input_signals = [s.strip() for s in re.split(r'[;,\n]', signals_str) if s.strip()]
 
         row_remarks = []
         row_num = idx + 2

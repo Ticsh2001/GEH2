@@ -939,12 +939,14 @@
         let summaryData = [];
         let maxDepth = 0;
 
+// ========== Сводка с матрёшкой (рекурсивный обход + описания + нумерация уровней) ==========
+
 async function generateSummary() {
     const selected = getSelectedProjectObjects();
     if (!selected.length) return;
 
     const projectCodes = new Set(allProjects.map(p => p.code));
-    const summaryProjects = []; // массив объектов { index, type, code, desc, tags, tree }
+    const summaryProjects = [];
 
     for (const project of selected) {
         const projData = await fetchProjectData(project.filename);
@@ -959,16 +961,27 @@ async function generateSummary() {
             return tag ? tag.name : '';
         }).filter(Boolean).join('; ') || '—';
 
-        const elements = projData.elements || {};
+        // Собираем входные сигналы с описаниями
         const inputSignals = [];
-        for (const el of Object.values(elements)) {
+        for (const el of Object.values(projData.elements || {})) {
             if (el.type === 'input-signal' && el.props?.name) {
-                inputSignals.push(el.props.name);
+                inputSignals.push({
+                    name: el.props.name,
+                    description: el.props.description || ''
+                });
             }
         }
 
-        // Рекурсивно строим дерево зависимостей
-        const tree = await buildDependencyTree(inputSignals, projectCodes, 0);
+        // Рекурсивно строим дерево зависимостей, передавая описания
+        // Для каждого корневого сигнала строим дерево независимо
+        const tree = [];
+        for (const sig of inputSignals) {
+            const subTree = await buildDependencyTree([sig], projectCodes, 0, new Set(), 1);
+            if (subTree.length > 0) {
+                tree.push(subTree[0]);
+            }
+        }
+
         summaryProjects.push({
             index: summaryProjects.length + 1,
             type: projectType,
@@ -984,7 +997,7 @@ async function generateSummary() {
         return;
     }
 
-    // Вычисляем максимальную глубину дерева
+    // Вычисляем максимальную глубину
     const getDepth = (nodes) => {
         if (!nodes || nodes.length === 0) return 0;
         let maxChildDepth = 0;
@@ -1000,20 +1013,82 @@ async function generateSummary() {
         maxDepth = Math.max(maxDepth, getDepth(p.tree));
     });
 
-    // Строим HTML-таблицу
     const html = buildSummaryTableHtml(summaryProjects, maxDepth);
     downloadAsExcel(html, 'Сводка.xls');
 }
 
-function buildSummaryTableHtml(projects, maxDepth) {
-    // Строим плоские строки так же, как раньше
-    const allRows = [];
+async function buildDependencyTree(signalObjs, projectCodes, depth, ancestors = new Set(), startNum = 1) {
+    if (depth > 10) return [];
+    const result = [];
+    let num = startNum;
+    for (const {name, description} of signalObjs) {
+        // Предотвращаем зацикливание: если сигнал уже встречался в цепочке предков,
+        // не раскрываем его повторно, но всё равно включаем как узел без детей.
+        if (ancestors.has(name)) {
+            result.push({
+                kks: name,
+                description: description,
+                type: 'сигнал со станции', // или можно пометить как "циклический"
+                num: num++,
+                children: []
+            });
+            continue;
+        }
+
+        const isCreated = projectCodes.has(name);
+        if (!isCreated) {
+            result.push({
+                kks: name,
+                description: description,
+                type: 'сигнал со станции',
+                num: num++,
+                children: []
+            });
+        } else {
+            const projFilename = findProjectFilename(name);
+            if (!projFilename) {
+                result.push({ kks: name, description: 'Проект не найден', type: 'созданный', num: num++, children: [] });
+                continue;
+            }
+            const projData = await fetchProjectData(projFilename);
+            if (!projData) {
+                result.push({ kks: name, description: 'Ошибка загрузки', type: 'созданный', num: num++, children: [] });
+                continue;
+            }
+            const projDesc = projData.project?.description || '';
+            const elements = projData.elements || {};
+            const childSignals = [];
+            for (const el of Object.values(elements)) {
+                if (el.type === 'input-signal' && el.props?.name) {
+                    childSignals.push({
+                        name: el.props.name,
+                        description: el.props.description || ''
+                    });
+                }
+            }
+            // Создаём новый набор предков для дочерних вызовов
+            const childAncestors = new Set(ancestors);
+            childAncestors.add(name);
+            const children = await buildDependencyTree(childSignals, projectCodes, depth + 1, childAncestors, 1);
+            result.push({ kks: name, description: projDesc, type: 'созданный', num: num++, children });
+        }
+    }
+    return result;
+}
+
+function findProjectFilename(code) {
+    const proj = allProjects.find(p => p.code === code);
+    return proj ? proj.filename : null;
+}
+
+function buildSummaryTableHtml(summaryProjects, maxDepth) {
     const headerCols = ['№', 'Тип', 'KKS код', 'Описание', 'Система'];
     for (let level = 1; level <= maxDepth; level++) {
-        headerCols.push(`KKS уровень ${level}`, `Описание уровень ${level}`, `Тип уровень ${level}`);
+        headerCols.push(`№ ур.${level}`, `KKS ур.${level}`, `Описание ур.${level}`, `Тип ур.${level}`);
     }
 
-    for (const proj of projects) {
+    const allRows = [];
+    for (const proj of summaryProjects) {
         const base = [proj.index, proj.type, proj.code, proj.desc, proj.tags];
         const paths = generatePaths(proj.tree);
         if (paths.length === 0) {
@@ -1024,7 +1099,7 @@ function buildSummaryTableHtml(projects, maxDepth) {
             for (const path of paths) {
                 const row = [...base];
                 for (const node of path) {
-                    row.push(node.kks, node.description, node.type);
+                    row.push(node.num, node.kks, node.description, node.type);
                 }
                 while (row.length < headerCols.length) {
                     row.push('');
@@ -1034,58 +1109,43 @@ function buildSummaryTableHtml(projects, maxDepth) {
         }
     }
 
-    // Вычисляем rowspan для всех ячеек с учётом иерархии
-    const spans = [];
     const numCols = headerCols.length;
-    for (let r = 0; r < allRows.length; r++) {
-        spans[r] = new Array(numCols).fill(0);
-    }
+    const spans = Array.from({ length: allRows.length }, () => new Array(numCols).fill(0));
 
-    // Для каждой колонки слева направо
+    // Вычисляем rowspan для всех столбцов
     for (let c = 0; c < numCols; c++) {
         let r = 0;
         while (r < allRows.length) {
-            // Если ячейка уже покрыта сверху – пропускаем
-            if (spans[r][c] !== 0) {
-                r++;
-                continue;
-            }
-            // Считаем, сколько строк подряд имеют одинаковые значения во всех колонках от 0 до c
+            if (spans[r][c] !== 0) { r++; continue; }
             let cnt = 1;
             while (r + cnt < allRows.length) {
                 let same = true;
                 for (let k = 0; k <= c; k++) {
-                    if (allRows[r][k] !== allRows[r + cnt][k]) {
-                        same = false;
-                        break;
-                    }
+                    if (allRows[r][k] !== allRows[r + cnt][k]) { same = false; break; }
                 }
                 if (!same) break;
                 cnt++;
             }
             spans[r][c] = cnt;
-            for (let i = 1; i < cnt; i++) {
-                spans[r + i][c] = 0; // эти ячейки будут скрыты
-            }
+            for (let i = 1; i < cnt; i++) spans[r + i][c] = 0;
             r += cnt;
         }
     }
 
-    // Генерируем HTML с rowspan
+    // Генерация HTML
     let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
     <head><meta charset="UTF-8"></head><body><table border="1">`;
-    // Заголовки
     html += '<tr>';
     headerCols.forEach(h => html += `<th>${h}</th>`);
     html += '</tr>';
 
-    // Данные
     for (let r = 0; r < allRows.length; r++) {
         html += '<tr>';
         for (let c = 0; c < numCols; c++) {
-            if (spans[r][c] === 0) continue; // ячейка скрыта из-за rowspan сверху
+            if (spans[r][c] === 0) continue;
             const span = spans[r][c];
-            html += `<td${span > 1 ? ` rowspan="${span}"` : ''}>${allRows[r][c] || ''}</td>`;
+            const value = allRows[r][c] || '';
+            html += `<td${span > 1 ? ` rowspan="${span}"` : ''}>${value}</td>`;
         }
         html += '</tr>';
     }
@@ -1114,114 +1174,10 @@ function generatePaths(nodes) {
     return result;
 }
 
+// fetchProjectData уже есть в вашем коде, оставляем без изменений
+// downloadAsExcel тоже уже определена
 
-function downloadSummaryExcel() {
-    const rows = [];
-    // Заголовки
-    const header = ['№', 'Тип', 'KKS код', 'Описание', 'Система'];
-    for (let i = 1; i <= maxDepth + 1; i++) {
-        header.push(`KKS уровень ${i}`, `Описание уровень ${i}`, `Тип уровень ${i}`);
-    }
-    rows.push(header);
-
-    for (const item of summaryData) {
-        const row = [
-            item.projectIndex,
-            item.projectType,
-            item.projectCode,
-            item.projectDesc,
-            item.tagNames
-        ];
-        // Заполняем до максимальной глубины
-        flattenTree(item.tree, row, 1);
-        // Добиваем пустыми ячейками до полной ширины
-        while (row.length < header.length) {
-            row.push('');
-        }
-        rows.push(row);
-    }
-
-    // Генерируем Excel через HTML
-    let html = `<html><head><meta charset="UTF-8"></head><body><table border="1">`;
-    html += `<tr>${header.map(h => `<th>${h}</th>`).join('')}</tr>`;
-
-    for (let i = 1; i < rows.length; i++) {
-        html += '<tr>';
-        for (let j = 0; j < rows[i].length; j++) {
-            const cell = rows[i][j] !== undefined ? rows[i][j] : '';
-            html += `<td>${cell}</td>`;
-        }
-        html += '</tr>';
-    }
-
-    html += '</table></body></html>';
-    downloadAsExcel(html, 'Сводка.xls');
-}
-
-function flattenTree(tree, row, level) {
-    if (!tree || tree.length === 0) return;
-    const kks = [];
-    const descs = [];
-    const types = [];
-    for (const node of tree) {
-        kks.push(node.kks);
-        descs.push(node.description);
-        types.push(node.type);
-        if (node.children && node.children.length > 0) {
-            flattenTree(node.children, row, level + 1);
-        }
-    }
-    row.push(kks.join(', '), descs.join(', '), types.join(', '));
-}
-
-// Рекурсивное построение дерева зависимостей (без изменений)
-async function buildDependencyTree(signalNames, projectCodes, depth, visited = new Set()) {
-    if (depth > 10) return [];
-    const result = [];
-    for (const sigName of signalNames) {
-        if (visited.has(sigName)) continue;
-        visited.add(sigName);
-        const isCreated = projectCodes.has(sigName);
-        if (!isCreated) {
-            result.push({
-                kks: sigName,
-                description: '',
-                type: 'сигнал со станции',
-                children: []
-            });
-        } else {
-            const projFilename = findProjectFilename(sigName);
-            if (!projFilename) {
-                result.push({ kks: sigName, description: 'Проект не найден', type: 'созданный', children: [] });
-                continue;
-            }
-            const projData = await fetchProjectData(projFilename);
-            if (!projData) {
-                result.push({ kks: sigName, description: 'Ошибка загрузки', type: 'созданный', children: [] });
-                continue;
-            }
-            const desc = projData.project?.description || '';
-            const elements = projData.elements || {};
-            const childSignals = [];
-            for (const el of Object.values(elements)) {
-                if (el.type === 'input-signal' && el.props?.name) {
-                    childSignals.push(el.props.name);
-                }
-            }
-            const children = await buildDependencyTree(childSignals, projectCodes, depth + 1, visited);
-            result.push({ kks: sigName, description: desc, type: 'созданный', children });
-        }
-    }
-    return result;
-}
-
-function findProjectFilename(code) {
-    const proj = allProjects.find(p => p.code === code);
-    return proj ? proj.filename : null;
-}
-
-
-        async function fetchProjectData(filename) {
+ async function fetchProjectData(filename) {
             try {
                 const url = addConfig(`/api/project/load/${encodeURIComponent(filename)}?source=projects`);
                 const resp = await fetch(url);
@@ -1231,57 +1187,6 @@ function findProjectFilename(code) {
                 console.error('Ошибка загрузки', filename, e);
                 return null;
             }
-        }
-
-        function buildSummaryExcelHtml(rows) {
-            // Группируем строки по первым 4 колонкам, чтобы объединить ячейки
-            const grouped = [];
-            let prevKey = null;
-            let group = [];
-            for (const row of rows) {
-                const key = row.slice(0, 5).join('|');
-                if (key !== prevKey) {
-                    if (group.length) grouped.push(group);
-                    group = [row];
-                    prevKey = key;
-                } else {
-                    group.push(row);
-                }
-            }
-            if (group.length) grouped.push(group);
-
-            let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-            <head><meta charset="UTF-8"></head><body><table border="1">`;
-            html += `<tr>
-                <th>№</th><th>Система</th><th>Тип</th><th>KKS код</th><th>Описание</th>
-                <th>№</th><th>KKS используемого сигнала</th>
-                <th>Описание используемого сигнала</th><th>Тип сигнала</th>
-            </tr>`;
-
-            for (const group of grouped) {
-                const firstRow = group[0];
-                const span = group.length;
-                html += '<tr>';
-                // Объединяемые ячейки (первые 4)
-                html += `<td rowspan="${span}">${firstRow[0]}</td>`;
-                html += `<td rowspan="${span}">${firstRow[1]}</td>`;
-                html += `<td rowspan="${span}">${firstRow[2]}</td>`;
-                html += `<td rowspan="${span}">${firstRow[3]}</td>`;
-                html += `<td rowspan="${span}">${firstRow[4]}</td>`;
-                // Первая строка сигнала
-                html += `<td>${firstRow[5]}</td><td>${firstRow[6]}</td><td>${firstRow[7]}</td><td>${firstRow[8]}</td>`;
-                html += '</tr>';
-
-                for (let i = 1; i < group.length; i++) {
-                    const r = group[i];
-                    html += '<tr>';
-                    html += `<td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${r[8]}</td>`;
-                    html += '</tr>';
-                }
-            }
-
-            html += '</table></body></html>';
-            return html;
         }
 
         function downloadAsExcel(html, filename) {
