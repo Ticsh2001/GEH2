@@ -1167,7 +1167,7 @@ async def check_syntax(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
 
     code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
-    signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'used signals', 'используемые параметры']), None)
+    signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'used signals']), None)
 
     if not code_col:
         raise HTTPException(status_code=400, detail="В файле не найден столбец 'Код'")
@@ -1178,7 +1178,7 @@ async def check_syntax(file: UploadFile = File(...)):
     for idx, row in df.iterrows():
         code = str(row[code_col]) if pd.notna(row[code_col]) else ""
         signals_str = str(row[signals_col]) if pd.notna(row[signals_col]) else ""
-        input_signals = [s.strip() for s in re.split(r'[;,\n]', signals_str) if s.strip()]
+        input_signals = [s.strip() for s in re.split(r'[;,]', signals_str) if s.strip()]
 
         row_remarks = []
         row_num = idx + 2
@@ -1187,6 +1187,11 @@ async def check_syntax(file: UploadFile = File(...)):
             row_remarks.append("Пустой код")
             remarks.append({"row": row_num, "remarks": row_remarks})
             continue
+
+        # 0. Проверка имён сигналов на недопустимые символы
+        for sig in input_signals:
+            if any(c in sig for c in "+-*/^"):
+                row_remarks.append(f"Сигнал '{sig}' содержит недопустимый символ в имени (возможно, пропущен оператор)")
 
         # 1. Скобки и кавычки
         if code.count('(') != code.count(')'):
@@ -1249,7 +1254,6 @@ async def check_syntax(file: UploadFile = File(...)):
             row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
 
         # 7. Проверка на пробелы между двумя идентификаторами (разрыв кода)
-        # Удаляем строки, чтобы не захватывать пробелы внутри кавычек
         code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
         if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings):
             row_remarks.append("Обнаружен разрыв кода: два идентификатора или значение через пробел")
