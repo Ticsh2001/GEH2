@@ -1178,7 +1178,7 @@ async def check_syntax(file: UploadFile = File(...)):
     for idx, row in df.iterrows():
         code = str(row[code_col]) if pd.notna(row[code_col]) else ""
         signals_str = str(row[signals_col]) if pd.notna(row[signals_col]) else ""
-        input_signals = [s.strip() for s in re.split(r'[;,]', signals_str) if s.strip()]
+        input_signals = [s.strip() for s in re.split(r'[;,\n]', signals_str) if s.strip()]
 
         row_remarks = []
         row_num = idx + 2
@@ -1188,10 +1188,16 @@ async def check_syntax(file: UploadFile = File(...)):
             remarks.append({"row": row_num, "remarks": row_remarks})
             continue
 
-        # 0. Проверка имён сигналов на недопустимые символы
+        # 0. Проверка имён сигналов на недопустимые символы (арифметические операторы)
         for sig in input_signals:
             if any(c in sig for c in "+-*/^"):
                 row_remarks.append(f"Сигнал '{sig}' содержит недопустимый символ в имени (возможно, пропущен оператор)")
+
+        # Проверка, является ли код просто числом или прочерком
+        is_constant = False
+        clean_code = code.strip()
+        if clean_code and (clean_code.replace('.', '', 1).replace(',', '', 1).isdigit() or clean_code == '-'):
+            is_constant = True
 
         # 1. Скобки и кавычки
         if code.count('(') != code.count(')'):
@@ -1208,7 +1214,7 @@ async def check_syntax(file: UploadFile = File(...)):
             row_remarks.append(f"Недопустимые символы: {', '.join(repr(c) for c in invalid_chars)}")
 
         # 3. Унарный минус перед идентификатором (не перед числом и не перед скобкой)
-        if re.search(r'(?<![a-zA-Z0-9_§])\s*-\s*(?=[A-Za-z_§])', code):
+        if not is_constant and re.search(r'(?<![a-zA-Z0-9_§])\s*-\s*(?=[A-Za-z_§])', code):
             row_remarks.append("Обнаружен унарный минус перед сигналом. При необходимости замените на '-1*'")
 
         # 4. Логические операторы
@@ -1233,49 +1239,53 @@ async def check_syntax(file: UploadFile = File(...)):
                 if arg and arg not in input_signals:
                     row_remarks.append(f"Таблицы '{arg}' нет в используемых параметрах")
 
-        # 6. Неизвестные функции/опечатки (исключаем токены внутри строк)
-        known_functions = {'WHEN','ABS','EXP','POW','LOG','LOG10','MIN','MAX','AVG','MED','ROUND',
-                          'GETPOINT','INTERPOLATE','PREV','HISTORYAVG','HISTORYCOUNT','HISTORYSUM',
-                          'HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT'}
+        # 6. Неизвестные функции/опечатки
+        if not is_constant:
+            known_functions = {'WHEN','ABS','EXP','POW','LOG','LOG10','MIN','MAX','AVG','MED','ROUND',
+                            'GETPOINT','INTERPOLATE','PREV','HISTORYAVG','HISTORYCOUNT','HISTORYSUM',
+                            'HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT'}
 
-        string_literals = re.findall(r'[\'"].*?[\'"]', code)
+            string_literals = re.findall(r'[\'"].*?[\'"]', code)
 
-        for token in re.findall(r'[A-Z][A-Z0-9_]*', code):
-            if token in known_functions or token in ('AND','OR','NOT','X','Y'):
-                continue
-            if token in input_signals:
-                continue
-            if re.match(r'P\d', token):
-                continue
-            if any(token in s for s in string_literals):
-                continue
-            if any(token in sig.replace('§', '_') for sig in input_signals):
-                continue
-            row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
+            for token in re.findall(r'[A-Z][A-Z0-9_]*', code):
+                if token in known_functions or token in ('AND','OR','NOT','X','Y'):
+                    continue
+                if token in input_signals:
+                    continue
+                if re.match(r'P\d', token):
+                    continue
+                if any(token in s for s in string_literals):
+                    continue
+                if any(token in sig.replace('§', '_') for sig in input_signals):
+                    continue
+                row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
 
-        # 7. Проверка на пробелы между двумя идентификаторами (разрыв кода)
-        code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
-        if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings):
-            row_remarks.append("Обнаружен разрыв кода: два идентификатора или значение через пробел")
+        # 7. Разрыв кода (пробел между идентификаторами)
+        if not is_constant:
+            code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+            if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings):
+                row_remarks.append("Обнаружен разрыв кода: два идентификатора или значение через пробел")
 
-        # 8. Проверка использования сигналов
-        for sig in input_signals:
-            sig_underscored = sig.replace('§', '_')
-            found = (sig in code) or (sig_underscored in code)
-            if not found and sig[0].isdigit():
-                found = ('P' + sig in code) or ('P' + sig_underscored in code)
-            if not found:
-                row_remarks.append(f"Сигнал '{sig}' не найден в выражении")
+        # 8. Проверка использования сигналов (пропускается для констант)
+        if not is_constant:
+            for sig in input_signals:
+                sig_underscored = sig.replace('§', '_')
+                found = (sig in code) or (sig_underscored in code)
+                if not found and sig[0].isdigit():
+                    found = ('P' + sig in code) or ('P' + sig_underscored in code)
+                if not found:
+                    row_remarks.append(f"Сигнал '{sig}' не найден в выражении")
 
-        # 9. Проверка префикса P для сигналов, начинающихся с цифры
-        for sig in input_signals:
-            if not sig[0].isdigit():
-                continue
-            sig_u = sig.replace('§', '_')
-            code_without_strings = re.sub(r'[\'"].*?[\'"]', '', code)
-            pattern_sig = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(sig_u)}(?![A-Za-z0-9_])')
-            if pattern_sig.search(code_without_strings):
-                row_remarks.append(f"Сигнал '{sig}' начинается с цифры – необходимо добавить префикс P")
+        # 9. Префикс P для сигналов, начинающихся с цифры
+        if not is_constant:
+            for sig in input_signals:
+                if not sig[0].isdigit():
+                    continue
+                sig_u = sig.replace('§', '_')
+                code_without_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+                pattern_sig = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(sig_u)}(?![A-Za-z0-9_])')
+                if pattern_sig.search(code_without_strings):
+                    row_remarks.append(f"Сигнал '{sig}' начинается с цифры – необходимо добавить префикс P")
 
         if row_remarks:
             remarks.append({"row": row_num, "remarks": row_remarks})

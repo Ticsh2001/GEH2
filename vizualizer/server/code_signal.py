@@ -448,7 +448,7 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
 
         # проверяем period
         try:
-            minutes = int(period)
+            minutes = int(period_val)
         except Exception:
             return pd.Series(np.nan, index=index)
 
