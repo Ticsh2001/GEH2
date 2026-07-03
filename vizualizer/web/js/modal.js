@@ -388,17 +388,21 @@ const Modal = {
                             <option value="OR" ${logic === 'OR' ? 'selected' : ''}>ИЛИ (OR)</option>
                         </select>
                     </div>`;
-            } else if (elemType === 'signal-const') {
-                contentHTML = `
-                    <div class="modal-row">
-                        <label>Значение:</label>
-                        <input type="number" id="prop-value" value="${props.value ?? 0}" step="any">
-                    </div>
-                    <div class="modal-row">
-                        <label>Описание:</label>
-                        <textarea id="prop-description">${props.description || ''}</textarea>
-                    </div>`;
-            }          
+                    } else if (elemType === 'signal-const') {
+                        contentHTML = `
+                            <div class="modal-row">
+                                <label>Значение:</label>
+                                <input type="number" id="prop-value" value="${props.value ?? 0}" step="any">
+                            </div>
+                            <div class="modal-row">
+                                <label>Описание:</label>
+                                <textarea id="prop-description">${props.description || ''}</textarea>
+                            </div>
+                            <div class="modal-row">
+                                <label>Размерность:</label>
+                                <input type="text" id="prop-dimension" value="${props.dimension || ''}" />
+                            </div>`;
+                    }     
         
         else if (elemType === 'formula') {
             let signalsHTML = '';
@@ -878,11 +882,12 @@ const Modal = {
             } else if (elemType === 'signal-const') {
                 const value = parseFloat(document.getElementById('prop-value').value) || 0;
                 const desc = document.getElementById('prop-description')?.value || '';
+                const dimension = document.getElementById('prop-dimension')?.value || '';
                 elemData.props.value = value;
                 elemData.props.description = desc;
+                elemData.props.dimension = dimension;
                 const symbol = elem.querySelector('.element-symbol');
                 if (symbol) symbol.textContent = String(value);
-
             } else if (elemType === 'formula') {
                 const expression = document.getElementById('prop-expression').value;
                 const inputCount = parseInt(document.getElementById('prop-input-count').value) || 2;

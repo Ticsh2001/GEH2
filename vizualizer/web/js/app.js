@@ -226,7 +226,7 @@ async loadConfigurations() {
                     code: kks,
                     type: 'parameter',
                     description: elem.props.description || '',
-                    dimension: '',
+                    dimension: elem.props.dimension || '',
                 },
                 elements: {
                     const_1: {
@@ -295,7 +295,7 @@ async loadConfigurations() {
                 name: kks,
                 description: elemData.props.description || '',
                 signalType: SIGNAL_TYPE.NUMERIC,
-                dimension: '',
+                dimension: elemData.props.dimension || '', 
                 comment: elemData.props.comment || ''
             };
 
