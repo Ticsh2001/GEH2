@@ -48,6 +48,14 @@ init() {
         }
     });
 
+    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'constants-modal-overlay') App.hideConstantsModal();
+    });
+
+    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'constants-modal-overlay') App.hideConstantsModal();
+    });
+
     document.getElementById('code-modal-close').addEventListener('click', () => {
         document.getElementById('code-modal-overlay').style.display = 'none';
     });
@@ -78,6 +86,14 @@ init() {
         const url = `/all-signals.html?user=${encodeURIComponent(currentUser)}&config=${encodeURIComponent(config)}`;
         window.open(url, '_blank');
     });
+
+        // Обработчики для модалки "Константы"
+    document.getElementById('btn-constants').addEventListener('click', () => App.showConstantsModal());
+    document.getElementById('constants-cancel').addEventListener('click', () => this.hideConstantsModal());
+    document.getElementById('constants-assign').addEventListener('click', () => this.assignConstants());
+    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'constants-modal-overlay') this.hideConstantsModal();
+        });
 
 document.getElementById('btn-create-similar').addEventListener('click', async () => {
     try {
@@ -124,6 +140,8 @@ document.getElementById('btn-create-similar').addEventListener('click', async ()
     this.autoLoadFromURL();
 },
 
+
+
 async loadConfigurations() {
     try {
         const resp = await fetch('/api/configurations');
@@ -166,6 +184,134 @@ async loadConfigurations() {
         Settings.fetchSignals('*').catch(() => {});
     }
 },
+
+
+    showConstantsModal() {
+        const list = document.getElementById('constants-list');
+        const signalConsts = Object.values(AppState.elements).filter(e => e.type === 'signal-const');
+        if (!signalConsts.length) {
+            alert('В проекте нет сигналов-констант.');
+            return;
+        }
+
+        list.innerHTML = signalConsts.map(el => `
+            <div class="modal-row" style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+                <span style="min-width:200px;">${el.props.description || el.id}</span>
+                <input type="text" class="const-kks" data-id="${el.id}" placeholder="KKS код" style="flex:1;">
+            </div>
+        `).join('');
+        document.getElementById('constants-modal-overlay').style.display = 'flex';
+    },
+
+    hideConstantsModal() {
+        document.getElementById('constants-modal-overlay').style.display = 'none';
+    },
+
+    async assignConstants() {
+        const inputs = document.querySelectorAll('.const-kks');
+        const promises = [];
+        const replacements = []; // { elemId, kks }
+
+        for (const inp of inputs) {
+            const kks = inp.value.trim();
+            if (!kks) continue;
+            const elemId = inp.dataset.id;
+            const elem = AppState.elements[elemId];
+            if (!elem) continue;
+
+            // Создаём проект для константы
+            const projectData = {
+                version: '1.0',
+                project: {
+                    code: kks,
+                    type: 'parameter',
+                    description: elem.props.description || '',
+                    dimension: '',
+                },
+                elements: {
+                    const_1: {
+                        id: 'const_1',
+                        type: 'const',
+                        x: 100,
+                        y: 100,
+                        width: 120,
+                        height: 60,
+                        props: { value: elem.props.value || 0 }
+                    },
+                    output_2: {
+                        id: 'output_2',
+                        type: 'output',
+                        x: 300,
+                        y: 100,
+                        width: 150,
+                        height: 60,
+                        props: {
+                            label: kks,
+                            outputGroup: ''
+                        }
+                    }
+                },
+                connections: [
+                    {
+                        fromElement: 'const_1',
+                        fromPort: 'out-0',
+                        toElement: 'output_2',
+                        toPort: 'in-0',
+                        signalType: 'numeric'
+                    }
+                ],
+                counter: 2,
+                viewport: { zoom: 1, panX: 0, panY: 0 },
+                code: String(elem.props.value ?? 0),
+                visualizer_state: null
+            };
+            const filename = `${kks}_parameter.json`;
+            promises.push(
+                Settings.saveProject(filename, projectData, 'projects')
+                    .then(() => ({ success: true, elemId, kks }))
+                    .catch(e => ({ success: false, elemId, kks, error: e }))
+            );
+            replacements.push({ elemId, kks });
+        }
+
+        if (promises.length === 0) {
+            alert('Не задано ни одного KKS.');
+            return;
+        }
+
+        const results = await Promise.all(promises);
+        const failed = results.filter(r => !r.success);
+        if (failed.length) {
+            alert('Ошибки при создании проектов:\n' + failed.map(f => `${f.kks}: ${f.error.message}`).join('\n'));
+            return;
+        }
+
+        // Заменяем signal-const на input-signal в текущем проекте
+        for (const { elemId, kks } of replacements) {
+            const elemData = AppState.elements[elemId];
+            if (!elemData) continue;
+            elemData.type = 'input-signal';
+            elemData.props = {
+                name: kks,
+                description: elemData.props.description || '',
+                signalType: SIGNAL_TYPE.NUMERIC,
+                dimension: '',
+                comment: elemData.props.comment || ''
+            };
+
+            // Перерисовываем элемент
+            const elemDom = document.getElementById(elemId);
+            if (elemDom) {
+                const { html } = Elements.createElementHTML('input-signal', elemId, elemData.x, elemData.y, elemData.props, elemData.width, elemData.height);
+                elemDom.outerHTML = html;
+                Elements.setupElementHandlers(elemId);
+            }
+        }
+
+        Connections.drawConnections();
+        this.hideConstantsModal();
+        alert('Константы успешно назначены и проекты созданы.');
+    },
 
 
 /**

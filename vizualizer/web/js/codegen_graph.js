@@ -230,6 +230,31 @@ const CodeGenGraph = {
                 }
                 return result || Optimizer.TrueCond;
             }
+            case 'multi-if': {
+                const etGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
+                const etVal = etGraph ? this.evalValue(etGraph) : Optimizer.Const(0);
+                const etName = this.exprToStr(etVal);
+                const op = elem.props.operator || '>';
+                const logic = elem.props.logic || 'AND';
+                const conds = [];
+                for (const inp of graph.inputs) {
+                    if (inp.conn.toPort === 'in-0') continue;
+                    const sigGraph = inp.fromGraph;
+                    if (!sigGraph) continue;
+                    const sigVal = this.evalValue(sigGraph);
+                    const sigName = this.exprToStr(sigVal);
+                    conds.push(Optimizer.Cmp(sigName, op, etName));
+                }
+                let combinedCond = null;
+                if (logic === 'AND') {
+                    for (const c of conds) combinedCond = combinedCond ? Optimizer.And(combinedCond, c) : c;
+                } else {
+                    for (const c of conds) combinedCond = combinedCond ? Optimizer.Or(combinedCond, c) : c;
+                }
+                const condCtx = this.collectAllCond(graph);
+                return condCtx ? Optimizer.And(condCtx, combinedCond || Optimizer.TrueCond) : (combinedCond || Optimizer.TrueCond);
+            }
+
             // codegen_graph.js -> evalLogic(graph)
 
             case 'range': {
@@ -327,6 +352,9 @@ const CodeGenGraph = {
 
             case 'separator':
                 return this.evalValue(graph.inputs[0]?.fromGraph);
+
+            case 'signal-const':
+                return Optimizer.Const(Number(elem.props.value) || 0);
 
             case 'switch': {
                 const exprCore = this.buildSwitchExpr(graph);
@@ -467,6 +495,47 @@ const CodeGenGraph = {
                 return { cond: condCtx, expr: exprCore };
                 
                 //#return { cond: condCtx, expr };
+            }
+                        case 'multi-if': {
+                // Получаем эталонное значение (in-0)
+                const etGraph = graph.inputs.find(inp => inp.conn.toPort === 'in-0')?.fromGraph;
+                const etVal = etGraph ? this.evalValue(etGraph) : Optimizer.Const(0);
+                const etName = this.exprToStr(etVal);
+
+                const op = elem.props.operator || '>';
+                const logic = elem.props.logic || 'AND';
+                const conds = [];
+
+                for (const inp of graph.inputs) {
+                    if (inp.conn.toPort === 'in-0') continue;
+                    const sigGraph = inp.fromGraph;
+                    if (!sigGraph) continue;
+                    const sigVal = this.evalValue(sigGraph);
+                    const sigName = this.exprToStr(sigVal);
+                    // Сравниваем сигнал с эталоном: сигнал OP эталон
+                    conds.push(Optimizer.Cmp(sigName, op, etName));
+                }
+
+                let combinedCond = null;
+                if (logic === 'AND') {
+                    for (const c of conds) {
+                        combinedCond = combinedCond ? Optimizer.And(combinedCond, c) : c;
+                    }
+                } else { // OR
+                    for (const c of conds) {
+                        combinedCond = combinedCond ? Optimizer.Or(combinedCond, c) : c;
+                    }
+                }
+
+                // Условие от cond-порта (если есть)
+                const condCtx = this.collectAllCond(graph);
+                const finalCond = condCtx ? Optimizer.And(condCtx, combinedCond || Optimizer.TrueCond) : (combinedCond || Optimizer.TrueCond);
+
+                // Возвращаем: условие = finalCond, а значение = WHEN(finalCond, 1, 0)
+                return {
+                    cond: null,  // чтобы вышестоящий код не добавлял ещё один WHEN
+                    expr: Optimizer.When(finalCond, Optimizer.Const(1), Optimizer.Const(0))
+                };
             }
             default:
                     expr = Optimizer.Const(0);

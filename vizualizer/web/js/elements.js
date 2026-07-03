@@ -7,6 +7,43 @@ const Elements = {
     /**
      * Генерация HTML для элемента
      */
+
+    updateMultiIfInputs(elemId, inputCount) {
+        const elem = document.getElementById(elemId);
+        if (!elem) return;
+        const portsLeft = elem.querySelector('.ports-left');
+        if (!portsLeft) return;
+
+        // Удаляем старые соединения к несуществующим портам
+        AppState.connections = AppState.connections.filter(c => {
+            if (c.toElement === elemId && c.toPort.startsWith('in-')) {
+                const portNum = parseInt(c.toPort.split('-')[1], 10);
+                return portNum < inputCount;
+            }
+            return true;
+        });
+
+        let inputsHTML = '';
+        for (let i = 0; i < inputCount; i++) {
+            const extraClass = i === 0 ? ' switch-main-port' : '';
+            const roleAttr = i === 0 ? 'data-role="multi-et"' : '';
+            inputsHTML += `
+                <div class="port input any-port${extraClass}"
+                    data-port="in-${i}"
+                    data-element="${elemId}"
+                    data-signal-type="${SIGNAL_TYPE.ANY}"
+                    ${roleAttr}
+                    title="${i === 0 ? 'эталон' : 'сигнал ' + i}">
+                </div>`;
+        }
+        portsLeft.innerHTML = inputsHTML;
+        portsLeft.querySelectorAll('.port').forEach(port => Connections.setupPortHandlers(port));
+        Connections.drawConnections();
+    },
+
+
+
+
     updateSwitchInputs(elemId, inputCount) {
         const elem = document.getElementById(elemId);
         if (!elem) return;
@@ -135,6 +172,51 @@ const Elements = {
                         </div>
                     </div>`;
             }
+            else if (elemType === 'signal-const') {
+                innerHTML = `
+                    <div class="element-header" style="background:${config.color};">Сигнал Константа</div>
+                    <div class="element-body">
+                        <div class="element-symbol">${props.value ?? 0}</div>
+                        <div class="ports-right">
+                            ${buildOutputPorts(1, [SIGNAL_TYPE.NUMERIC], ['Значение'])}
+                        </div>
+                    </div>`;
+            }
+            else if (elemType === 'multi-if') {
+                const totalInputs = props.inputCount || config.defaultProps?.inputCount || 2;
+                let inputsHTML = '';
+                for (let i = 0; i < totalInputs; i++) {
+                    let extraClass = '';
+                    let roleAttr = '';
+                    if (i === 0) {
+                        extraClass = ' switch-main-port';  // используем существующий оранжевый стиль
+                        roleAttr = 'data-role="multi-et"';
+                    }
+                    const type = config.inputTypes[i] ?? SIGNAL_TYPE.ANY;
+                    const label = i === 0 ? 'эталон' : `сигнал ${i}`;
+                    inputsHTML += `
+                        <div class="port input any-port${extraClass}"
+                            data-port="in-${i}"
+                            data-element="${elemId}"
+                            data-signal-type="${type}"
+                            ${roleAttr}
+                            title="${label}">
+                        </div>`;
+                }
+                const op = props.operator || '>';
+                const logic = props.logic || 'AND';
+                innerHTML = `
+                    <div class="element-header" style="background:${config.color};">Комб. если</div>
+                    <div class="element-body">
+                        <div class="ports-left">${inputsHTML}</div>
+                        <div class="element-symbol">${op} ${logic}</div>
+                        <div class="ports-right">
+                            ${buildOutputPorts(1, [SIGNAL_TYPE.LOGIC], ['результат'])}
+                        </div>
+                    </div>`;
+            }
+
+            
             else if (elemType === 'const') {
                 innerHTML = `
                     <div class="element-header" style="background:${config.color};">Константа</div>

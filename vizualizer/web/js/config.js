@@ -61,6 +61,46 @@ const ELEMENT_TYPES = {
         ]
         }
     },
+
+    'multi-if': {
+        name: 'Комб. если',
+        inputs: 2,                     // первый – эталон, остальные – сравниваемые сигналы
+        outputs: 1,
+        // in-0: эталонное значение (особый порт)
+        // in-1..in-N: сравниваемые сигналы
+        inputLabels: ['эталон', 'сигнал'],
+        inputTypes: [SIGNAL_TYPE.ANY, SIGNAL_TYPE.ANY],
+        outputLabels: ['результат'],
+        outputTypes: [SIGNAL_TYPE.LOGIC],
+        color: '#d946ef',              // фиолетовый
+        hasProperties: true,
+        resizable: true,
+        minWidth: 160,
+        minHeight: 100,
+        hasConditionPort: true,
+        conditionPortType: SIGNAL_TYPE.LOGIC,
+        defaultProps: {
+            inputCount: 2,             // минимум: эталон + 1 сигнал
+            operator: '>',            // '>', '<', '>=', '<=', '=', '!='
+            logic: 'AND'              // 'AND', 'OR'
+        }
+    },
+
+    'signal-const': {
+        name: 'Сигнал-конст',
+        inputs: 0,
+        outputs: 1,
+        outputLabels: ['out'],
+        outputTypes: [SIGNAL_TYPE.NUMERIC],
+        color: '#818cf8',              // индиго
+        hasProperties: true,
+        defaultProps: { value: 0, description: '' },
+        resizable: true,
+        minWidth: 140,
+        minHeight: 60,
+        hasConditionPort: true,
+        conditionPortType: SIGNAL_TYPE.LOGIC
+    },
     
     'range': {
         name: 'Диапазон',

@@ -361,8 +361,44 @@ const Modal = {
                 </small>
                 </div>
             `;
-        }
-           
+            } else if (elemType === 'multi-if') {
+                const totalInputs = props.inputCount || 2;
+                const op = props.operator || '>';
+                const logic = props.logic || 'AND';
+                contentHTML = `
+                    <div class="modal-row">
+                        <label>Количество входов (включая эталон):</label>
+                        <input type="number" id="prop-input-count" value="${totalInputs}" min="2" max="20">
+                    </div>
+                    <div class="modal-row">
+                        <label>Оператор сравнения:</label>
+                        <select id="prop-operator">
+                            <option value=">" ${op === '>' ? 'selected' : ''}>> (больше)</option>
+                            <option value="<" ${op === '<' ? 'selected' : ''}>< (меньше)</option>
+                            <option value=">=" ${op === '>=' ? 'selected' : ''}>= (больше или равно)</option>
+                            <option value="<=" ${op === '<=' ? 'selected' : ''}>= (меньше или равно)</option>
+                            <option value="=" ${op === '=' ? 'selected' : ''}>= (равно)</option>
+                            <option value="!=" ${op === '!=' ? 'selected' : ''}>!= (не равно)</option>
+                        </select>
+                    </div>
+                    <div class="modal-row">
+                        <label>Логическая операция:</label>
+                        <select id="prop-logic">
+                            <option value="AND" ${logic === 'AND' ? 'selected' : ''}>И (AND)</option>
+                            <option value="OR" ${logic === 'OR' ? 'selected' : ''}>ИЛИ (OR)</option>
+                        </select>
+                    </div>`;
+            } else if (elemType === 'signal-const') {
+                contentHTML = `
+                    <div class="modal-row">
+                        <label>Значение:</label>
+                        <input type="number" id="prop-value" value="${props.value ?? 0}" step="any">
+                    </div>
+                    <div class="modal-row">
+                        <label>Описание:</label>
+                        <textarea id="prop-description">${props.description || ''}</textarea>
+                    </div>`;
+            }          
         
         else if (elemType === 'formula') {
             let signalsHTML = '';
@@ -827,7 +863,26 @@ const Modal = {
                     symbol.textContent = `A → ${cnt} кейс(ов), default`;
                 }
 
-            
+            } else if (elemType === 'multi-if') {
+                const inputCount = parseInt(document.getElementById('prop-input-count').value) || 2;
+                const operator = document.getElementById('prop-operator').value;
+                const logic = document.getElementById('prop-logic').value;
+                elemData.props.inputCount = inputCount;
+                elemData.props.operator = operator;
+                elemData.props.logic = logic;
+                Elements.updateMultiIfInputs(elemId, inputCount);
+                Elements.updateElementSize(elemId);
+                const symbol = elem.querySelector('.element-symbol');
+                if (symbol) symbol.textContent = `${operator} ${logic}`;
+
+            } else if (elemType === 'signal-const') {
+                const value = parseFloat(document.getElementById('prop-value').value) || 0;
+                const desc = document.getElementById('prop-description')?.value || '';
+                elemData.props.value = value;
+                elemData.props.description = desc;
+                const symbol = elem.querySelector('.element-symbol');
+                if (symbol) symbol.textContent = String(value);
+
             } else if (elemType === 'formula') {
                 const expression = document.getElementById('prop-expression').value;
                 const inputCount = parseInt(document.getElementById('prop-input-count').value) || 2;

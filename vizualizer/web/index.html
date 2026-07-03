@@ -18,6 +18,7 @@
             <button class="menu-btn" id="btn-visualize">📈 Визуализировать</button>
             <button class="menu-btn" id="btn-map">🌐 Карта</button>
             <button class="menu-btn" id="btn-all-signals">🛠 Проекты</button>
+            <button class="menu-btn" id="btn-constants">🎚️ Константы</button>
             <div id="user-badge" class="user-badge" title="Нажмите чтобы сменить пользователя">
                 👤 <span id="user-badge-name">—</span>
             </div>
@@ -147,7 +148,13 @@
                     <div class="palette-item-name">Switch</div>
                 </div>
 
-                
+                <div class="palette-item" data-type="multi-if">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="5" width="50" height="30" rx="5" fill="#0f3460" stroke="#d946ef" stroke-width="2"/>
+                            <text x="8" y="25" fill="#d946ef" font-size="9" font-weight="bold">MIF</text>
+                        </svg>
+                        <div class="palette-item-name">Комб. если</div>
+                </div>
 
                 <div class="palette-section">
                     <div class="palette-section-title">РАЗВЕТВЛЕНИЕ</div>
@@ -171,6 +178,16 @@
                         </svg>
                         <div class="palette-item-name">Константа</div>
                     </div>
+
+                    <div class="palette-item" data-type="signal-const">
+                        <svg viewBox="0 0 60 40">
+                            <rect x="10" y="8" width="40" height="24" rx="3" fill="#0f3460" stroke="#818cf8" stroke-width="2"/>
+                            <text x="22" y="25" fill="#818cf8" font-size="13" font-weight="bold">C*</text>
+                        </svg>
+                        <div class="palette-item-name">Сигнал-константа</div>
+                    </div>
+
+                    
 
                     <div class="palette-item" data-type="formula">
                         <svg viewBox="0 0 60 40">
@@ -304,6 +321,17 @@
             <div class="modal__actions">
                 <button id="project-cancel" class="btn btn-secondary">Отмена</button>
                 <button id="project-load" class="btn btn-primary" disabled>Загрузить</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="constants-modal-overlay" class="modal-overlay-class" style="display:none;">
+        <div id="constants-modal" class="modal-class" style="max-width:700px; max-height:80vh; overflow-y:auto;">
+            <h3>Назначить KKS для сигналов-констант</h3>
+            <div id="constants-list"></div>
+            <div class="modal-buttons" style="margin-top:15px;">
+                <button class="modal-btn cancel" id="constants-cancel">Отмена</button>
+                <button class="modal-btn save" id="constants-assign">Назначить</button>
             </div>
         </div>
     </div>
