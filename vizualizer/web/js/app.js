@@ -8,6 +8,30 @@ const App = {
      * Инициализация приложения
      */
 init() {
+    console.log('[INIT] Начало');
+    const menu = document.getElementById('menu');
+    if (menu) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList') {
+                    mutation.removedNodes.forEach(node => {
+                        if (node.id === 'btn-constants') {
+                            console.trace('[TRACE] btn-constants был удалён');
+                        }
+                    });
+                    if (!document.getElementById('btn-constants')) {
+                        console.trace('[TRACE] btn-constants исчез из DOM');
+                    }
+                }
+            });
+        });
+        observer.observe(menu, { childList: true, subtree: true });
+        console.log('[INIT] MutationObserver на меню запущен');
+}
+    console.log('[INIT] btn-constants существует:', !!document.getElementById('btn-constants'));
+    console.log('[INIT] multi-if в палитре:', !!document.querySelector('.palette-item[data-type="multi-if"]'));
+    console.log('[INIT] signal-const в палитре:', !!document.querySelector('.palette-item[data-type="signal-const"]'));
+
     // Settings.init() вызовется внутри autoLoadFromURL, если есть ?load=
     this.initUser();
     Settings.init().catch(console.error);
@@ -17,12 +41,13 @@ init() {
     this.setupGlobalMouseHandlers();
     this.setupContextMenu();
     this.setupWorkspaceClick();
-    //this.setupOutputCounter();
     this.setupMultiSelection();
 
     Viewport.init();
     Modal.init();
     Project.init();
+    console.log('[INIT] После Project.init');
+    console.log('[INIT] btn-constants:', !!document.getElementById('btn-constants'));
 
     if (typeof Outputs !== 'undefined' && Outputs.updateOutputStatus) {
         Outputs.updateOutputStatus();
@@ -43,17 +68,8 @@ init() {
         if (dstEl) {
             dstEl.value = processed || '';
         } else {
-            // fallback: если второе поле не добавили — покажем в исходном
             if (srcEl) srcEl.value = processed || '';
         }
-    });
-
-    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
-        if (e.target.id === 'constants-modal-overlay') App.hideConstantsModal();
-    });
-
-    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
-        if (e.target.id === 'constants-modal-overlay') App.hideConstantsModal();
     });
 
     document.getElementById('code-modal-close').addEventListener('click', () => {
@@ -63,6 +79,7 @@ init() {
     document.getElementById('btn-visualize').addEventListener('click', () => {
         App.openSignalVisualizer();
     });
+
     document.getElementById('btn-map').addEventListener('click', () => {
         const proj = AppState.project || {};
         const code = (proj.code || '').trim();
@@ -73,13 +90,11 @@ init() {
             return;
         }
 
-        // Формируем имя файла так же, как при сохранении!
         const filename = `${code}_${type}.json`;
         const url = `/map.html?project=${encodeURIComponent(filename)}&config=${encodeURIComponent(AppState.currentConfig || '')}`;
         window.open(url, '_blank');
     });
 
-        // Добавить в функцию init() после других обработчиков
     document.getElementById('btn-all-signals').addEventListener('click', () => {
         const currentUser = localStorage.getItem('lse_username') || 'Аноним';
         const config = AppState.currentConfig || '';
@@ -87,57 +102,61 @@ init() {
         window.open(url, '_blank');
     });
 
-        // Обработчики для модалки "Константы"
-    document.getElementById('btn-constants').addEventListener('click', () => App.showConstantsModal());
-    document.getElementById('constants-cancel').addEventListener('click', () => this.hideConstantsModal());
-    document.getElementById('constants-assign').addEventListener('click', () => this.assignConstants());
-    document.getElementById('constants-modal-overlay').addEventListener('click', (e) => {
-        if (e.target.id === 'constants-modal-overlay') this.hideConstantsModal();
-        });
+    document.getElementById('btn-create-similar').addEventListener('click', async () => {
+        try {
+            const proj = AppState.project || {};
+            const code = (proj.code || '').trim();
+            const type = (proj.type || 'parameter').trim();
 
-document.getElementById('btn-create-similar').addEventListener('click', async () => {
-    try {
-        const proj = AppState.project || {};
-        const code = (proj.code || '').trim();
-        const type = (proj.type || 'parameter').trim();
+            if (!code) {
+                alert('Сначала укажите код проекта в свойствах и сохраните проект.');
+                return;
+            }
 
-        if (!code) {
-            alert('Сначала укажите код проекта в свойствах и сохраните проект.');
-            return;
+            const filename = `${code}_${type}.json`;
+            const source = (type === 'template') ? 'templates' : 'projects';
+
+            await Settings.loadProject(filename, source);
+
+            const config = AppState.currentConfig || '';
+            const url = `/similar.html?filename=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(config)}`;
+            window.open(url, '_blank');
+        } catch (e) {
+            console.error(e);
+            alert('Ошибка при открытии мастера: ' + e.message);
         }
+    });
 
-        const filename = `${code}_${type}.json`;
-        const source = (type === 'template') ? 'templates' : 'projects';
-
-        // Проверяем, что проект существует (через Settings.loadProject, которая добавит config)
-        await Settings.loadProject(filename, source);
-
-        const config = AppState.currentConfig || '';
-        const url = `/similar.html?filename=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(config)}`;
-        window.open(url, '_blank');
-    } catch (e) {
-        console.error(e);
-        alert('Ошибка при открытии мастера: ' + e.message);
+    // ================= Безопасные обработчики модалки «Константы» =================
+    const constOverlay = document.getElementById('constants-modal-overlay');
+    if (constOverlay) {
+        constOverlay.addEventListener('click', (e) => {
+            if (e.target.id === 'constants-modal-overlay') App.hideConstantsModal();
+        });
     }
-});
+    const constCancel = document.getElementById('constants-cancel');
+    if (constCancel) {
+        constCancel.addEventListener('click', () => App.hideConstantsModal());
+    }
+    const constAssign = document.getElementById('constants-assign');
+    if (constAssign) {
+        constAssign.addEventListener('click', () => App.assignConstants());
+    }
+    const constBtn = document.getElementById('btn-constants');
+    if (constBtn) {
+        constBtn.addEventListener('click', () => App.showConstantsModal());
+    }
 
-
-    //document.getElementById('code-modal-to-system').addEventListener('click', () => {
-    //    const srcEl = document.getElementById('code-output');
-    //    const dstEl = document.getElementById('code-output-system');
-    //    const originalCode = (srcEl && typeof srcEl.value === 'string') ? srcEl.value : '';
-    //
-    //    const processed = App.prepareCodeForSystem(originalCode);
-    //    if (dstEl) {
-    //        dstEl.value = processed || '';
-    //    } else {
-    //        // fallback: если второе поле не добавили — покажем в исходном
-    //        if (srcEl) srcEl.value = processed || '';
-    //    }
-    //});
-
-    // ===== Автозагрузка проекта из URL =====
-    this.autoLoadFromURL();
+    // ===== Автозагрузка проекта из URL (безопасно) =====
+    console.log('[INIT] Перед autoLoadFromURL');
+    console.log('[INIT] btn-constants:', !!document.getElementById('btn-constants'));
+    try {
+        this.autoLoadFromURL();
+    } catch (err) {
+        console.error('[autoLoad] Ошибка:', err);
+    }
+    console.log('[INIT] После autoLoadFromURL');
+    console.log('[INIT] btn-constants:', !!document.getElementById('btn-constants'));
 },
 
 
