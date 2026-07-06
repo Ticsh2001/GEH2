@@ -159,6 +159,10 @@ init() {
     console.log('[INIT] btn-constants:', !!document.getElementById('btn-constants'));
 },
 
+hideConstantsModal() {
+        document.getElementById('constants-modal-overlay').style.display = 'none';
+    },
+
 
 
 async loadConfigurations() {
@@ -213,17 +217,19 @@ async loadConfigurations() {
             return;
         }
 
+        // Увеличиваем ширину модального окна
+        const modal = document.getElementById('constants-modal');
+        if (modal) {
+            modal.style.maxWidth = '850px';
+        }
+
         list.innerHTML = signalConsts.map(el => `
-            <div class="modal-row" style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
-                <span style="min-width:200px;">${el.props.description || el.id}</span>
-                <input type="text" class="const-kks" data-id="${el.id}" placeholder="KKS код" style="flex:1;">
+            <div class="modal-row" style="margin-bottom:12px;">
+                <label style="font-weight:600;">${el.props.description || el.id}</label>
+                <input type="text" class="const-kks" data-id="${el.id}" placeholder="KKS код" style="width:100%;">
             </div>
         `).join('');
         document.getElementById('constants-modal-overlay').style.display = 'flex';
-    },
-
-    hideConstantsModal() {
-        document.getElementById('constants-modal-overlay').style.display = 'none';
     },
 
     async assignConstants() {
@@ -324,6 +330,21 @@ async loadConfigurations() {
                 const { html } = Elements.createElementHTML('input-signal', elemId, elemData.x, elemData.y, elemData.props, elemData.width, elemData.height);
                 elemDom.outerHTML = html;
                 Elements.setupElementHandlers(elemId);
+            }
+        }
+
+                // ========== НОВОЕ: замена имён в формулах ==========
+        for (const { elemId, kks } of replacements) {
+            // Проходим по всем элементам схемы
+            for (const [id, el] of Object.entries(AppState.elements)) {
+                if (el.type === 'formula') {
+                    // Заменяем старое имя (внутренний ID элемента) на новый KKS
+                    if (el.props.expression) {
+                        // Создаём регулярное выражение, которое ищет точное совпадение elemId
+                        const regex = new RegExp('\\b' + elemId + '\\b', 'g');
+                        el.props.expression = el.props.expression.replace(regex, kks);
+                    }
+                }
             }
         }
 

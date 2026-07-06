@@ -73,7 +73,21 @@ const CodeGenGraph = {
             if (token === currentElemId) continue;
 
             const elem = AppState.elements[token];
-            if (!elem || !this.isInlineableType(elem.type)) continue;
+            if (elem && (elem.type === 'const' || elem.type === 'signal-const')) {
+                console.log(`[EXPAND] Найден ${elem.type} с токеном ${token}, value = ${elem.props.value}`);
+                }
+            if (!elem) continue;
+
+            // ---------- ОБРАБОТКА КОНСТАНТ ----------
+            if (elem.type === 'const' || elem.type === 'signal-const') {
+                const val = Number(elem.props.value) || 0;
+                const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                result = result.replace(new RegExp(`\\b${escaped}\\b`, 'g'), String(val));
+                continue;
+            }
+            // ---------------------------------------
+
+            if (!this.isInlineableType(elem.type)) continue;
 
             const refGraph = this.buildDependencyGraph(token);
             if (!refGraph) continue;
@@ -361,6 +375,9 @@ const CodeGenGraph = {
                 const condCtx = this.collectAllCond(graph);
                 return condCtx ? Optimizer.When(condCtx, exprCore, Optimizer.Const(0)) : exprCore;
             }
+
+            case 'signal-const':
+                return Optimizer.Const(Number(elem.props.value) || 0);
 
             default:
                 return Optimizer.Const(0);
