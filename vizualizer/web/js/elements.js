@@ -455,7 +455,10 @@ const Elements = {
             }
 
             if (!elemId) {
-                elemId = `${elemType}_${++AppState.elementCounter}`;
+                // Заменяем дефисы в имени типа на подчёркивания,
+                // чтобы ID были безопасными именами (без арифметических знаков)
+                const safeType = elemType.replace(/-/g, '_');
+                elemId = `${safeType}_${++AppState.elementCounter}`;
             }
 
             let width = customWidth;
