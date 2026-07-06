@@ -80,11 +80,22 @@ const Modal = {
         const filename = `${code}_${type}.json`;
         const config = AppState.currentConfig || '';
 
+        // Блок для индикации загрузки (будем использовать, но потом скроем)
         const previewDiv = document.getElementById('dependency-preview');
-        if (previewDiv) {
-            previewDiv.style.display = 'block';
-            previewDiv.textContent = '⏳ Сборка промпта и запрос к LLM...';
-        }
+        const showLoading = (msg) => {
+            if (previewDiv) {
+                previewDiv.style.display = 'block';
+                previewDiv.textContent = msg;
+            }
+        };
+        const hidePreview = () => {
+            if (previewDiv) {
+                previewDiv.style.display = 'none';
+                previewDiv.textContent = '';
+            }
+        };
+
+        showLoading('⏳ Сборка промпта и запрос к LLM...');
 
         try {
             // 1. Загружаем всё необходимое
@@ -146,14 +157,50 @@ const Modal = {
             const llmData = await llmResp.json();
             const llmText = llmData.response || '(пустой ответ)';
 
-            // 5. Выводим результат
-            if (previewDiv) {
-                previewDiv.textContent = llmText;
+            // 5. Заполняем поля в модалке
+            if (projectType === 'parameter') {
+                const descField = document.getElementById('project-description');
+                if (descField) {
+                    const oldText = descField.value.trim();
+                    const newText = `------------ПРЕДЛОЖЕНИЕ AI---------------\n${llmText.trim()}`;
+                    descField.value = oldText ? `${newText}\n\n(было)\n${oldText}` : newText;
+                }
+            } else if (projectType === 'rule') {
+                // Парсим ответ модели по ожидаемым меткам
+                const descMatch = llmText.match(/DESCRIPTION:\s*([\s\S]*?)(?=POSSIBLE_CAUSE:|GUIDELINES:|$)/i);
+                const causeMatch = llmText.match(/POSSIBLE_CAUSE:\s*([\s\S]*?)(?=GUIDELINES:|$)/i);
+                const guideMatch = llmText.match(/GUIDELINES:\s*([\s\S]*?)$/i);
+
+                const aiDesc = descMatch ? descMatch[1].trim() : llmText.trim();
+                const aiCause = causeMatch ? causeMatch[1].trim() : '';
+                const aiGuide = guideMatch ? guideMatch[1].trim() : '';
+
+                const descField = document.getElementById('project-rule-description');
+                const causeField = document.getElementById('project-possible-cause');
+                const guideField = document.getElementById('project-guidelines');
+
+                if (descField) {
+                    const old = descField.value.trim();
+                    const newText = `------------ПРЕДЛОЖЕНИЕ AI---------------\n${aiDesc}`;
+                    descField.value = old ? `${newText}\n\n(было)\n${old}` : newText;
+                }
+                if (causeField) {
+                    const old = causeField.value.trim();
+                    const newText = `------------ПРЕДЛОЖЕНИЕ AI---------------\n${aiCause}`;
+                    causeField.value = old ? `${newText}\n\n(было)\n${old}` : newText;
+                }
+                if (guideField) {
+                    const old = guideField.value.trim();
+                    const newText = `------------ПРЕДЛОЖЕНИЕ AI---------------\n${aiGuide}`;
+                    guideField.value = old ? `${newText}\n\n(было)\n${old}` : newText;
+                }
             }
+
+            // Успешно – скрываем отладочный блок
+            hidePreview();
         } catch (e) {
-            if (previewDiv) {
-                previewDiv.textContent = 'Ошибка: ' + e.message;
-            }
+            showLoading('Ошибка: ' + e.message);
+            // Оставляем блок видимым, чтобы пользователь увидел ошибку
         }
     },
 
@@ -1215,7 +1262,7 @@ const Modal = {
             ${outputsHtml}
              <div class="modal-buttons" style="margin-top:10px; justify-content:flex-start;">
                 <button id="dependency-tree-btn" class="modal-btn" style="background:#f59e0b; color:#000;">
-                    ✨ Показать матрёшку
+                    ✨ Предложение AI
                 </button>
             </div>
         `;
