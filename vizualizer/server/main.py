@@ -11,6 +11,8 @@ from io import BytesIO
 from update_projects import update_projects_if_templates_changed
 from datetime import datetime
 import io
+import requests
+
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
@@ -1328,6 +1330,196 @@ async def export_remarks(data: List[Dict[str, Any]] = Body(...)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=syntax_remarks.xlsx"}
     )
+
+
+
+# Зависимости: используем уже существующие функции
+# – extract_input_signals_from_project, resolve_signal_dependencies,
+# – load_project_by_code, config_path
+
+def _build_dependency_tree(signal_name: str, config: str, visited: set = None) -> dict:
+    if visited is None:
+        visited = set()
+    if signal_name in visited:
+        return {"name": signal_name, "type": "cyclic", "description": "Циклическая зависимость", "code": ""}
+    visited.add(signal_name)
+
+    # Базовый сигнал
+    if is_base_signal(signal_name, config):
+        # Ищем описание среди загруженных сигналов
+        desc = ""
+        signals_list = get_signals_for_config(config)
+        for s in signals_list:
+            if s["Tagname"] == signal_name:
+                desc = s.get("Description", "")
+                break
+        return {
+            "name": signal_name,
+            "type": "base",
+            "description": desc,
+            "code": ""   # у базового сигнала нет кода
+        }
+
+    # Синтетический сигнал – загружаем его проект
+    project = load_project_by_code(signal_name, config)
+    if not project:
+        return {"name": signal_name, "type": "unknown", "description": "Проект не найден", "code": ""}
+
+    proj_meta = project.get("project", {})
+    desc = proj_meta.get("description", "")
+    dim = proj_meta.get("dimension", "")
+    code = project.get("formula", "")   # исходный код проекта
+    code_truncated = False
+    if len(code) > STATE.get('settings').get('llm').get('max_code_length'):
+        code = code[:STATE.get('settings').get('llm').get('max_code_length')] + "..."
+        code_truncated = True
+
+    # Рекурсивно строим детей
+    input_names = extract_input_signals_from_project(project)
+    children = []
+    for inp in sorted(set(input_names)):
+        children.append(_build_dependency_tree(inp, config, visited.copy()))
+
+    return {
+        "name": signal_name,
+        "type": "synthetic",
+        "description": desc,
+        "dimension": dim,
+        "code": code,
+        "code_truncated": code_truncated,
+        "inputs": children
+    }
+
+
+@app.get("/api/project/dependency-tree")
+def api_dependency_tree(filename: str, source: str = "projects", config: str = Query(...)):
+    """Возвращает дерево зависимостей сигналов для указанного проекта."""
+    # Загружаем проект
+    try:
+        path = get_storage_path(filename, storage=source, config=config if source == "projects" else None)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Project not found")
+        with open(path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading project: {e}")
+
+    project_meta = content.get("project", {})
+    project_code = project_meta.get("code", "").strip()
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+
+    # Собираем входные сигналы текущего проекта
+    input_signals = extract_input_signals_from_project(content)
+    unique_inputs = sorted(set(input_signals))
+
+    # Строим дерево для каждого входного сигнала
+    trees = []
+    for sig in unique_inputs:
+        trees.append(_build_dependency_tree(sig, config))
+
+    raw_code = content.get("code", "")
+    code_truncated = False
+    if len(raw_code) > STATE.get('settings').get('llm').get('max_code_length'):
+        raw_code = raw_code[:STATE.get('settings').get('llm').get('max_code_length')] + "..."
+        code_truncated = True
+
+    return {
+        "project": project_code,
+        "type": project_meta.get("type", ""),
+        "description": project_meta.get("description", ""),
+        "dimension": project_meta.get("dimension", ""),
+        "possibleCause": project_meta.get("possibleCause", ""),
+        "guidelines": project_meta.get("guidelines", ""),
+        "code": raw_code,          # <-- код текущего проекта
+        "code_truncated": code_truncated,
+        "dependencies": trees
+    }
+
+@app.get("/api/llm/context-structure")
+def api_llm_context_structure():
+    """Возвращает содержимое structure.md из папки, указанной в настройках"""
+    settings = STATE.get("settings") or {}
+    llm_cfg = settings.get("llm") or {}
+    context_dir = llm_cfg.get("contextFolder")
+    if not context_dir:
+        raise HTTPException(status_code=500, detail="LLM context folder not configured in settings.json")
+    # Если путь относительный – делаем абсолютным относительно BASE_DIR
+    if not os.path.isabs(context_dir):
+        context_dir = os.path.normpath(os.path.join(BASE_DIR, context_dir))
+    path = os.path.join(context_dir, "structure.md")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="structure.md not found")
+    with open(path, "r", encoding="utf-8") as f:
+        return {"content": f.read()}
+
+
+@app.get("/api/llm/context-syntax")
+def api_llm_context_syntax():
+    """Возвращает содержимое syntax.md из папки, указанной в настройках"""
+    settings = STATE.get("settings") or {}
+    llm_cfg = settings.get("llm") or {}
+    context_dir = llm_cfg.get("contextFolder")
+    if not context_dir:
+        raise HTTPException(status_code=500, detail="LLM context folder not configured in settings.json")
+    if not os.path.isabs(context_dir):
+        context_dir = os.path.normpath(os.path.join(BASE_DIR, context_dir))
+    path = os.path.join(context_dir, "syntax.md")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="syntax.md not found")
+    with open(path, "r", encoding="utf-8") as f:
+        return {"content": f.read()}
+    
+@app.get("/api/llm/config")
+def api_llm_config():
+    settings = STATE.get("settings") or {}
+    llm_cfg = settings.get("llm") or {}
+    return {
+        "ollamaUrl": llm_cfg.get("ollamaUrl", "http://localhost:11434"),
+        "contextFolder": llm_cfg.get("contextFolder", ""),
+        "max_code_length": llm_cfg.get("max_code_length", 4000)
+    }
+
+@app.post("/api/llm/generate")
+async def api_llm_generate(payload: dict = Body(...)):
+    settings = STATE.get("settings") or {}
+    llm_cfg = settings.get("llm") or {}
+    ollama_url = llm_cfg.get("ollamaUrl", "http://localhost:11434")
+    model = payload.get("model", "gemma4:31b")
+    prompt = payload.get("prompt", "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+    
+    # Пробуем сначала стандартный /api/generate, потом /v1/completions
+    paths_to_try = ["/api/generate", "/v1/completions"]
+    last_error = None
+    
+    for path in paths_to_try:
+        try:
+            resp = requests.post(
+                f"{ollama_url}{path}",
+                json={"model": model, "prompt": prompt, "stream": False},
+                headers={"Content-Type": "application/json"},
+                timeout=120
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                # Извлекаем ответ в зависимости от API
+                if "response" in data:
+                    return {"response": data["response"]}
+                elif "choices" in data and len(data["choices"]) > 0:
+                    return {"response": data["choices"][0].get("text", "")}
+                else:
+                    return {"response": "Empty response from model"}
+            else:
+                last_error = f"{path} returned {resp.status_code}: {resp.text[:200]}"
+        except Exception as e:
+            last_error = f"{path} failed: {str(e)}"
+            continue
+    
+    raise HTTPException(status_code=502, detail=f"Ollama error: {last_error}")
 
 
 

@@ -70,6 +70,93 @@ const Modal = {
         });
     },
 
+    async showDependencyTree() {
+        const code = AppState.project.code;
+        if (!code) {
+            alert('Сначала укажите код проекта (сохраните проект)');
+            return;
+        }
+        const type = AppState.project.type || 'parameter';
+        const filename = `${code}_${type}.json`;
+        const config = AppState.currentConfig || '';
+
+        const previewDiv = document.getElementById('dependency-preview');
+        if (previewDiv) {
+            previewDiv.style.display = 'block';
+            previewDiv.textContent = '⏳ Сборка промпта и запрос к LLM...';
+        }
+
+        try {
+            // 1. Загружаем всё необходимое
+            const treeUrl = `/api/project/dependency-tree?filename=${encodeURIComponent(filename)}&source=projects&config=${encodeURIComponent(config)}`;
+            const [treeResp, structResp, syntaxResp] = await Promise.all([
+                fetch(treeUrl),
+                fetch('/api/llm/context-structure'),
+                fetch('/api/llm/context-syntax')
+            ]);
+
+            if (!treeResp.ok) throw new Error('Ошибка загрузки дерева');
+            const tree = await treeResp.json();
+
+            let structureMd = '';
+            let syntaxMd = '';
+            if (structResp.ok) {
+                const s = await structResp.json();
+                structureMd = s.content || '';
+            }
+            if (syntaxResp.ok) {
+                const s = await syntaxResp.json();
+                syntaxMd = s.content || '';
+            }
+
+            const projectType = tree.type || 'parameter';
+            const projectCode = tree.project || '';
+            const desc = tree.description || '';
+            const dim = tree.dimension || '';
+            const cause = tree.possibleCause || '';
+            const guide = tree.guidelines || '';
+
+            // 2. Строим системный промпт
+            let systemPrompt = `You are an engineer at a thermal power plant. You are filling in the properties of a ${projectType === 'rule' ? 'protection/blocking rule' : 'calculated parameter'} for an automated process control system.\n\nBelow is a JSON tree of the input signals that the project depends on, along with their descriptions and (for synthetic signals) their calculation code.`;
+            if (structureMd) systemPrompt += `\n\nExplanation of the JSON structure:\n${structureMd}`;
+            if (syntaxMd) systemPrompt += `\n\nDescription of the code syntax used in the "code" fields:\n${syntaxMd}`;
+            systemPrompt += `\n\nJSON dependency tree:\n${JSON.stringify(tree, null, 2)}`;
+
+            // 3. Пользовательский запрос
+            let userPrompt = '';
+            if (projectType === 'parameter') {
+                userPrompt = `Based on the project code "${projectCode}", its current description${desc ? ` "${desc}"` : ''}, dimension "${dim}", and the provided dependency tree, formulate a detailed description of this parameter.\n\nThe description should:\n- Explain what physical quantity or process characteristic the parameter represents.\n- Mention which input signals are used and how they are processed (use the tree to find them).\n- Be written in a professional engineering style typical for thermal power plant documentation.\n- Include the dimension (${dim || 'not specified'}) if applicable.\n\nReturn only the final description text, without any introductory phrases.`;
+            } else {
+                userPrompt = `Based on the project code "${projectCode}", its current description${desc ? ` "${desc}"` : ''}, possible cause${cause ? ` "${cause}"` : ''}, guidelines${guide ? ` "${guide}"` : ''}, and the provided dependency tree, formulate the following three fields for this rule:\n\n1. **Description** – what the rule controls, why it is needed.\n2. **Possible cause** – the most likely reason for the rule to trigger.\n3. **Guidelines** – actions for the operator when the rule fires.\n\nUse the dependency tree to understand which signals the rule relies on. Write in a professional engineering style typical for thermal power plant documentation.\n\nReturn the answer strictly in the following format, each on a new line:\nDESCRIPTION: <text>\nPOSSIBLE_CAUSE: <text>\nGUIDELINES: <text>`;
+            }
+
+            const fullPrompt = systemPrompt + '\n\n' + userPrompt + '\n' + 'Write the answer strictly in Russian language';
+
+            // 4. Отправляем в Ollama через наш прокси
+            const llmResp = await fetch('/api/llm/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    model: 'gemma4:31b',
+                    prompt: fullPrompt
+                })
+            });
+
+            if (!llmResp.ok) throw new Error('Ошибка LLM: ' + (await llmResp.text()));
+            const llmData = await llmResp.json();
+            const llmText = llmData.response || '(пустой ответ)';
+
+            // 5. Выводим результат
+            if (previewDiv) {
+                previewDiv.textContent = llmText;
+            }
+        } catch (e) {
+            if (previewDiv) {
+                previewDiv.textContent = 'Ошибка: ' + e.message;
+            }
+        }
+    },
+
     /**
      * Показать модальное окно
      */
@@ -82,6 +169,16 @@ const Modal = {
      */
     hideModal(modalId) {
         document.getElementById(modalId).style.display = 'none';
+
+         if (modalId === 'project-modal-overlay') {
+            const preview = document.getElementById('dependency-preview');
+            if (preview) {
+                preview.style.display = 'none';
+                preview.textContent = '';
+            }
+        }
+
+
         // Скрываем tooltip если он есть
         const tooltip = document.getElementById('template-tooltip');
         if (tooltip) {
@@ -467,6 +564,9 @@ const Modal = {
         
 
         modalContent.innerHTML = contentHTML;
+
+      
+
         // modal.js — внутри showPropertiesModal, блок if (elemType === 'formula')
         if (elemType === 'formula') {
             const listEl = document.getElementById('template-list');
@@ -1113,7 +1213,35 @@ const Modal = {
 
             
             ${outputsHtml}
+             <div class="modal-buttons" style="margin-top:10px; justify-content:flex-start;">
+                <button id="dependency-tree-btn" class="modal-btn" style="background:#f59e0b; color:#000;">
+                    ✨ Показать матрёшку
+                </button>
+            </div>
         `;
+
+        const depTreeBtn = content.querySelector('#dependency-tree-btn');
+        if (depTreeBtn) {
+            depTreeBtn.addEventListener('click', () => this.showDependencyTree());
+        }
+
+        // Блок для отображения JSON (как и было раньше)
+        let previewDiv = document.getElementById('dependency-preview');
+        if (!previewDiv) {
+            previewDiv = document.createElement('div');
+            previewDiv.id = 'dependency-preview';
+            previewDiv.style.marginTop = '10px';
+            previewDiv.style.maxHeight = '300px';
+            previewDiv.style.overflowY = 'auto';
+            previewDiv.style.background = '#0a0a1a';
+            previewDiv.style.padding = '10px';
+            previewDiv.style.borderRadius = '5px';
+            previewDiv.style.display = 'none';
+            content.appendChild(previewDiv);
+        }
+
+
+
 
         const templateArgsContainer = content.querySelector('#template-args-container');
         if (templateArgsContainer) {

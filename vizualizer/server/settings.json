@@ -5,5 +5,10 @@
   "signalArchiveFolder": "archive",
   "tablesFolder": "tables",
   "visualizerPort": 8501,
-  "adminAuthor": "Виктор Тищенко"
+  "adminAuthor": "Виктор Тищенко",
+  "llm": {
+    "contextFolder": "llm_context",
+    "ollamaUrl": "http://localhost:11434",
+    "max_code_length": 4000
+  }
 }
