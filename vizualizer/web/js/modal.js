@@ -148,7 +148,6 @@ const Modal = {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    model: 'gemma4:31b',
                     prompt: fullPrompt
                 })
             });

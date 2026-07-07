@@ -1479,7 +1479,8 @@ def api_llm_config():
     return {
         "ollamaUrl": llm_cfg.get("ollamaUrl", "http://localhost:11434"),
         "contextFolder": llm_cfg.get("contextFolder", ""),
-        "max_code_length": llm_cfg.get("max_code_length", 4000)
+        "max_code_length": llm_cfg.get("max_code_length", 4000),
+        "model": llm_cfg.get("model", "gemma4:31b")   # ← новое
     }
 
 @app.post("/api/llm/generate")
@@ -1487,39 +1488,24 @@ async def api_llm_generate(payload: dict = Body(...)):
     settings = STATE.get("settings") or {}
     llm_cfg = settings.get("llm") or {}
     ollama_url = llm_cfg.get("ollamaUrl", "http://localhost:11434")
-    model = payload.get("model", "gemma4:31b")
+    model = llm_cfg.get("model", "gemma4:31b")   # ← из конфига
     prompt = payload.get("prompt", "")
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
     
-    # Пробуем сначала стандартный /api/generate, потом /v1/completions
-    paths_to_try = ["/api/generate", "/v1/completions"]
-    last_error = None
-    
-    for path in paths_to_try:
-        try:
-            resp = requests.post(
-                f"{ollama_url}{path}",
-                json={"model": model, "prompt": prompt, "stream": False},
-                headers={"Content-Type": "application/json"},
-                timeout=120
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                # Извлекаем ответ в зависимости от API
-                if "response" in data:
-                    return {"response": data["response"]}
-                elif "choices" in data and len(data["choices"]) > 0:
-                    return {"response": data["choices"][0].get("text", "")}
-                else:
-                    return {"response": "Empty response from model"}
-            else:
-                last_error = f"{path} returned {resp.status_code}: {resp.text[:200]}"
-        except Exception as e:
-            last_error = f"{path} failed: {str(e)}"
-            continue
-    
-    raise HTTPException(status_code=502, detail=f"Ollama error: {last_error}")
+    try:
+        resp = requests.post(
+            f"{ollama_url}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False},
+            timeout=120
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {"response": data.get("response", "")}
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Ollama HTTP error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Ollama connection error: {str(e)}")
 
 
 
