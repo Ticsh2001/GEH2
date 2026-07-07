@@ -1497,7 +1497,7 @@ async def api_llm_generate(payload: dict = Body(...)):
         resp = requests.post(
             f"{ollama_url}/api/generate",
             json={"model": model, "prompt": prompt, "stream": False},
-            timeout=llm_cfg.get("timeout", 120)
+            timeout=(10, llm_cfg.get("timeout", 120))
         )
         resp.raise_for_status()
         data = resp.json()
