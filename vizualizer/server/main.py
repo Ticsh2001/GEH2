@@ -12,6 +12,8 @@ from update_projects import update_projects_if_templates_changed
 from datetime import datetime
 import io
 import requests
+import httpx
+
 
 
 from openpyxl import Workbook
@@ -1488,24 +1490,28 @@ async def api_llm_generate(payload: dict = Body(...)):
     settings = STATE.get("settings") or {}
     llm_cfg = settings.get("llm") or {}
     ollama_url = llm_cfg.get("ollamaUrl", "http://localhost:11434")
-    model = llm_cfg.get("model", "gemma4:31b")   # ← из конфига
+    model = llm_cfg.get("model", "gemma4:31b")
     prompt = payload.get("prompt", "")
+    timeout = llm_cfg.get("timeout", 300)
+
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required")
-    
-    try:
-        resp = requests.post(
-            f"{ollama_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
-            timeout=(10, llm_cfg.get("timeout", 120))
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return {"response": data.get("response", "")}
-    except requests.exceptions.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Ollama HTTP error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Ollama connection error: {str(e)}")
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            resp = await client.post(
+                f"{ollama_url}/api/generate",
+                json={"model": model, "prompt": prompt, "stream": False}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return {"response": data.get("response", "")}
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=502, detail=f"Ollama HTTP error: {e.response.text}")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Ollama request timed out")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Ollama connection error: {str(e)}")
 
 
 
