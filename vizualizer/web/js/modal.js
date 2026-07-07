@@ -70,7 +70,7 @@ const Modal = {
         });
     },
 
-    async showDependencyTree() {
+        async showDependencyTree() {
         const code = AppState.project.code;
         if (!code) {
             alert('Сначала укажите код проекта (сохраните проект)');
@@ -80,7 +80,6 @@ const Modal = {
         const filename = `${code}_${type}.json`;
         const config = AppState.currentConfig || '';
 
-        // Блок для индикации загрузки (будем использовать, но потом скроем)
         const previewDiv = document.getElementById('dependency-preview');
         const showLoading = (msg) => {
             if (previewDiv) {
@@ -127,29 +126,91 @@ const Modal = {
             const cause = tree.possibleCause || '';
             const guide = tree.guidelines || '';
 
-            // 2. Строим системный промпт
-            let systemPrompt = `You are an engineer at a thermal power plant. You are filling in the properties of a ${projectType === 'rule' ? 'protection/blocking rule' : 'calculated parameter'} for an automated process control system.\n\nBelow is a JSON tree of the input signals that the project depends on, along with their descriptions and (for synthetic signals) their calculation code.`;
-            if (structureMd) systemPrompt += `\n\nExplanation of the JSON structure:\n${structureMd}`;
-            if (syntaxMd) systemPrompt += `\n\nDescription of the code syntax used in the "code" fields:\n${syntaxMd}`;
-            systemPrompt += `\n\nJSON dependency tree:\n${JSON.stringify(tree, null, 2)}`;
+            // Определяем, есть ли усечённый код где-либо в дереве
+            const hasTruncatedCode = (node) => {
+                if (node.code_truncated) return true;
+                if (node.inputs && node.inputs.length) {
+                    return node.inputs.some(child => hasTruncatedCode(child));
+                }
+                if (node.dependencies && node.dependencies.length) {
+                    return node.dependencies.some(child => hasTruncatedCode(child));
+                }
+                return false;
+            };
+
+            const truncated = hasTruncatedCode(tree);
+
+            // 2. Строим системный промпт (по вашему шаблону)
+            let systemPrompt = `You are an instrumentation and control (I&C) engineer at a thermal power plant with deep expertise in turbine and boiler equipment. Your task is to fill in the fields of ${projectType === 'rule' ? 'a protection/interlock rule project' : 'a calculated parameter project'} for a diagnostic system.
+
+Below is a JSON dependency tree of the input signals this project depends on, including their descriptions and (for synthetic signals) their calculation code.`;
+
+            if (structureMd) systemPrompt += `\n\n## JSON tree structure reference\n${structureMd}`;
+            if (syntaxMd) systemPrompt += `\n\n## Code syntax reference for "code" fields\n${syntaxMd}`;
+
+            systemPrompt += `\n\n## Analysis steps (perform internally before answering; do not show this reasoning in the output — only the final result)
+1. Identify which signals in the tree are base signals (type: "base") and which are synthetic (type: "synthetic"); for synthetic signals, parse their code using the syntax reference.
+2. For each significant signal, determine its physical meaning from its KKS code prefix: the system group (leading letters, see systems table) and the measurement/control type (letters following the digits, see measurement types table).
+3. Trace the full chain: how the final parameter/rule value depends on base signals through intermediate synthetic calculations.
+4. Pay attention to constructs like WHEN(condition, ...) and comparisons (>, <, >=, <=) — these are thresholds and triggering logic; reflect them concretely in the answer, not in vague terms.
+5. If functions like HISTORYAVG/HISTORYGRADIENT/HISTORYMAX etc. are used, account for the physical meaning of the time window (period in minutes): this is an average, trend, or extremum over an interval, not an instantaneous value.`;
+
+            if (truncated) {
+                systemPrompt += `\n6. IMPORTANT: some signals in the tree have "code_truncated": true — their code was cut off due to length. Do not make assumptions about the truncated part; rely only on the visible portion.`;
+            }
+
+            systemPrompt += `\n\n## Output style requirements
+- Professional engineering style typical of thermal power plant operational documentation.
+- Maximum technical specificity: reference actual KKS signal codes from the tree, not just their verbal descriptions.
+- If the code contains numeric thresholds (comparisons, constants), state the concrete values and their physical meaning.
+- Do not use vague statements without concrete backing (e.g. "this parameter is important for process control" with no explanation of how).
+- Do not invent information that is not present in the dependency tree or current descriptions. If some information is insufficient to fully explain something, state this explicitly rather than guessing.
+- Do not use markdown formatting (no asterisks, no headers, no "-"/"*" bullet lists) — plain connected text only.
+- CRITICAL: Regardless of the fact that this system prompt and the reference materials are in English, your entire response MUST be written in Russian. Do not output any English text in the final answer.
+
+## JSON dependency tree
+${JSON.stringify(tree, null, 2)}`;
 
             // 3. Пользовательский запрос
             let userPrompt = '';
             if (projectType === 'parameter') {
-                userPrompt = `Based on the project code "${projectCode}", its current description${desc ? ` "${desc}"` : ''}, dimension "${dim}", and the provided dependency tree, formulate a detailed description of this parameter.\n\nThe description should:\n- Explain what physical quantity or process characteristic the parameter represents.\n- Mention which input signals are used and how they are processed (use the tree to find them).\n- Be written in a professional engineering style typical for thermal power plant documentation.\n- Include the dimension (${dim || 'not specified'}) if applicable.\n\nReturn only the final description text, without any introductory phrases.`;
+                userPrompt = `Project: "${projectCode}"${desc ? `, current description: "${desc}"` : ''}, dimension: "${dim || 'not specified'}".
+
+Write a detailed technical description of this parameter.
+
+The description must:
+- Explain what physical quantity or process characteristic the parameter represents.
+- Explicitly name which input signals (with their KKS codes) are used and how they are processed, based on the dependency tree and the parsed code.
+- State concrete thresholds/conditions if present in the calculation code.
+- Include the dimension (${dim || 'if applicable'}).
+
+Return only the final description text, with no introductory phrases (e.g. do not start with "Here is the description:").
+
+Write your entire answer in Russian.`;
             } else {
-                userPrompt = `Based on the project code "${projectCode}", its current description${desc ? ` "${desc}"` : ''}, possible cause${cause ? ` "${cause}"` : ''}, guidelines${guide ? ` "${guide}"` : ''}, and the provided dependency tree, formulate the following three fields for this rule:\n\n1. **Description** – what the rule controls, why it is needed.\n2. **Possible cause** – the most likely reason for the rule to trigger.\n3. **Guidelines** – actions for the operator when the rule fires.\n\nUse the dependency tree to understand which signals the rule relies on. Write in a professional engineering style typical for thermal power plant documentation.\n\nReturn the answer strictly in the following format, each on a new line:\nDESCRIPTION: <text>\nPOSSIBLE_CAUSE: <text>\nGUIDELINES: <text>`;
+                userPrompt = `Rule project: "${projectCode}"${desc ? `, current description: "${desc}"` : ''}${cause ? `, current possible cause: "${cause}"` : ''}${guide ? `, current guidelines: "${guide}"` : ''}.
+
+Based on the dependency tree and the parsed code, write three fields for this rule:
+
+1. DESCRIPTION — what the rule controls, why it exists, and under what condition it triggers (state concrete thresholds from the code, if any).
+2. POSSIBLE_CAUSE — the most likely technical reason for the rule to trigger, based on the physical meaning of the involved signals.
+3. GUIDELINES — concrete actions for operations personnel when the rule fires.
+
+Return the answer strictly in the following format, each field on its own line, with no markdown formatting:
+DESCRIPTION: <text>
+POSSIBLE_CAUSE: <text>
+GUIDELINES: <text>
+
+Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_CAUSE, GUIDELINES) exactly as shown, in English.`;
             }
 
-            const fullPrompt = systemPrompt + '\n\n' + userPrompt + '\n' + 'Write the answer strictly in Russian language';
+            const fullPrompt = systemPrompt + '\n\n' + userPrompt;
 
-            // 4. Отправляем в Ollama через наш прокси
+            // 4. Отправляем в Ollama через наш прокси (без указания model)
             const llmResp = await fetch('/api/llm/generate', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    prompt: fullPrompt
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: fullPrompt })
             });
 
             if (!llmResp.ok) throw new Error('Ошибка LLM: ' + (await llmResp.text()));
@@ -199,7 +260,6 @@ const Modal = {
             hidePreview();
         } catch (e) {
             showLoading('Ошибка: ' + e.message);
-            // Оставляем блок видимым, чтобы пользователь увидел ошибку
         }
     },
 

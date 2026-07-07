@@ -10,6 +10,7 @@
     "contextFolder": "llm_context",
     "ollamaUrl": "http://localhost:11434",
     "max_code_length": 4000,
-    "model": "gemma4:31b"
+    "model": "gemma4:31b",
+    "timeout": 400
   }
 }
