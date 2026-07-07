@@ -210,7 +210,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
             const llmResp = await fetch('/api/llm/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: fullPrompt })
+                body: JSON.stringify({ prompt: fullPrompt, options: { temperature: 0.3 }})
             });
 
             if (!llmResp.ok) throw new Error('Ошибка LLM: ' + (await llmResp.text()));
@@ -1320,7 +1320,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
             
             ${outputsHtml}
              <div class="modal-buttons" style="margin-top:10px; justify-content:flex-start;">
-                <button id="dependency-tree-btn" class="modal-btn" style="background:#f59e0b; color:#000;">
+                <button id="dependency-tree-btn" class="modal-btn" style="background:#542881; color:#000;">
                     ✨ Предложение AI
                 </button>
             </div>
