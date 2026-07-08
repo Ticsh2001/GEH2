@@ -194,7 +194,7 @@ Based on the dependency tree and the parsed code, write three fields for this ru
 
 1. DESCRIPTION — what the rule controls, why it exists, and under what condition it triggers (state concrete thresholds from the code, if any).
 2. POSSIBLE_CAUSE — the most likely technical reason for the rule to trigger, based on the physical meaning of the involved signals.
-3. GUIDELINES — concrete actions for operations personnel when the rule fires.
+3. GUIDELINES — concrete actions for operations personnel when the rule fires. Also include a list of possible consequences if the operator fails to react to the triggered rule (what can happen to the equipment or process).
 
 Return the answer strictly in the following format, each field on its own line, with no markdown formatting:
 DESCRIPTION: <text>

@@ -1217,6 +1217,10 @@ async def check_syntax(file: UploadFile = File(...)):
         if invalid_chars:
             row_remarks.append(f"Недопустимые символы: {', '.join(repr(c) for c in invalid_chars)}")
 
+                # 2b. Проверка на экспоненциальную запись числа (недопустимо)
+        if re.search(r'\b\d+\.?\d*[eE][+-]?\d+\b', code):
+            row_remarks.append("Обнаружено число в экспоненциальной записи (например, 1.5E-3). Такая запись недопустима – используйте десятичную дробь.")
+
         # 3. Унарный минус перед идентификатором (не перед числом и не перед скобкой)
         if not is_constant and re.search(r'(?<![a-zA-Z0-9_§])\s*-\s*(?=[A-Za-z_§])', code):
             row_remarks.append("Обнаружен унарный минус перед сигналом. При необходимости замените на '-1*'")
