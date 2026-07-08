@@ -455,8 +455,38 @@ def _build_rules_docx_bytes(df: pd.DataFrame) -> bytes:
     doc.save(out)
     return out.getvalue()
 
+def _build_combined_excel_bytes(rows: list[dict]) -> bytes:
+    """Создаёт Excel-файл с объединёнными параметрами и правилами."""
+    df = pd.DataFrame(rows, columns=PARAM_EXPORT_COLUMNS)
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    buffer.seek(0)
+    wb = load_workbook(buffer)
+    ws = wb.active
 
-def export_selected_projects(filenames: list[str], project_dir: str, param_format: str = "excel") -> dict:
+    wrap_cols = {"Описание", "Используемые сигналы", "Код"}
+    header = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+    col_idx = {name: i + 1 for i, name in enumerate(header)}
+    for col_name in wrap_cols:
+        idx = col_idx.get(col_name)
+        if not idx:
+            continue
+        for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+    widths = {"KKS код": 18, "Описание": 50, "Ед. изм.": 12, "Используемые сигналы": 30, "Код": 60}
+    for name, width in widths.items():
+        idx = col_idx.get(name)
+        if idx:
+            ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = width
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def export_selected_projects(filenames: list[str], project_dir: str, param_format: str = "excel", export_rules_excel: bool = True) -> dict:
     if not isinstance(filenames, list) or not filenames:
         raise ValueError("Нужно передать непустой список filenames")
 
@@ -500,6 +530,22 @@ def export_selected_projects(filenames: list[str], project_dir: str, param_forma
             "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "content": _build_rules_docx_bytes(df_rule)
         })
+        if export_rules_excel:
+            rule_excel_rows = []
+            for r in rule_rows:
+                rule_excel_rows.append({
+                    "KKS код": r.get("KKS код", ""),
+                    "Описание": r.get("Описание", ""),   # описание правила
+                    "Ед. изм.": "",
+                    "Используемые сигналы": r.get("Используемые сигналы", ""),
+                    "Код": r.get("Код", "")
+                })
+            if rule_excel_rows:
+                files_to_send.append({
+                    "filename": "Правила.xlsx",
+                    "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "content": _build_combined_excel_bytes(rule_excel_rows)  # используем ту же функцию форматирования
+                })
 
     if not files_to_send:
         raise ValueError("Среди выбранных проектов нет типов parameter или rule")
