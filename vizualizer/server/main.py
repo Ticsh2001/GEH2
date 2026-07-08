@@ -1166,7 +1166,7 @@ async def check_syntax(file: UploadFile = File(...)):
 
     contents = await file.read()
     try:
-        df = pd.read_excel(io.BytesIO(contents))
+        df = pd.read_excel(io.BytesIO(contents), dtype=str).fillna('')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
 
