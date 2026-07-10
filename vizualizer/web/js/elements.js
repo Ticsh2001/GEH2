@@ -836,6 +836,7 @@ const Elements = {
         const elem = document.getElementById(elemId);
         const elemData = AppState.elements[elemId];
         const config = ELEMENT_TYPES[elemData.type];
+        if (!config) return;
 
         const dx = (e.clientX - startX) / AppState.viewport.zoom;
         const dy = (e.clientY - startY) / AppState.viewport.zoom;

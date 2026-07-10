@@ -121,10 +121,15 @@ const NeuralApp = {
         const cfg = this.blockParams[type];
         if (!cfg) return null;
         const id = `${type}_${++AppState.elementCounter}`;
+        // Количество входов: из props, если задано, иначе из конфига
+        const inputs = (props.inputCount !== undefined) ? props.inputCount : cfg.inputs;
+        const outputs = cfg.outputs;   // не меняем
         const elemData = {
             id, type, x, y,
             width: 150, height: 60,
-            props: { ...cfg.defaultProps, ...props }
+            props: { ...cfg.defaults, ...props },
+            inputs: inputs,
+            outputs: outputs
         };
         AppState.elements[id] = elemData;
 
@@ -139,24 +144,22 @@ const NeuralApp = {
             <div class="element-header" style="background:${cfg.color};">${cfg.name}</div>
             <div class="element-body">
                 <div class="ports-left">
-                    ${Array.from({length: cfg.inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
+                    ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
                 </div>
                 <div class="element-symbol">${type}</div>
                 <div class="ports-right">
-                    ${Array.from({length: cfg.outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
+                    ${Array.from({length: outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
                 </div>
             </div>
             <div class="resize-handle handle-se" data-direction="se"></div>
         `;
         document.getElementById('workspace').appendChild(elem);
         Elements.setupElementHandlers(id);
-        // Внутри createNNElement, после добавления элемента в DOM:
+        // Двойной клик — открыть свойства
         elem.addEventListener('dblclick', (e) => {
             if (e.target.classList.contains('port')) return;
             NeuralApp.showLayerPropertiesModal(id);
         });
-        elemData.inputCount = cfg.inputs;
-        elemData.outputCount = cfg.outputs;
         Connections.drawConnections();
         return id;
     },
@@ -324,6 +327,7 @@ const NeuralApp = {
     },
 
         // -------- Модальное окно свойств слоя ----------
+    // -------- Модальное окно свойств слоя ----------
     showLayerPropertiesModal(elemId) {
         const elemData = AppState.elements[elemId];
         if (!elemData) return;
@@ -371,14 +375,11 @@ const NeuralApp = {
             html += `<div class="modal-row"><label>${label}:</label>${inputHtml}</div>`;
         }
 
-        // Настройка количества входов/выходов (если разрешено)
+        // Настройка количества входов (если разрешено)
+        // Выходы не настраиваем – один выход может быть подключён к нескольким входам
         if (cfg.maxInputs > 1) {
             const curInputs = elemData.inputs || cfg.inputs;
             html += `<div class="modal-row"><label>Количество входов:</label><input type="number" id="prop-inputCount" value="${curInputs}" min="1" max="${cfg.maxInputs}" step="1"></div>`;
-        }
-        if (cfg.maxOutputs > 1) {
-            const curOutputs = elemData.outputs || cfg.outputs;
-            html += `<div class="modal-row"><label>Количество выходов:</label><input type="number" id="prop-outputCount" value="${curOutputs}" min="1" max="${cfg.maxOutputs}" step="1"></div>`;
         }
 
         modalContent.innerHTML = html;
@@ -416,44 +417,39 @@ const NeuralApp = {
             }
             elemData.props = newProps;
 
-            // Обновить количество портов, если задано
+            // Обновить количество входов, если задано
             if (cfg.maxInputs > 1) {
-                const inputCount = parseInt(document.getElementById('prop-inputCount').value) || 1;
+                const inputCount = parseInt(document.getElementById('prop-inputCount').value) || cfg.inputs;
                 elemData.inputs = inputCount;
             }
-            if (cfg.maxOutputs > 1) {
-                const outputCount = parseInt(document.getElementById('prop-outputCount').value) || 1;
-                elemData.outputs = outputCount;
-            }
 
-            // Пересоздать элемент с новыми портами
-            this.recreateElement(elemId);
+            // Безопасно обновить порты (не удаляя элемент)
+            this.updateElementPorts(elemId);
+
             Modal.hideModal('modal-overlay');
         };
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
     },
 
         // Обновить порты элемента без изменения ID
+    // Обновить порты элемента без изменения его ID и связей
     updateElementPorts(elemId) {
         const data = AppState.elements[elemId];
         if (!data) return;
-        const cfg = this.blockParams[data.type];
-        if (!cfg) return;
         const elem = document.getElementById(elemId);
         if (!elem) return;
         const portsLeft = elem.querySelector('.ports-left');
         const portsRight = elem.querySelector('.ports-right');
         if (portsLeft) {
-            portsLeft.innerHTML = Array.from({ length: data.inputs }, (_, i) =>
+            portsLeft.innerHTML = Array.from({ length: data.inputs || 1 }, (_, i) =>
                 `<div class="port input any-port" data-port="in-${i}" data-element="${elemId}" title="Вход ${i+1}"></div>`
             ).join('');
         }
         if (portsRight) {
-            portsRight.innerHTML = Array.from({ length: data.outputs }, (_, i) =>
+            portsRight.innerHTML = Array.from({ length: data.outputs || 1 }, (_, i) =>
                 `<div class="port output any-port" data-port="out-${i}" data-element="${elemId}" title="Выход ${i+1}"></div>`
             ).join('');
         }
-        // Перепривязываем обработчики портов
         Elements.setupElementHandlers(elemId);
         Connections.drawConnections();
     },
