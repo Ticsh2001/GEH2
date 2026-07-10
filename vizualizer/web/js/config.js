@@ -61,6 +61,16 @@ const ELEMENT_TYPES = {
         ]
         }
     },
+        'nn-layer': {
+        name: 'Слой NN',
+        inputs: 1,
+        outputs: 1,
+        color: '#6b7280',
+        resizable: true,
+        minWidth: 120,
+        minHeight: 60,
+        hasConditionPort: false,
+    },
 
     'multi-if': {
         name: 'Комб. если',
