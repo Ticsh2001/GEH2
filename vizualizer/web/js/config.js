@@ -16,7 +16,8 @@ const SIGNAL_TYPE = {
 const PROJECT_TYPE = {
     PARAMETER: 'parameter',
     RULE: 'rule',
-    TEMPLATE: 'template'
+    TEMPLATE: 'template',
+    NEURAL_TEMPLATE: 'neural_template' 
 };
 
 // Конфигурация элементов

@@ -287,7 +287,7 @@ const NeuralApp = {
     },
 
     // -------- Генерация структуры ----------
-    generateStructureString() {
+        generateStructureString() {
         const elements = AppState.elements;
         const connections = AppState.connections;
         const inDegree = {};
@@ -310,24 +310,41 @@ const NeuralApp = {
                 if (inDegree[to] === 0) queue.push(to);
             }
         }
+
         const parts = [];
-        const outMarkers = {};
+        const outMarkers = {}; // id -> marker index
         let outCounter = 0;
+
+        // Собираем информацию о skipped connections: какой add ссылается на какой out
+        const addToOuts = {}; // id_add -> [id_out, ...]
+        for (const conn of connections) {
+            const toElem = elements[conn.toElement];
+            if (toElem && (toElem.nnType || toElem.type) === 'add') {
+                if (!addToOuts[conn.toElement]) addToOuts[conn.toElement] = [];
+                // Мы предполагаем, что in-0 – основной поток, остальные – skipped connections
+                if (conn.toPort !== 'in-0') {
+                    addToOuts[conn.toElement].push(conn.fromElement);
+                }
+            }
+        }
+
         for (const id of sorted) {
             const elem = elements[id];
-            const type = elem.nnType || elem.type;
-            if (type === 'out') {
+            const nnType = elem.nnType || elem.type;
+            if (nnType === 'out') {
                 const marker = outCounter++;
                 outMarkers[id] = marker;
                 parts.push('out');
-            } else if (type === 'add') {
-                const inputs = connections.filter(c => c.toElement === id).map(c => c.fromElement);
-                const markers = inputs.map(inId => outMarkers[inId] !== undefined ? outMarkers[inId] : null).filter(m => m !== null);
+            } else if (nnType === 'add') {
+                const outs = addToOuts[id] || [];
+                const markers = outs.map(outId => outMarkers[outId] !== undefined ? outMarkers[outId] : null).filter(m => m !== null);
                 parts.push(`add{${markers.join(',')}}`);
             } else {
-                parts.push(type);
+                // Учитываем количество одинаковых слоёв подряд? Пока просто добавляем тип
+                parts.push(nnType);
             }
         }
+
         return parts.join('_');
     },
 
@@ -375,36 +392,67 @@ const NeuralApp = {
         Viewport.updateTransform();
     },
 
-    async saveProject() {
-        if (!AppState.project.code) {
-            Modal.showProjectPropertiesModal();
-            alert('Пожалуйста, укажите код проекта перед сохранением.');
-            return;
-        }
-        AppState.project.type = 'neural';
-        AppState.project.code = this.generateStructureString();
-        const project = {
-            version: '1.0',
-            project: AppState.project,
-            elements: AppState.elements,
-            connections: AppState.connections,
-            counter: AppState.elementCounter,
-            viewport: {
-                zoom: AppState.viewport.zoom,
-                panX: AppState.viewport.panX,
-                panY: AppState.viewport.panY
-            },
-            code: AppState.project.code
-        };
-        const filename = `${AppState.project.code}_neural.json`;
+    async autoLoadFromURL() {
+        const params = new URLSearchParams(window.location.search);
+        const filename = params.get('load');
+        if (!filename) return;
+        const config = params.get('config') || '';
+        if (config) AppState.currentConfig = config;
         try {
-            await Settings.saveProject(filename, project, 'projects');
-            alert(`Проект сохранён как ${filename}`);
+            const data = await Settings.loadProject(filename, 'projects');
+            document.getElementById('workspace').innerHTML = '';
+            document.getElementById('connections-svg').innerHTML = '';
+            resetState();
+            if (data.project) AppState.project = data.project;
+            AppState.connections = data.connections || [];
+            AppState.elementCounter = data.counter || 0;
+            const elements = data.elements || {};
+            for (const [id, el] of Object.entries(elements)) {
+                const nnType = el.nnType || el.type;
+                const cfg = this.blockParams[nnType];
+                if (!cfg) continue;
+                this.createNNElement(nnType, el.x, el.y, el.props);
+            }
+            Connections.drawConnections();
         } catch (e) {
-            console.error(e);
-            alert('Ошибка сохранения: ' + e.message);
+            console.error('Ошибка загрузки:', e);
         }
     },
+
+async saveProject() {
+    if (!AppState.project.code) {
+        Modal.showProjectPropertiesModal();
+        alert('Пожалуйста, укажите код проекта перед сохранением.');
+        return;
+    }
+    AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
+    // Сохраняем код проекта как введённый пользователем
+    const projectCode = AppState.project.code;
+    // Генерируем строку архитектуры
+    const architecture = this.generateStructureString();
+    // Для файла используем пользовательский код, архитектуру кладём в code
+    const project = {
+        version: '1.0',
+        project: AppState.project,
+        elements: AppState.elements,
+        connections: AppState.connections,
+        counter: AppState.elementCounter,
+        viewport: {
+            zoom: AppState.viewport.zoom,
+            panX: AppState.viewport.panX,
+            panY: AppState.viewport.panY
+        },
+        code: architecture   // строка структуры
+    };
+    const filename = `${projectCode}_neural.json`;   // имя файла
+    try {
+        await Settings.saveProject(filename, project, 'projects');
+        alert(`Проект сохранён как ${filename}`);
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка сохранения: ' + e.message);
+    }
+},
 
     // -------- Обработчики ----------
     setupGlobalMouseHandlers() {
