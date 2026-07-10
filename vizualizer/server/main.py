@@ -38,6 +38,8 @@ from export import get_code_length
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 TEMPLATES_PATH = os.path.join(BASE_DIR, "formula_templates.json")
+NN_BLOCK_PARAMS_PATH = os.path.join(BASE_DIR, "nn_block_params.json")
+
 SIGNAL_INDEX_CACHE = {}          # кэш индексов сигналов: config -> (folder_state, index)
 SIGNALS_CACHE = {}              # кэш списков сигналов: config -> list
 TABLES_CACHE = {}               # кэш списка таблиц: config -> list
@@ -1165,10 +1167,26 @@ async def check_syntax(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Поддерживаются только файлы Excel (.xlsx, .xls)")
 
     contents = await file.read()
+
+    # Читаем Excel вручную, чтобы избежать ошибок приведения типов
     try:
-        df = pd.read_excel(io.BytesIO(contents), dtype=str).fillna('')
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            raise HTTPException(status_code=400, detail="Пустой лист")
+
+        # Первая строка — заголовки
+        headers = [str(cell) if cell is not None else "" for cell in rows[0]]
+        data = []
+        for row in rows[1:]:
+            data.append([str(cell) if cell is not None else "" for cell in row])
+        df = pd.DataFrame(data, columns=headers)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
+
+    code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
 
     code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
     signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'used signals']), None)
@@ -1516,6 +1534,19 @@ async def api_llm_generate(payload: dict = Body(...)):
             raise HTTPException(status_code=504, detail="Ollama request timed out")
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Ollama connection error: {str(e)}")
+        
+
+@app.get("/api/nn-block-params")
+async def get_nn_block_params():
+    json_path = os.path.join(BASE_DIR, "nn_block_params.json")
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="nn_block_params.json not found")
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    # Поддерживаем и массив, и объект: если объект, отдаём список значений
+    if isinstance(data, dict):
+        data = list(data.values())
+    return JSONResponse(content=data)
 
 
 
@@ -1528,3 +1559,7 @@ app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 print(f"[DEBUG] WEB_DIR: {WEB_DIR}")
 for f in os.listdir(WEB_DIR):
     print(f"  {repr(f)}  | exists: {os.path.exists(os.path.join(WEB_DIR, f))}")
+
+
+
+

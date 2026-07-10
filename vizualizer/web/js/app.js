@@ -76,6 +76,12 @@ init() {
         document.getElementById('code-modal-overlay').style.display = 'none';
     });
 
+        // Открытие конструктора нейросетей
+    document.getElementById('btn-nn').addEventListener('click', () => {
+        const config = AppState.currentConfig || '';
+        window.open(`/neural.html?config=${encodeURIComponent(config)}`, '_blank');
+    });
+
     document.getElementById('btn-visualize').addEventListener('click', () => {
         App.openSignalVisualizer();
     });

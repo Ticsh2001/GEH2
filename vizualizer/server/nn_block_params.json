@@ -1,0 +1,168 @@
+[
+  {
+    "type": "c",
+    "name": "Conv2D",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#4a90d9",
+    "defaultProps": {
+      "filters": 64,
+      "kernel_size": [3, 3],
+      "padding": "same",
+      "activation": "relu",
+      "use_bias": true,
+      "kernel_initializer": "glorot_uniform",
+      "bias_initializer": "zeros"
+    }
+  },
+  {
+    "type": "sc",
+    "name": "Strides Conv2D",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#4a90d9",
+    "defaultProps": {
+      "filters": 64,
+      "kernel_size": [3, 3],
+      "strides": [2, 2],
+      "padding": "same",
+      "activation": "relu",
+      "use_bias": true,
+      "kernel_initializer": "glorot_uniform",
+      "bias_initializer": "zeros"
+    }
+  },
+  {
+    "type": "mp",
+    "name": "Max Pooling",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#60a5fa",
+    "defaultProps": {
+      "pool_size": [2, 2],
+      "padding": "valid"
+    }
+  },
+  {
+    "type": "ct",
+    "name": "Conv2DTranspose",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#f59e0b",
+    "defaultProps": {
+      "filters": 64,
+      "kernel_size": [3, 3],
+      "strides": [2, 2],
+      "activation": "relu",
+      "padding": "same",
+      "use_bias": true,
+      "kernel_initializer": "glorot_uniform",
+      "bias_initializer": "zeros"
+    }
+  },
+  {
+    "type": "us",
+    "name": "UpSampling",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#10b981",
+    "defaultProps": {
+      "size": [2, 2],
+      "interpolation": "nearest"
+    }
+  },
+  {
+    "type": "bn",
+    "name": "BatchNormalization",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#a78bfa",
+    "defaultProps": {
+      "axis": -1,
+      "momentum": 0.99,
+      "epsilon": 0.001,
+      "center": true,
+      "scale": true
+    }
+  },
+  {
+    "type": "den",
+    "name": "Dense",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#f97316",
+    "defaultProps": {
+      "units": 1,
+      "activation": null,
+      "use_bias": true,
+      "kernel_initializer": "glorot_uniform",
+      "bias_initializer": "zeros"
+    }
+  },
+  {
+    "type": "drop",
+    "name": "Dropout",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#eab308",
+    "defaultProps": {
+      "rate": 0.1
+    }
+  },
+  {
+    "type": "re",
+    "name": "Reshape",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#06b6d4",
+    "defaultProps": {
+      "target_shape": [-1, 1, 1]
+    }
+  },
+  {
+    "type": "fl",
+    "name": "Flatten",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#84cc16",
+    "defaultProps": {}
+  },
+  {
+    "type": "act",
+    "name": "Activation",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#ec4899",
+    "defaultProps": {
+      "activation": "relu"
+    }
+  },
+  {
+    "type": "pad",
+    "name": "Padding",
+    "inputs": 1,
+    "outputs": 1,
+    "color": "#8b5cf6",
+    "defaultProps": {
+      "paddings": [[0, 0], [0, 0]],
+      "mode": "CONSTANT",
+      "constant_values": 0
+    }
+  },
+  {
+    "type": "add",
+    "name": "Add",
+    "inputs": 2,
+    "outputs": 1,
+    "color": "#14b8a6",
+    "defaultProps": {}
+  },
+  {
+    "type": "out",
+    "name": "OutTensor",
+    "inputs": 1,
+    "outputs": 0,
+    "color": "#ef4444",
+    "defaultProps": {}
+  }
+]

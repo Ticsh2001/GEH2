@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Конструктор нейросетей</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div id="menu">
+            <button class="menu-btn" id="btn-new">📄 Новый</button>
+            <button class="menu-btn" id="btn-save">💾 Сохранить</button>
+            <button class="menu-btn" id="btn-load">📂 Загрузить</button>
+            <button class="menu-btn" id="btn-generate-code">🧩 Код</button>
+            <button class="menu-btn" id="btn-project-settings">⚙️ Свойства</button>
+            <div id="user-badge" class="user-badge">
+                👤 <span id="user-badge-name">—</span>
+            </div>
+            <div class="config-selector">
+                <label for="config-select">Конфигурация:</label>
+                <select id="config-select">
+                    <option value="">Загрузка...</option>
+                </select>
+            </div>
+            <div class="menu-separator"></div>
+            <div class="zoom-controls">
+                <button class="menu-btn zoom-btn" id="btn-zoom-out">−</button>
+                <span id="zoom-level">100%</span>
+                <button class="menu-btn zoom-btn" id="btn-zoom-in">+</button>
+                <button class="menu-btn" id="btn-zoom-fit">⊡ Вписать</button>
+                <button class="menu-btn" id="btn-zoom-reset">1:1</button>
+            </div>
+        </div>
+
+        <div id="main">
+            <div id="palette">
+                <h3>🧠 Слои нейросети</h3>
+                <div id="nn-palette-items"></div>
+            </div>
+            <div id="workspace-container">
+                <svg id="connections-svg"></svg>
+                <div id="workspace"></div>
+                <div id="selection-rect"></div>
+                <div id="minimap"><div id="minimap-viewport"></div><canvas id="minimap-canvas"></canvas></div>
+                <div id="viewport-info"><span id="cursor-pos">X:0, Y:0</span><span id="selection-info"></span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалки (свойства слоя, проекта, код) — можно использовать общие -->
+    <div id="modal-overlay">
+        <div id="modal">
+            <h3 id="modal-title">Свойства</h3>
+            <div id="modal-content"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="modal-cancel">Отмена</button>
+                <button class="modal-btn save" id="modal-save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+    <div id="project-modal-overlay" class="modal-overlay-class">
+        <div id="project-modal" class="modal-class">
+            <h3>Свойства проекта</h3>
+            <div id="project-modal-content"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" id="project-modal-cancel">Отмена</button>
+                <button class="modal-btn save" id="project-modal-save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+    <div id="context-menu">
+        <div class="context-item" id="ctx-properties">⚙️ Свойства</div>
+        <div class="context-item" id="ctx-copy">📋 Копировать</div>
+        <div class="context-item" id="ctx-delete">🗑️ Удалить</div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/viewport.js"></script>
+    <script src="js/elements.js"></script>
+    <script src="js/connections.js"></script>
+    <script src="js/modal.js"></script>
+    <script src="js/project.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/neural_app.js"></script>
+</body>
+</html>
