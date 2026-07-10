@@ -4,8 +4,10 @@
     "name": "Conv2D",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#4a90d9",
-    "defaultProps": {
+    "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
       "padding": "same",
@@ -13,6 +15,15 @@
       "use_bias": true,
       "kernel_initializer": "glorot_uniform",
       "bias_initializer": "zeros"
+    },
+    "paramMeta": {
+      "filters": { "type": "number", "label": "Фильтры", "min": 1, "step": 1 },
+      "kernel_size": { "type": "array", "label": "Размер ядра (JSON)", "placeholder": "[3, 3]" },
+      "padding": { "type": "select", "label": "Padding", "options": ["valid", "same"] },
+      "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", null] },
+      "use_bias": { "type": "boolean", "label": "Смещение" },
+      "kernel_initializer": { "type": "select", "label": "Инициализатор ядра", "options": ["glorot_uniform", "he_normal", "random_normal", "zeros"] },
+      "bias_initializer": { "type": "select", "label": "Инициализатор смещения", "options": ["zeros", "ones", "random_normal"] }
     }
   },
   {
@@ -20,8 +31,10 @@
     "name": "Strides Conv2D",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#4a90d9",
-    "defaultProps": {
+    "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
       "strides": [2, 2],
@@ -30,6 +43,16 @@
       "use_bias": true,
       "kernel_initializer": "glorot_uniform",
       "bias_initializer": "zeros"
+    },
+    "paramMeta": {
+      "filters": { "type": "number", "label": "Фильтры", "min": 1, "step": 1 },
+      "kernel_size": { "type": "array", "label": "Размер ядра", "placeholder": "[3, 3]" },
+      "strides": { "type": "array", "label": "Шаги", "placeholder": "[2, 2]" },
+      "padding": { "type": "select", "label": "Padding", "options": ["valid", "same"] },
+      "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", null] },
+      "use_bias": { "type": "boolean", "label": "Смещение" },
+      "kernel_initializer": { "type": "select", "label": "Инициализатор ядра", "options": ["glorot_uniform", "he_normal", "random_normal", "zeros"] },
+      "bias_initializer": { "type": "select", "label": "Инициализатор смещения", "options": ["zeros", "ones", "random_normal"] }
     }
   },
   {
@@ -37,10 +60,16 @@
     "name": "Max Pooling",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#60a5fa",
-    "defaultProps": {
+    "defaults": {
       "pool_size": [2, 2],
       "padding": "valid"
+    },
+    "paramMeta": {
+      "pool_size": { "type": "array", "label": "Размер окна", "placeholder": "[2, 2]" },
+      "padding": { "type": "select", "label": "Padding", "options": ["valid", "same"] }
     }
   },
   {
@@ -48,8 +77,10 @@
     "name": "Conv2DTranspose",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#f59e0b",
-    "defaultProps": {
+    "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
       "strides": [2, 2],
@@ -58,6 +89,16 @@
       "use_bias": true,
       "kernel_initializer": "glorot_uniform",
       "bias_initializer": "zeros"
+    },
+    "paramMeta": {
+      "filters": { "type": "number", "label": "Фильтры", "min": 1, "step": 1 },
+      "kernel_size": { "type": "array", "label": "Размер ядра", "placeholder": "[3, 3]" },
+      "strides": { "type": "array", "label": "Шаги", "placeholder": "[2, 2]" },
+      "padding": { "type": "select", "label": "Padding", "options": ["valid", "same"] },
+      "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", null] },
+      "use_bias": { "type": "boolean", "label": "Смещение" },
+      "kernel_initializer": { "type": "select", "label": "Инициализатор ядра", "options": ["glorot_uniform", "he_normal", "random_normal", "zeros"] },
+      "bias_initializer": { "type": "select", "label": "Инициализатор смещения", "options": ["zeros", "ones", "random_normal"] }
     }
   },
   {
@@ -65,10 +106,16 @@
     "name": "UpSampling",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#10b981",
-    "defaultProps": {
+    "defaults": {
       "size": [2, 2],
       "interpolation": "nearest"
+    },
+    "paramMeta": {
+      "size": { "type": "array", "label": "Размер", "placeholder": "[2, 2]" },
+      "interpolation": { "type": "select", "label": "Интерполяция", "options": ["nearest", "bilinear"] }
     }
   },
   {
@@ -76,13 +123,22 @@
     "name": "BatchNormalization",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#a78bfa",
-    "defaultProps": {
+    "defaults": {
       "axis": -1,
       "momentum": 0.99,
       "epsilon": 0.001,
       "center": true,
       "scale": true
+    },
+    "paramMeta": {
+      "axis": { "type": "number", "label": "Ось", "min": -1, "step": 1 },
+      "momentum": { "type": "number", "label": "Моментум", "min": 0, "max": 1, "step": 0.01 },
+      "epsilon": { "type": "number", "label": "Эпсилон", "min": 0, "step": 0.0001 },
+      "center": { "type": "boolean", "label": "Центрирование" },
+      "scale": { "type": "boolean", "label": "Масштабирование" }
     }
   },
   {
@@ -90,13 +146,22 @@
     "name": "Dense",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#f97316",
-    "defaultProps": {
+    "defaults": {
       "units": 1,
       "activation": null,
       "use_bias": true,
       "kernel_initializer": "glorot_uniform",
       "bias_initializer": "zeros"
+    },
+    "paramMeta": {
+      "units": { "type": "number", "label": "Нейроны", "min": 1, "step": 1 },
+      "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", null] },
+      "use_bias": { "type": "boolean", "label": "Смещение" },
+      "kernel_initializer": { "type": "select", "label": "Инициализатор ядра", "options": ["glorot_uniform", "he_normal", "random_normal", "zeros"] },
+      "bias_initializer": { "type": "select", "label": "Инициализатор смещения", "options": ["zeros", "ones", "random_normal"] }
     }
   },
   {
@@ -104,9 +169,14 @@
     "name": "Dropout",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#eab308",
-    "defaultProps": {
+    "defaults": {
       "rate": 0.1
+    },
+    "paramMeta": {
+      "rate": { "type": "number", "label": "Вероятность", "min": 0, "max": 1, "step": 0.01 }
     }
   },
   {
@@ -114,9 +184,14 @@
     "name": "Reshape",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#06b6d4",
-    "defaultProps": {
+    "defaults": {
       "target_shape": [-1, 1, 1]
+    },
+    "paramMeta": {
+      "target_shape": { "type": "array", "label": "Целевая форма", "placeholder": "[-1, 1, 1]" }
     }
   },
   {
@@ -124,17 +199,25 @@
     "name": "Flatten",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#84cc16",
-    "defaultProps": {}
+    "defaults": {},
+    "paramMeta": {}
   },
   {
     "type": "act",
     "name": "Activation",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#ec4899",
-    "defaultProps": {
+    "defaults": {
       "activation": "relu"
+    },
+    "paramMeta": {
+      "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", "elu", "selu"] }
     }
   },
   {
@@ -142,11 +225,18 @@
     "name": "Padding",
     "inputs": 1,
     "outputs": 1,
+    "maxInputs": 1,
+    "maxOutputs": 10,
     "color": "#8b5cf6",
-    "defaultProps": {
+    "defaults": {
       "paddings": [[0, 0], [0, 0]],
       "mode": "CONSTANT",
       "constant_values": 0
+    },
+    "paramMeta": {
+      "paddings": { "type": "array", "label": "Отступы (JSON)", "placeholder": "[[0, 0], [0, 0]]" },
+      "mode": { "type": "select", "label": "Режим", "options": ["CONSTANT", "REFLECT", "SYMMETRIC"] },
+      "constant_values": { "type": "number", "label": "Константа", "step": "any" }
     }
   },
   {
@@ -154,15 +244,21 @@
     "name": "Add",
     "inputs": 2,
     "outputs": 1,
+    "maxInputs": 10,
+    "maxOutputs": 1,
     "color": "#14b8a6",
-    "defaultProps": {}
+    "defaults": {},
+    "paramMeta": {}
   },
   {
     "type": "out",
     "name": "OutTensor",
     "inputs": 1,
     "outputs": 0,
+    "maxInputs": 1,
+    "maxOutputs": 0,
     "color": "#ef4444",
-    "defaultProps": {}
+    "defaults": {},
+    "paramMeta": {}
   }
 ]

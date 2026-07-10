@@ -150,6 +150,13 @@ const NeuralApp = {
         `;
         document.getElementById('workspace').appendChild(elem);
         Elements.setupElementHandlers(id);
+        // Внутри createNNElement, после добавления элемента в DOM:
+        elem.addEventListener('dblclick', (e) => {
+            if (e.target.classList.contains('port')) return;
+            NeuralApp.showLayerPropertiesModal(id);
+        });
+        elemData.inputCount = cfg.inputs;
+        elemData.outputCount = cfg.outputs;
         Connections.drawConnections();
         return id;
     },
@@ -316,6 +323,211 @@ const NeuralApp = {
         });
     },
 
+        // -------- Модальное окно свойств слоя ----------
+    showLayerPropertiesModal(elemId) {
+        const elemData = AppState.elements[elemId];
+        if (!elemData) return;
+        const cfg = this.blockParams[elemData.type];
+        if (!cfg) return;
+
+        const modalTitle = document.getElementById('modal-title');
+        const modalContent = document.getElementById('modal-content');
+        const modalOverlay = document.getElementById('modal-overlay');
+        modalTitle.textContent = `Свойства слоя: ${cfg.name}`;
+
+        const currentProps = elemData.props || {};
+        const paramMeta = cfg.paramMeta || {};
+
+        let html = '';
+
+        // Поля параметров из paramMeta
+        for (const [key, meta] of Object.entries(paramMeta)) {
+            const currentVal = currentProps[key] !== undefined ? currentProps[key] : cfg.defaults[key];
+            const label = meta.label || key;
+            let inputHtml = '';
+
+            switch (meta.type) {
+                case 'number':
+                    inputHtml = `<input type="number" id="prop-${key}" value="${currentVal ?? 0}" step="${meta.step || 'any'}" min="${meta.min ?? ''}" max="${meta.max ?? ''}">`;
+                    break;
+                case 'boolean':
+                    inputHtml = `<input type="checkbox" id="prop-${key}" ${currentVal ? 'checked' : ''}>`;
+                    break;
+                case 'select':
+                    inputHtml = `<select id="prop-${key}">`;
+                    for (const opt of (meta.options || [])) {
+                        const val = opt === null ? '' : opt;
+                        const selected = (currentVal === val || (opt === null && currentVal === null)) ? 'selected' : '';
+                        inputHtml += `<option value="${val}" ${selected}>${opt === null ? 'Нет' : opt}</option>`;
+                    }
+                    inputHtml += `</select>`;
+                    break;
+                case 'array':
+                default:
+                    inputHtml = `<input type="text" id="prop-${key}" value="${JSON.stringify(currentVal)}" placeholder="${meta.placeholder || ''}">`;
+                    break;
+            }
+
+            html += `<div class="modal-row"><label>${label}:</label>${inputHtml}</div>`;
+        }
+
+        // Настройка количества входов/выходов (если разрешено)
+        if (cfg.maxInputs > 1) {
+            const curInputs = elemData.inputs || cfg.inputs;
+            html += `<div class="modal-row"><label>Количество входов:</label><input type="number" id="prop-inputCount" value="${curInputs}" min="1" max="${cfg.maxInputs}" step="1"></div>`;
+        }
+        if (cfg.maxOutputs > 1) {
+            const curOutputs = elemData.outputs || cfg.outputs;
+            html += `<div class="modal-row"><label>Количество выходов:</label><input type="number" id="prop-outputCount" value="${curOutputs}" min="1" max="${cfg.maxOutputs}" step="1"></div>`;
+        }
+
+        modalContent.innerHTML = html;
+        modalOverlay.dataset.elementId = elemId;
+        Modal.showModal('modal-overlay');
+
+        const saveBtn = document.getElementById('modal-save');
+        const cancelBtn = document.getElementById('modal-cancel');
+
+        saveBtn.onclick = () => {
+            const newProps = {};
+            for (const key of Object.keys(paramMeta)) {
+                const input = document.getElementById(`prop-${key}`);
+                if (!input) continue;
+                const meta = paramMeta[key];
+                switch (meta.type) {
+                    case 'number':
+                        newProps[key] = parseFloat(input.value) || 0;
+                        break;
+                    case 'boolean':
+                        newProps[key] = input.checked;
+                        break;
+                    case 'select':
+                        newProps[key] = input.value === '' ? null : input.value;
+                        break;
+                    case 'array':
+                    default:
+                        try {
+                            newProps[key] = JSON.parse(input.value);
+                        } catch (e) {
+                            newProps[key] = cfg.defaults[key];
+                        }
+                        break;
+                }
+            }
+            elemData.props = newProps;
+
+            // Обновить количество портов, если задано
+            if (cfg.maxInputs > 1) {
+                const inputCount = parseInt(document.getElementById('prop-inputCount').value) || 1;
+                elemData.inputs = inputCount;
+            }
+            if (cfg.maxOutputs > 1) {
+                const outputCount = parseInt(document.getElementById('prop-outputCount').value) || 1;
+                elemData.outputs = outputCount;
+            }
+
+            // Пересоздать элемент с новыми портами
+            this.recreateElement(elemId);
+            Modal.hideModal('modal-overlay');
+        };
+        cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
+    },
+
+        // Обновить порты элемента без изменения ID
+    updateElementPorts(elemId) {
+        const data = AppState.elements[elemId];
+        if (!data) return;
+        const cfg = this.blockParams[data.type];
+        if (!cfg) return;
+        const elem = document.getElementById(elemId);
+        if (!elem) return;
+        const portsLeft = elem.querySelector('.ports-left');
+        const portsRight = elem.querySelector('.ports-right');
+        if (portsLeft) {
+            portsLeft.innerHTML = Array.from({ length: data.inputs }, (_, i) =>
+                `<div class="port input any-port" data-port="in-${i}" data-element="${elemId}" title="Вход ${i+1}"></div>`
+            ).join('');
+        }
+        if (portsRight) {
+            portsRight.innerHTML = Array.from({ length: data.outputs }, (_, i) =>
+                `<div class="port output any-port" data-port="out-${i}" data-element="${elemId}" title="Выход ${i+1}"></div>`
+            ).join('');
+        }
+        // Перепривязываем обработчики портов
+        Elements.setupElementHandlers(elemId);
+        Connections.drawConnections();
+    },
+
+    // Пересоздание элемента (например, после изменения количества портов)
+    recreateElement(elemId) {
+        const data = AppState.elements[elemId];
+        if (!data) return;
+        const oldElem = document.getElementById(elemId);
+        if (oldElem) oldElem.remove();
+        // Создаём заново с теми же координатами и обновлёнными props
+        this.createNNElement(data.type, data.x, data.y, data.props);
+        // Так как createNNElement создаёт новый id, нужно сохранить старый id? 
+        // Упростим: удалим старый элемент и создадим новый, но тогда потеряем ссылки в connections.
+        // Лучше обновить DOM существующего элемента, не удаляя его из AppState.
+        // Поэтому ниже альтернативный подход.
+    },
+
+    updateNNPorts(elemId) {
+        const elem = document.getElementById(elemId);
+        const elemData = AppState.elements[elemId];
+        if (!elem || !elemData) return;
+        const cfg = this.blockParams[elemData.type];
+        if (!cfg) return;
+
+        const maxInputs = cfg.maxInputs || 1;
+        const maxOutputs = cfg.maxOutputs || 1;
+        const currentInputs = elemData.inputCount || cfg.inputs;
+        const currentOutputs = elemData.outputCount || cfg.outputs;
+
+        // Удаляем связи к несуществующим портам
+        AppState.connections = AppState.connections.filter(c => {
+            if (c.toElement === elemId && c.toPort.startsWith('in-')) {
+                const portNum = parseInt(c.toPort.split('-')[1]);
+                return portNum < currentInputs;
+            }
+            if (c.fromElement === elemId && c.fromPort.startsWith('out-')) {
+                const portNum = parseInt(c.fromPort.split('-')[1]);
+                return portNum < currentOutputs;
+            }
+            return true;
+        });
+
+        // Обновляем DOM портов
+        const portsLeft = elem.querySelector('.ports-left');
+        const portsRight = elem.querySelector('.ports-right');
+        if (portsLeft) {
+            portsLeft.innerHTML = '';
+            for (let i = 0; i < currentInputs; i++) {
+                const port = document.createElement('div');
+                port.className = 'port input any-port';
+                port.dataset.port = `in-${i}`;
+                port.dataset.element = elemId;
+                port.title = `Вход ${i+1}`;
+                portsLeft.appendChild(port);
+            }
+        }
+        if (portsRight) {
+            portsRight.innerHTML = '';
+            for (let i = 0; i < currentOutputs; i++) {
+                const port = document.createElement('div');
+                port.className = 'port output any-port';
+                port.dataset.port = `out-${i}`;
+                port.dataset.element = elemId;
+                port.title = `Выход ${i+1}`;
+                portsRight.appendChild(port);
+            }
+        }
+
+        // Навешиваем обработчики портов
+        elem.querySelectorAll('.port').forEach(port => Connections.setupPortHandlers(port));
+        Connections.drawConnections();
+    },
+
     setupContextMenu() {
         document.addEventListener('click', (e) => {
             const menu = document.getElementById('context-menu');
@@ -324,8 +536,8 @@ const NeuralApp = {
         document.getElementById('ctx-properties').addEventListener('click', () => {
             const elemId = document.getElementById('context-menu').dataset.elementId;
             document.getElementById('context-menu').style.display = 'none';
-            if (elemId && ELEMENT_TYPES[AppState.elements[elemId]?.type]?.hasProperties) {
-                Modal.showPropertiesModal(elemId);
+            if (elemId && AppState.elements[elemId]) {
+                NeuralApp.showLayerPropertiesModal(elemId);
             }
         });
         document.getElementById('ctx-delete').addEventListener('click', () => {
