@@ -129,7 +129,23 @@ const NeuralApp = {
         // Объединяем дефолтные параметры с переданными
         const mergedProps = { ...cfg.defaults, ...props };
 
-        // Формируем список параметров для отображения
+        // Сохраняем элемент в состоянии до вычисления высоты, чтобы метод calculate мог прочитать inputs/outputs
+        AppState.elements[id] = {
+            id,
+            type: 'nn-layer',
+            nnType: type,
+            x, y,
+            width: 150,
+            height: 0, // временно
+            props: mergedProps,
+            inputs: inputs,
+            outputs: outputs
+        };
+
+        const height = this.calculateElementHeight(id);
+        AppState.elements[id].height = height;
+
+        // Подготовка отображаемых параметров
         const displayKeys = cfg.displayParams || [];
         const paramLines = displayKeys.map(key => {
             const val = mergedProps[key];
@@ -141,45 +157,28 @@ const NeuralApp = {
             return `${key}: ${text}`;
         });
 
-        // Вычисляем высоту блока: базовая + строки параметров
-        const baseHeight = 50;
-        const lineHeight = 20;
-        const totalHeight = baseHeight + paramLines.length * lineHeight;
-        const width = 150; // можно увеличить под длинные строки, но пока фикс.
-
-        const elemData = {
-            id,
-            type: 'nn-layer',
-            nnType: type,
-            x, y,
-            width: width,
-            height: totalHeight,
-            props: mergedProps,
-            inputs: inputs,
-            outputs: outputs
-        };
-        AppState.elements[id] = elemData;
-
         const elem = document.createElement('div');
         elem.id = id;
         elem.className = 'element nn-element';
         elem.style.left = `${x}px`;
         elem.style.top = `${y}px`;
-        elem.style.width = `${width}px`;
-        elem.style.height = `${totalHeight}px`;
+        elem.style.width = `${AppState.elements[id].width}px`;
+        elem.style.height = `${height}px`;
 
-        // Контент: заголовок, параметры, порты
+        // HTML с центрированием портов
         elem.innerHTML = `
             <div class="element-header" style="background:${cfg.color};">${cfg.name}</div>
-            <div class="element-body" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                ${paramLines.length > 0 ? `<div class="element-params" style="font-size:10px; line-height:1.2; padding:2px 4px; color:#eee; word-break:break-word;">${paramLines.join('<br>')}</div>` : `<div class="element-symbol">${type}</div>`}
-                <div style="display:flex; justify-content:space-between; width:100%;">
-                    <div class="ports-left">
-                        ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
-                    </div>
-                    <div class="ports-right">
-                        ${Array.from({length: outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
-                    </div>
+            <div class="element-body" style="display:flex; align-items:center; justify-content:center; height:${height - 30}px;">
+                <div class="ports-left" style="display:flex; flex-direction:column; justify-content:center;">
+                    ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
+                </div>
+                <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:0;">
+                    ${paramLines.length > 0 
+                        ? `<div class="element-params" style="font-size:10px; line-height:1.2; padding:2px 4px; color:#eee; word-break:break-word; text-align:center;">${paramLines.join('<br>')}</div>` 
+                        : `<div class="element-symbol">${type}</div>`}
+                </div>
+                <div class="ports-right" style="display:flex; flex-direction:column; justify-content:center;">
+                    ${Array.from({length: outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
                 </div>
             </div>
             <div class="resize-handle handle-se" data-direction="se"></div>
@@ -190,7 +189,6 @@ const NeuralApp = {
             if (e.target.classList.contains('port')) return;
             NeuralApp.showLayerPropertiesModal(id);
         });
-        // Не вызываем drawConnections здесь, если ещё не все элементы созданы
         return id;
     },
 
@@ -202,7 +200,6 @@ const NeuralApp = {
         if (!cfg) return;
         const props = elemData.props || {};
 
-        // Пересчитываем высоту и обновляем текст параметров
         const displayKeys = cfg.displayParams || [];
         const paramLines = displayKeys.map(key => {
             const val = props[key];
@@ -217,18 +214,14 @@ const NeuralApp = {
         const elem = document.getElementById(elemId);
         if (!elem) return;
 
-        // Находим контейнер с параметрами (или создаём)
         let paramsDiv = elem.querySelector('.element-params');
         let symbolDiv = elem.querySelector('.element-symbol');
 
         if (paramLines.length > 0) {
-            if (symbolDiv) {
-                symbolDiv.style.display = 'none';
-            }
+            if (symbolDiv) symbolDiv.style.display = 'none';
             if (!paramsDiv) {
-                // Создаём блок параметров и вставляем перед блоком портов
                 const body = elem.querySelector('.element-body');
-                const portsContainer = body.querySelector('div:last-child'); // блок с портами
+                const center = body.querySelector('div:last-child'); // центральный flex-элемент
                 paramsDiv = document.createElement('div');
                 paramsDiv.className = 'element-params';
                 paramsDiv.style.fontSize = '10px';
@@ -236,7 +229,8 @@ const NeuralApp = {
                 paramsDiv.style.padding = '2px 4px';
                 paramsDiv.style.color = '#eee';
                 paramsDiv.style.wordBreak = 'break-word';
-                body.insertBefore(paramsDiv, portsContainer);
+                paramsDiv.style.textAlign = 'center';
+                center.appendChild(paramsDiv);
             }
             paramsDiv.innerHTML = paramLines.join('<br>');
         } else {
@@ -244,12 +238,12 @@ const NeuralApp = {
             if (symbolDiv) symbolDiv.style.display = '';
         }
 
-        // Обновляем высоту
-        const baseHeight = 50;
-        const lineHeight = 20;
-        const newHeight = baseHeight + paramLines.length * lineHeight;
-        elem.style.height = `${newHeight}px`;
+        // Пересчитываем высоту
+        const newHeight = this.calculateElementHeight(elemId);
         elemData.height = newHeight;
+        elem.style.height = `${newHeight}px`;
+        const body = elem.querySelector('.element-body');
+        if (body) body.style.height = `${newHeight - 30}px`;
     },
 
     // -------- Модальное окно свойств слоя ----------
@@ -352,6 +346,37 @@ const NeuralApp = {
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
     },
 
+    calculateElementHeight(elemId) {
+        const data = AppState.elements[elemId];
+        if (!data) return 60;
+        const nnType = data.nnType || data.type;
+        const cfg = this.blockParams[nnType];
+        if (!cfg) return 60;
+
+        const props = data.props || {};
+        const displayKeys = cfg.displayParams || [];
+        const inputs = data.inputs !== undefined ? data.inputs : cfg.inputs;
+        const outputs = data.outputs !== undefined ? data.outputs : cfg.outputs;
+        const maxPorts = Math.max(inputs, outputs);
+
+        // Высота заголовка
+        const headerHeight = 30;
+        // Отступы
+        const padding = 16;
+        // Расстояние между портами по вертикали
+        const portSpacing = 24;
+        const portsHeight = maxPorts * portSpacing;
+
+        // Высота текстовых параметров
+        const lineHeight = 18;
+        const textHeight = displayKeys.length * lineHeight;
+
+        // Выбираем максимальную из высот текста и портов
+        const contentHeight = Math.max(textHeight, portsHeight);
+
+        return headerHeight + contentHeight + padding;
+    },
+
     // Обновить порты элемента без изменения его ID и связей
     updateElementPorts(elemId) {
         const data = AppState.elements[elemId];
@@ -371,6 +396,15 @@ const NeuralApp = {
             ).join('');
         }
         Elements.setupElementHandlers(elemId);
+
+        // Пересчитываем высоту и обновляем стиль
+        const newHeight = this.calculateElementHeight(elemId);
+        data.height = newHeight;
+        elem.style.height = `${newHeight}px`;
+        // Также корректируем высоту element-body, если изменилось количество портов
+        const body = elem.querySelector('.element-body');
+        if (body) body.style.height = `${newHeight - 30}px`;
+
         Connections.drawConnections();
     },
 

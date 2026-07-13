@@ -262,17 +262,5 @@
     "displayParams": [],
     "defaults": {},
     "paramMeta": {}
-  },
-  {
-    "type": "out",
-    "name": "OutTensor",
-    "inputs": 1,
-    "outputs": 0,
-    "maxInputs": 1,
-    "maxOutputs": 0,
-    "color": "#ef4444",
-    "displayParams": [],
-    "defaults": {},
-    "paramMeta": {}
   }
 ]
