@@ -1005,8 +1005,15 @@ const NeuralApp = {
             for (const [id, el] of Object.entries(elements)) {
                 const nnType = el.nnType;
                 if (nnType && this.blockParams[nnType]) {
+                      if (el.inputs !== undefined) {
+                        el.props = el.props || {};
+                        el.props.inputCount = el.inputs;
+                        }
                     // Нейросетевой слой (dataset, filter, c, den, …)
-                    this.createNNElement(nnType, el.x, el.y, el.props, id);
+                     const newId = this.createNNElement(nnType, el.x, el.y, el.props, id);
+                     if (newId && el._processing) {
+                        AppState.elements[newId]._processing = el._processing;
+                    }
                 } else if (ELEMENT_TYPES[el.type]) {
                     // Стандартный элемент из основного редактора
                     Elements.addElement(el.type, el.x, el.y, el.props, id, el.width, el.height);

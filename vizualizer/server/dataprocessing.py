@@ -65,29 +65,32 @@ def build_dataset(signals_data: Dict[str, pd.DataFrame], ref_signal: str,
 
 
 def filter_dataset(df: pd.DataFrame, rules: List[dict]) -> pd.DataFrame:
-    """
-    rules: список словарей {column, min, max, normalize}
-    min/max – границы фильтрации (включительно). normalize – булево, нужно ли нормировать.
-    Возвращает отфильтрованный DataFrame с нормализованными столбцами.
-    """
     df = df.copy()
     for rule in rules:
         col = rule['column']
         if col not in df.columns:
             continue
-        # Фильтрация
+        # Преобразуем столбец в числа, NaN останутся
+        numeric_col = pd.to_numeric(df[col], errors='coerce')
+        mask = pd.Series(True, index=df.index)
+
         if 'min' in rule and rule['min'] is not None:
-            df = df[df[col] >= rule['min']]
+            # Оставляем строки, где значение NaN ИЛИ >= min
+            mask &= (numeric_col.isna()) | (numeric_col >= rule['min'])
         if 'max' in rule and rule['max'] is not None:
-            df = df[df[col] <= rule['max']]
-        # Нормализация (приводим к [0,1] внутри оставшихся строк)
+            mask &= (numeric_col.isna()) | (numeric_col <= rule['max'])
+
+        df = df[mask]
+        # Нормализация – только для не‑NaN значений
         if rule.get('normalize'):
-            min_val = df[col].min()
-            max_val = df[col].max()
-            if max_val > min_val:
-                df[col] = (df[col] - min_val) / (max_val - min_val)
-            else:
-                df[col] = 0.0
+            valid = numeric_col.notna() & np.isfinite(numeric_col)
+            if valid.any():
+                min_val = numeric_col[valid].min()
+                max_val = numeric_col[valid].max()
+                if max_val > min_val:
+                    df.loc[valid, col] = (numeric_col[valid] - min_val) / (max_val - min_val)
+                else:
+                    df.loc[valid, col] = 0.0
     return df
 
 def load_input_data(element_id: str, project: dict, config: str,project_code: str,
