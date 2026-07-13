@@ -10,7 +10,7 @@ const NeuralApp = {
         this.loadConfigurations().catch(console.error);
         await this.fetchBlockParams();
         // Установить начальный режим и построить палитру
-        this.switchMode('design');  // добавить вместо this.buildPalette()
+        this.applyMode('design')  // добавить вместо this.buildPalette()
         // setupPaletteDragDrop и setupGlobalMouseHandlers уже внутри switchMode
         this.setupGlobalMouseHandlers();
         this.setupContextMenu();
@@ -33,22 +33,32 @@ const NeuralApp = {
         document.getElementById('btn-mode-training').addEventListener('click', () => this.switchMode('training'));
     },
 
-    switchMode(mode) {
+    applyMode(mode) {
         this.currentMode = mode;
-        // Обновляем активную кнопку в меню
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-        const activeBtn = document.getElementById(`btn-mode-${mode}`);
-        if (activeBtn) activeBtn.classList.add('active');
+        const btn = document.getElementById(`btn-mode-${mode}`);
+        if (btn) btn.classList.add('active');
 
-        // Синхронизируем тип проекта
         AppState.project.type = mode === 'design' ? PROJECT_TYPE.NEURAL_TEMPLATE : PROJECT_TYPE.NEURAL_NETWORK;
 
-        // Перестраиваем палитру под режим
         this.buildPalette();
-        // Перепривязываем drag & drop
         this.setupPaletteDragDrop();
     },
 
+    switchMode(mode) {
+        if (mode === this.currentMode) return;
+        if (Object.keys(AppState.elements).length > 0) {
+            if (!confirm('При переключении режима все несохранённые изменения пропадут. Продолжить?')) {
+                return;
+            }
+        }
+        // Очищаем рабочую область
+        document.getElementById('workspace').innerHTML = '';
+        document.getElementById('connections-svg').innerHTML = '';
+        resetState();
+        this.applyMode(mode);
+        Viewport.updateTransform();
+    },
     initUser() {
         let username = localStorage.getItem('lse_username');
         if (!username) {
@@ -637,7 +647,8 @@ const NeuralApp = {
         document.getElementById('connections-svg').innerHTML = '';
         
         resetState();
-        AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE; // <-- добавить
+        this.applyMode(this.currentMode);  
+        //AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE; // <-- добавить
         Viewport.updateTransform();
     },
 
@@ -668,12 +679,13 @@ const NeuralApp = {
                 const type = data.project.type;
                 if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
                     const mode = type === PROJECT_TYPE.NEURAL_TEMPLATE ? 'design' : 'training';
-                    this.currentMode = mode;
-                    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-                    const btn = document.getElementById(`btn-mode-${mode}`);
-                    if (btn) btn.classList.add('active');
-                    this.buildPalette();
-                    this.setupPaletteDragDrop();
+                    this.applyMode(mode);
+                    //this.currentMode = mode;
+                    //document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                    //const btn = document.getElementById(`btn-mode-${mode}`);
+                    //if (btn) btn.classList.add('active');
+                    //this.buildPalette();
+                    //this.setupPaletteDragDrop();
                 }
             }
 
@@ -707,7 +719,7 @@ async saveProject() {
         alert('Пожалуйста, укажите код проекта перед сохранением.');
         return;
     }
-    AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
+    //AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
     // Сохраняем код проекта как введённый пользователем
     const projectCode = AppState.project.code;
     // Генерируем строку архитектуры

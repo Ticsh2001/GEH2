@@ -297,12 +297,11 @@ async refreshProjectList() {
   try {
     const result = await Settings.listProjects();
     let projects = result.projects || [];
-     if (AppState.project.type === PROJECT_TYPE.NEURAL_TEMPLATE ||
-            AppState.project.type === PROJECT_TYPE.NEURAL_NETWORK) {
-            projects = projects.filter(p => 
-                p.type === 'neural_template' || p.type === 'neural_network'
-            );
-        }
+    if (AppState.project.type === PROJECT_TYPE.NEURAL_TEMPLATE) {
+        projects = projects.filter(p => p.type === 'neural_template');
+    } else if (AppState.project.type === PROJECT_TYPE.NEURAL_NETWORK) {
+        projects = projects.filter(p => p.type === 'neural_network');
+    }
 
 
     this.projectList = projects;
