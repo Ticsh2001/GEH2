@@ -125,13 +125,36 @@ const NeuralApp = {
         const id = elemId || `${type}_${++AppState.elementCounter}`;
         const inputs = (props.inputCount !== undefined) ? props.inputCount : cfg.inputs;
         const outputs = cfg.outputs;
+
+        // Объединяем дефолтные параметры с переданными
+        const mergedProps = { ...cfg.defaults, ...props };
+
+        // Формируем список параметров для отображения
+        const displayKeys = cfg.displayParams || [];
+        const paramLines = displayKeys.map(key => {
+            const val = mergedProps[key];
+            let text = val;
+            if (Array.isArray(val)) text = JSON.stringify(val);
+            else if (val === null) text = 'null';
+            else if (val === undefined) text = '';
+            else text = String(val);
+            return `${key}: ${text}`;
+        });
+
+        // Вычисляем высоту блока: базовая + строки параметров
+        const baseHeight = 50;
+        const lineHeight = 20;
+        const totalHeight = baseHeight + paramLines.length * lineHeight;
+        const width = 150; // можно увеличить под длинные строки, но пока фикс.
+
         const elemData = {
-            id, 
-            type: 'nn-layer',          // общий тип для Elements
-            nnType: type,              // реальный тип слоя
+            id,
+            type: 'nn-layer',
+            nnType: type,
             x, y,
-            width: 150, height: 60,
-            props: { ...cfg.defaults, ...props },
+            width: width,
+            height: totalHeight,
+            props: mergedProps,
             inputs: inputs,
             outputs: outputs
         };
@@ -142,17 +165,21 @@ const NeuralApp = {
         elem.className = 'element nn-element';
         elem.style.left = `${x}px`;
         elem.style.top = `${y}px`;
-        elem.style.width = `${elemData.width}px`;
-        elem.style.height = `${elemData.height}px`;
+        elem.style.width = `${width}px`;
+        elem.style.height = `${totalHeight}px`;
+
+        // Контент: заголовок, параметры, порты
         elem.innerHTML = `
             <div class="element-header" style="background:${cfg.color};">${cfg.name}</div>
-            <div class="element-body">
-                <div class="ports-left">
-                    ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
-                </div>
-                <div class="element-symbol">${type}</div>
-                <div class="ports-right">
-                    ${Array.from({length: outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
+            <div class="element-body" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                ${paramLines.length > 0 ? `<div class="element-params" style="font-size:10px; line-height:1.2; padding:2px 4px; color:#eee; word-break:break-word;">${paramLines.join('<br>')}</div>` : `<div class="element-symbol">${type}</div>`}
+                <div style="display:flex; justify-content:space-between; width:100%;">
+                    <div class="ports-left">
+                        ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
+                    </div>
+                    <div class="ports-right">
+                        ${Array.from({length: outputs}, (_, i) => `<div class="port output any-port" data-port="out-${i}" data-element="${id}" title="Выход ${i+1}"></div>`).join('')}
+                    </div>
                 </div>
             </div>
             <div class="resize-handle handle-se" data-direction="se"></div>
@@ -163,8 +190,66 @@ const NeuralApp = {
             if (e.target.classList.contains('port')) return;
             NeuralApp.showLayerPropertiesModal(id);
         });
-        //Connections.drawConnections();
+        // Не вызываем drawConnections здесь, если ещё не все элементы созданы
         return id;
+    },
+
+    updateElementDisplay(elemId) {
+        const elemData = AppState.elements[elemId];
+        if (!elemData) return;
+        const nnType = elemData.nnType;
+        const cfg = this.blockParams[nnType];
+        if (!cfg) return;
+        const props = elemData.props || {};
+
+        // Пересчитываем высоту и обновляем текст параметров
+        const displayKeys = cfg.displayParams || [];
+        const paramLines = displayKeys.map(key => {
+            const val = props[key];
+            let text = val;
+            if (Array.isArray(val)) text = JSON.stringify(val);
+            else if (val === null) text = 'null';
+            else if (val === undefined) text = '';
+            else text = String(val);
+            return `${key}: ${text}`;
+        });
+
+        const elem = document.getElementById(elemId);
+        if (!elem) return;
+
+        // Находим контейнер с параметрами (или создаём)
+        let paramsDiv = elem.querySelector('.element-params');
+        let symbolDiv = elem.querySelector('.element-symbol');
+
+        if (paramLines.length > 0) {
+            if (symbolDiv) {
+                symbolDiv.style.display = 'none';
+            }
+            if (!paramsDiv) {
+                // Создаём блок параметров и вставляем перед блоком портов
+                const body = elem.querySelector('.element-body');
+                const portsContainer = body.querySelector('div:last-child'); // блок с портами
+                paramsDiv = document.createElement('div');
+                paramsDiv.className = 'element-params';
+                paramsDiv.style.fontSize = '10px';
+                paramsDiv.style.lineHeight = '1.2';
+                paramsDiv.style.padding = '2px 4px';
+                paramsDiv.style.color = '#eee';
+                paramsDiv.style.wordBreak = 'break-word';
+                body.insertBefore(paramsDiv, portsContainer);
+            }
+            paramsDiv.innerHTML = paramLines.join('<br>');
+        } else {
+            if (paramsDiv) paramsDiv.remove();
+            if (symbolDiv) symbolDiv.style.display = '';
+        }
+
+        // Обновляем высоту
+        const baseHeight = 50;
+        const lineHeight = 20;
+        const newHeight = baseHeight + paramLines.length * lineHeight;
+        elem.style.height = `${newHeight}px`;
+        elemData.height = newHeight;
     },
 
     // -------- Модальное окно свойств слоя ----------
@@ -261,6 +346,7 @@ const NeuralApp = {
             }
 
             this.updateElementPorts(elemId);
+            this.updateElementDisplay(elemId);
             Modal.hideModal('modal-overlay');
         };
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
