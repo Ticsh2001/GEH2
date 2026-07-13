@@ -1225,8 +1225,26 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 </div>
             `;
         }
-        if (AppState.project.type === PROJECT_TYPE.NEURAL_TEMPLATE) {
+        if (project.type === PROJECT_TYPE.NEURAL_TEMPLATE || project.type === PROJECT_TYPE.NEURAL_NETWORK) {
+            const activeType = project.type;
             content.innerHTML = `
+                <div class="modal-row">
+                    <label>Тип проекта:</label>
+                    <div class="project-type-selector">
+                        <div class="project-type-btn ${activeType === PROJECT_TYPE.NEURAL_TEMPLATE ? 'active' : ''}"
+                            data-type="${PROJECT_TYPE.NEURAL_TEMPLATE}">
+                            <div class="type-icon">🧠</div>
+                            <div class="type-name">Дизайн</div>
+                            <div class="type-desc">Архитектура сети</div>
+                        </div>
+                        <div class="project-type-btn ${activeType === PROJECT_TYPE.NEURAL_NETWORK ? 'active' : ''}"
+                            data-type="${PROJECT_TYPE.NEURAL_NETWORK}">
+                            <div class="type-icon">⚡</div>
+                            <div class="type-name">Нейронная сеть</div>
+                            <div class="type-desc">Обучение и параметры</div>
+                        </div>
+                    </div>
+                </div>
                 <div class="modal-row">
                     <label>Код проекта:</label>
                     <input type="text" id="project-code" value="${project.code || ''}" placeholder="Уникальный идентификатор">
@@ -1235,12 +1253,13 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                     <label>Описание:</label>
                     <textarea id="project-description" placeholder="Описание нейросетевой модели">${project.description || ''}</textarea>
                 </div>
-                <div class="modal-buttons">
-                    <button class="modal-btn cancel" id="project-modal-cancel">Отмена</button>
-                    <button class="modal-btn save" id="project-modal-save">Сохранить</button>
-                </div>
             `;
-            // Обработчики для кнопок уже навешаны в Modal.init()
+            content.querySelectorAll('.project-type-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    content.querySelectorAll('.project-type-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
             this.showModal('project-modal-overlay');
             return;
         }
@@ -1444,11 +1463,12 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
             });
             AppState.project.templateArgs = argDescriptions;
          } else if (type === PROJECT_TYPE.NEURAL_TEMPLATE) {
-            AppState.project.code = document.getElementById('project-code').value;
-            AppState.project.description = document.getElementById('project-description').value;
+            const descEl = document.getElementById('project-description');
+            AppState.project.description = descEl ? descEl.value : '';
             AppState.project.dimension = '';
             AppState.project.possibleCause = '';
             AppState.project.guidelines = '';
+            AppState.project.templateArgs = {};
         }
 
         this.hideModal('project-modal-overlay');

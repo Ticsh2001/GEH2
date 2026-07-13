@@ -4,6 +4,8 @@ const NeuralApp = {
 
     async init() {
         this.initUser();
+        AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;   // ← добавить
+
         Settings.init().catch(console.error);
         this.loadConfigurations().catch(console.error);
         await this.fetchBlockParams();
@@ -388,7 +390,9 @@ const NeuralApp = {
         }
         document.getElementById('workspace').innerHTML = '';
         document.getElementById('connections-svg').innerHTML = '';
+        
         resetState();
+        AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE; // <-- добавить
         Viewport.updateTransform();
     },
 

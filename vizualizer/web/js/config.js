@@ -17,7 +17,8 @@ const PROJECT_TYPE = {
     PARAMETER: 'parameter',
     RULE: 'rule',
     TEMPLATE: 'template',
-    NEURAL_TEMPLATE: 'neural_template' 
+    NEURAL_TEMPLATE: 'neural_template',
+    NEURAL_NETWORK: 'neural_network'      // будущая нейронная сеть
 };
 
 // Конфигурация элементов
