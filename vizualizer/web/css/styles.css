@@ -884,3 +884,29 @@ body {
 .project-type-btn .type-desc {
     font-size: 10px;
 }
+
+.mode-switch {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 12px;
+    background: #1e293b;
+    border-radius: 6px;
+    padding: 2px;
+}
+.mode-btn {
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.mode-btn.active {
+    background: #3b82f6;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 0 6px rgba(59,130,246,0.5);
+}

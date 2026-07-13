@@ -1,16 +1,17 @@
 // neural_app.js — Конструктор нейросетей (общий тип nn-layer)
 const NeuralApp = {
     blockParams: {},
+    currentMode: 'design',
 
     async init() {
         this.initUser();
-        AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;   // ← добавить
-
+        AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
         Settings.init().catch(console.error);
         this.loadConfigurations().catch(console.error);
         await this.fetchBlockParams();
-        this.buildPalette();
-        this.setupPaletteDragDrop();
+        // Установить начальный режим и построить палитру
+        this.switchMode('design');  // добавить вместо this.buildPalette()
+        // setupPaletteDragDrop и setupGlobalMouseHandlers уже внутри switchMode
         this.setupGlobalMouseHandlers();
         this.setupContextMenu();
         this.setupWorkspaceClick();
@@ -27,6 +28,25 @@ const NeuralApp = {
         document.getElementById('btn-project-settings').addEventListener('click', () => {
             Modal.showProjectPropertiesModal();
         });
+
+        document.getElementById('btn-mode-design').addEventListener('click', () => this.switchMode('design'));
+        document.getElementById('btn-mode-training').addEventListener('click', () => this.switchMode('training'));
+    },
+
+    switchMode(mode) {
+        this.currentMode = mode;
+        // Обновляем активную кнопку в меню
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        const activeBtn = document.getElementById(`btn-mode-${mode}`);
+        if (activeBtn) activeBtn.classList.add('active');
+
+        // Синхронизируем тип проекта
+        AppState.project.type = mode === 'design' ? PROJECT_TYPE.NEURAL_TEMPLATE : PROJECT_TYPE.NEURAL_NETWORK;
+
+        // Перестраиваем палитру под режим
+        this.buildPalette();
+        // Перепривязываем drag & drop
+        this.setupPaletteDragDrop();
     },
 
     initUser() {
@@ -78,28 +98,103 @@ const NeuralApp = {
             const items = Array.isArray(json) ? json : Object.values(json);
             this.blockParams = {};
             items.forEach(item => { this.blockParams[item.type] = item; });
+            this.designBlockTypes = new Set(Object.keys(this.blockParams));
+            this.blockParams['nn-template'] = {
+                name: 'Шаблон',
+                inputs: 0, outputs: 1,
+                maxInputs: 1, maxOutputs: 10,
+                color: '#f97316',
+                defaults: {},
+                paramMeta: {},
+                displayParams: []
+            };
+            this.blockParams['nn-settings'] = {
+                name: 'Настройка',
+                inputs: 0, outputs: 1,
+                maxInputs: 1, maxOutputs: 10,
+                color: '#8b5cf6',
+                defaults: {},
+                paramMeta: {},
+                displayParams: []
+            };
+
+
         } catch (e) {
             console.error(e);
             alert('Не удалось загрузить параметры слоёв');
         }
+
     },
 
     buildPalette() {
         const container = document.getElementById('nn-palette-items');
         container.innerHTML = '';
-        Object.entries(this.blockParams).forEach(([type, cfg]) => {
-            const item = document.createElement('div');
-            item.className = 'palette-item';
-            item.dataset.type = type;
-            item.innerHTML = `
-                <svg viewBox="0 0 60 40">
-                    <rect x="5" y="8" width="50" height="24" rx="4" fill="#0f3460" stroke="${cfg.color}" stroke-width="2"/>
-                    <text x="30" y="24" fill="${cfg.color}" font-size="10" font-weight="bold" text-anchor="middle">${type}</text>
-                </svg>
-                <div class="palette-item-name">${cfg.name}</div>
-            `;
-            container.appendChild(item);
-        });
+
+        if (this.currentMode === 'design') {
+            // Только те типы, что были загружены с сервера
+            const items = Object.entries(this.blockParams).filter(([type]) => this.designBlockTypes.has(type));
+            items.forEach(([type, cfg]) => {
+                const item = document.createElement('div');
+                item.className = 'palette-item';
+                item.dataset.type = type;
+                item.innerHTML = `
+                    <svg viewBox="0 0 60 40">
+                        <rect x="5" y="8" width="50" height="24" rx="4" fill="#0f3460" stroke="${cfg.color}" stroke-width="2"/>
+                        <text x="30" y="24" fill="${cfg.color}" font-size="10" font-weight="bold" text-anchor="middle">${type}</text>
+                    </svg>
+                    <div class="palette-item-name">${cfg.name}</div>
+                `;
+                container.appendChild(item);
+            });
+        } else if (this.currentMode === 'training') {
+            const groups = [
+                {
+                    title: 'ВИЗУАЛЬНЫЕ',
+                    items: [{ type: 'group', name: 'Группа', color: '#6b7280' }]
+                },
+                {
+                    title: 'ВХОДЫ',
+                    items: [
+                        { type: 'input-signal', name: 'Входной сигнал', color: '#4a90d9' },
+                        { type: 'table', name: 'Таблица', color: '#60a5fa' }
+                    ]
+                },
+                {
+                    title: 'ОБРАБОТКА ДАННЫХ',
+                    items: []  // позже заполним
+                },
+                {
+                    title: 'НЕЙРОННАЯ СЕТЬ',
+                    items: [
+                        { type: 'nn-template', name: 'Шаблон', color: '#f97316' },
+                        { type: 'nn-settings', name: 'Настройка', color: '#8b5cf6' }
+                    ]
+                }
+            ];
+
+            groups.forEach(group => {
+                const section = document.createElement('div');
+                section.className = 'palette-section';
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'palette-section-title';
+                titleDiv.textContent = group.title;
+                section.appendChild(titleDiv);
+                group.items.forEach(item => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'palette-item';
+                    itemDiv.dataset.type = item.type;
+                    itemDiv.innerHTML = `
+                        <svg viewBox="0 0 60 40">
+                            <rect x="5" y="8" width="50" height="24" rx="4" fill="#0f3460" stroke="${item.color}" stroke-width="2"/>
+                            <text x="30" y="24" fill="${item.color}" font-size="10" font-weight="bold" text-anchor="middle">${item.type.substring(0,3)}</text>
+                        </svg>
+                        <div class="palette-item-name">${item.name}</div>
+                    `;
+                    section.appendChild(itemDiv);
+                });
+                container.appendChild(section);
+            });
+        }
     },
 
     setupPaletteDragDrop() {
@@ -568,9 +663,17 @@ const NeuralApp = {
             }
             
             if (data.project) {
-                AppState.project = data.project;
-                if (![PROJECT_TYPE.NEURAL_TEMPLATE, PROJECT_TYPE.NEURAL_NETWORK].includes(AppState.project.type)) {
-                    AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
+                 AppState.project = data.project;
+                // Определяем режим по типу
+                const type = data.project.type;
+                if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
+                    const mode = type === PROJECT_TYPE.NEURAL_TEMPLATE ? 'design' : 'training';
+                    this.currentMode = mode;
+                    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                    const btn = document.getElementById(`btn-mode-${mode}`);
+                    if (btn) btn.classList.add('active');
+                    this.buildPalette();
+                    this.setupPaletteDragDrop();
                 }
             }
 
@@ -652,7 +755,22 @@ async saveProject() {
                 const rect = container.getBoundingClientRect();
                 if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
                     const pos = screenToCanvas(e.clientX, e.clientY);
-                    NeuralApp.createNNElement(AppState.dragType, pos.x - 75, pos.y - 30);
+                    if (this.currentMode === 'design') {
+                        this.createNNElement(AppState.dragType, pos.x - 75, pos.y - 30);
+                    } else if (this.currentMode === 'training') {
+                        // nn-типы обучения
+                        if (AppState.dragType === 'nn-template' || AppState.dragType === 'nn-settings') {
+                            this.createNNElement(AppState.dragType, pos.x - 75, pos.y - 30);
+                        } else {
+                            // Стандартные элементы из ELEMENT_TYPES
+                            const config = ELEMENT_TYPES[AppState.dragType];
+                            if (config) {
+                                const w = config.minWidth || 120;
+                                const h = config.minHeight || 60;
+                                Elements.addElement(AppState.dragType, pos.x - w/2, pos.y - h/2);
+                            }
+                        }
+                    }
                 }
                 AppState.isDraggingFromPalette = false;
                 AppState.dragType = null;
