@@ -119,10 +119,10 @@ const NeuralApp = {
         });
     },
 
-    createNNElement(type, x, y, props = {}) {
+    createNNElement(type, x, y, props = {}, elemId = null) {
         const cfg = this.blockParams[type];
         if (!cfg) return null;
-        const id = `${type}_${++AppState.elementCounter}`;
+        const id = elemId || `${type}_${++AppState.elementCounter}`;
         const inputs = (props.inputCount !== undefined) ? props.inputCount : cfg.inputs;
         const outputs = cfg.outputs;
         const elemData = {
@@ -163,7 +163,7 @@ const NeuralApp = {
             if (e.target.classList.contains('port')) return;
             NeuralApp.showLayerPropertiesModal(id);
         });
-        Connections.drawConnections();
+        //Connections.drawConnections();
         return id;
     },
 
@@ -401,7 +401,7 @@ const NeuralApp = {
         const filename = params.get('load');
         if (!filename) return;
         const config = params.get('config') || '';
-        const source = params.get('source') || 'projects';   // ← важно!
+        const source = params.get('source') || 'projects';
         if (config) AppState.currentConfig = config;
 
         try {
@@ -409,29 +409,40 @@ const NeuralApp = {
             document.getElementById('workspace').innerHTML = '';
             document.getElementById('connections-svg').innerHTML = '';
             resetState();
-            // Восстанавливаем тип проекта (перезаписываем после resetState)
+            
+            // Восстанавливаем viewport до создания элементов
+            if (data.viewport) {
+                AppState.viewport.zoom = data.viewport.zoom ?? 1;
+                AppState.viewport.panX = data.viewport.panX ?? 0;
+                AppState.viewport.panY = data.viewport.panY ?? 0;
+            }
+            
             if (data.project) {
                 AppState.project = data.project;
-                // Убедимся, что тип остался нейросетевым
                 if (![PROJECT_TYPE.NEURAL_TEMPLATE, PROJECT_TYPE.NEURAL_NETWORK].includes(AppState.project.type)) {
                     AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
                 }
             }
-            AppState.connections = data.connections || [];
-            AppState.elementCounter = data.counter || 0;
 
             const elements = data.elements || {};
             for (const [id, el] of Object.entries(elements)) {
                 const nnType = el.nnType || el.type;
                 const cfg = this.blockParams[nnType];
-                if (!cfg) {
-                    console.warn('Неизвестный тип слоя:', nnType);
-                    continue;
-                }
-                this.createNNElement(nnType, el.x, el.y, el.props);
+                if (!cfg) continue;
+                this.createNNElement(nnType, el.x, el.y, el.props, id);
             }
-            Connections.drawConnections();
+
+            AppState.connections = data.connections || [];
+
+            // Обновляем счётчик
+            const maxNum = Object.keys(AppState.elements).reduce((max, key) => {
+                const match = key.match(/_(\d+)$/);
+                return match ? Math.max(max, parseInt(match[1])) : max;
+            }, 0);
+            AppState.elementCounter = Math.max(AppState.elementCounter, maxNum);
+
             Viewport.updateTransform();
+            Connections.drawConnections();   // теперь только один раз, с полными данными
         } catch (e) {
             console.error('Ошибка загрузки:', e);
         }
