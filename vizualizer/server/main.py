@@ -1611,7 +1611,9 @@ async def get_dataset_stats(element_id: str, config: str = Query(...), code: str
             if not numeric_col.empty:
                 stats[col] = {
                     'min': float(numeric_col.min()),
-                    'max': float(numeric_col.max())
+                    'max': float(numeric_col.max()),
+                    'mean': float(numeric_col.mean()),
+                    'median': float(numeric_col.median())
                 }
         return {"columns": stats}
     except Exception as e:

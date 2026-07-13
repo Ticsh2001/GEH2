@@ -480,6 +480,8 @@ const NeuralApp = {
                     elemData.inputs = newInputCount;
                     this.updateElementPorts(elemId);
                 }
+                // Сбрасываем кэш обработки, так как настройки изменились
+                delete elemData._processing;
                 Modal.hideModal('modal-overlay');
             };
             document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
@@ -497,110 +499,169 @@ const NeuralApp = {
             return;
         }
 
-        // ---------- FILTER ----------
+        // --- FILTER (широкая модалка, статистики) ---
         if (nnType === 'filter') {
-            // Найти входной элемент
-            const conn = AppState.connections.find(c => c.toElement === elemId && c.toPort === 'in-0');
-            const sourceId = conn ? conn.fromElement : null;
-            let sourceProcessed = false;
-            if (sourceId) {
-                const srcElem = AppState.elements[sourceId];
-                if (srcElem && (srcElem.nnType === 'dataset' || srcElem.nnType === 'filter') && srcElem._processing && srcElem._processing.hash) {
-                    sourceProcessed = true;
-                }
-            }
+            // Расширяем модальное окно
+            const modalEl = document.getElementById('modal');
+            if (modalEl) modalEl.style.maxWidth = '950px';
 
-            const currentRules = elemData.props.rules || [];
-            let statsHtml = '';
+            // 1. Определяем входной элемент
+            const conn = AppState.connections.find(c => c.toElement === elemId);
+            const srcId = conn ? conn.fromElement : null;
+            let columnsStats = null;
 
-            if (sourceId && sourceProcessed) {
-                // Загружаем столбцы и их min/max
+            if (srcId && AppState.elements[srcId]?._processing?.hash) {
                 try {
-                    const resp = await fetch(`/api/nn/data/${sourceId}/stats?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`);
+                    const params = new URLSearchParams({
+                        config: AppState.currentConfig || '',
+                        code: AppState.project.code || ''
+                    });
+                    const resp = await fetch(`/api/nn/data/${srcId}/stats?${params}`);
                     if (resp.ok) {
                         const data = await resp.json();
-                        const columns = data.columns || {};
-                        statsHtml = Object.entries(columns).map(([col, stat]) => {
-                            const existingRule = currentRules.find(r => r.column === col) || {};
-                            const minVal = existingRule.min !== undefined ? existingRule.min : '';
-                            const maxVal = existingRule.max !== undefined ? existingRule.max : '';
-                            const norm = existingRule.normalize ? 'checked' : '';
-                            return `<div class="filter-rule-row" data-col="${col}">
-                                <span style="flex:2;">${col} <small>(min: ${stat.min.toFixed(4)}, max: ${stat.max.toFixed(4)})</small></span>
-                                <input type="number" class="filter-min" value="${minVal}" placeholder="Мин" step="any" style="flex:1;">
-                                <input type="number" class="filter-max" value="${maxVal}" placeholder="Макс" step="any" style="flex:1;">
-                                <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" class="filter-norm" ${norm}> Норм.</label>
-                            </div>`;
-                        }).join('');
-                    } else {
-                        statsHtml = '<div style="color:#f97316;">Не удалось загрузить статистику входного файла. Проверьте, что предыдущий элемент применён.</div>';
+                        columnsStats = data.columns || {};
                     }
                 } catch (e) {
-                    statsHtml = '<div style="color:#f97316;">Ошибка загрузки статистики.</div>';
+                    console.warn('Не удалось загрузить статистики фильтра', e);
                 }
-            } else if (sourceId) {
-                // Входной элемент не обработан или является input-signal
-                const srcElem = AppState.elements[sourceId];
-                if (srcElem && srcElem.type === 'input-signal') {
-                    statsHtml = '<div style="color:#f97316;">⚠️ Фильтрация не может применяться напрямую к входному сигналу. Подключите элемент "Собрать датасет" перед фильтром.</div>';
-                } else {
-                    statsHtml = '<div style="color:#f97316;">Входные данные ещё не подготовлены. Примените предшествующий элемент или нажмите "Применить" для автоматической обработки.</div>';
-                }
-            } else {
-                statsHtml = '<div style="color:#f97316;">Нет входных данных. Подключите элемент к входу.</div>';
             }
 
+            // 2. Строим строки правил
+            const rules = elemData.props.rules || [];
+            let rulesHtml = '';
+
+            // Заголовки
+            const headerHtml = `
+                <div class="filter-rule-header" style="display:flex; gap:6px; font-weight:bold; font-size:12px; margin-bottom:4px; padding-bottom:4px; border-bottom:1px solid #4a5568;">
+                    <span style="flex:1 1 120px;">Столбец</span>
+                    <span style="width:70px;">Мин</span>
+                    <span style="width:70px;">Макс</span>
+                    <span style="width:70px;">Среднее</span>
+                    <span style="width:70px;">Медиана</span>
+                    <span style="width:80px;">Мин.фильтр</span>
+                    <span style="width:80px;">Макс.фильтр</span>
+                    <span style="width:55px;">Норм.</span>
+                    <span style="width:20px;"></span>
+                </div>`;
+
+            if (columnsStats && Object.keys(columnsStats).length > 0) {
+                // Автоматическое построение по статистикам
+                Object.entries(columnsStats).forEach(([col, stat]) => {
+                    const existingRule = rules.find(r => r.column === col) || {};
+                    const minVal = existingRule.min !== undefined ? existingRule.min : '';
+                    const maxVal = existingRule.max !== undefined ? existingRule.max : '';
+                    const normalize = existingRule.normalize || false;
+                    rulesHtml += `
+                        <div class="filter-rule-row" data-column="${col}" style="display:flex; gap:6px; align-items:center; margin-bottom:4px; font-size:12px;">
+                            <span style="flex:1 1 120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${col}">${col}</span>
+                            <span style="width:70px;">${stat.min.toFixed(2)}</span>
+                            <span style="width:70px;">${stat.max.toFixed(2)}</span>
+                            <span style="width:70px;">${stat.mean.toFixed(2)}</span>
+                            <span style="width:70px;">${stat.median.toFixed(2)}</span>
+                            <input type="number" class="filter-min" value="${minVal}" placeholder="мин" style="width:80px;" step="any">
+                            <input type="number" class="filter-max" value="${maxVal}" placeholder="макс" style="width:80px;" step="any">
+                            <label style="width:55px; display:inline-flex; align-items:center; gap:2px; white-space:nowrap;">
+                                <input type="checkbox" class="filter-norm" ${normalize ? 'checked' : ''}>
+                            </label>
+                            <button class="remove-rule-btn" style="width:20px; background:none; border:none; color:#f87171; cursor:pointer;">✕</button>
+                        </div>`;
+                });
+            } else {
+                // Ручной режим (статистик нет)
+                rulesHtml = rules.map((r, idx) => `
+                    <div class="filter-rule-row" data-column="${r.column}" style="display:flex; gap:6px; align-items:center; margin-bottom:4px; font-size:12px;">
+                        <input type="text" value="${r.column || ''}" placeholder="Столбец" style="flex:1 1 120px;">
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <input type="number" class="filter-min" value="${r.min ?? ''}" placeholder="мин" style="width:80px;" step="any">
+                        <input type="number" class="filter-max" value="${r.max ?? ''}" placeholder="макс" style="width:80px;" step="any">
+                        <label style="width:55px; display:inline-flex; align-items:center; gap:2px; white-space:nowrap;">
+                            <input type="checkbox" class="filter-norm" ${r.normalize ? 'checked' : ''}>
+                        </label>
+                        <button class="remove-rule-btn" style="width:20px;">✕</button>
+                    </div>
+                `).join('');
+                if (!rulesHtml) {
+                    rulesHtml = '<div style="color:#999; font-size:12px;">Нет правил. Нажмите «Добавить правило» или примените датасет.</div>';
+                }
+            }
+
+            // 3. Индикатор статуса
             const processing = elemData._processing;
             const statusIcon = processing?.hash ? '🟢' : '🔴';
             const statusText = processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
 
             modalContent.innerHTML = `
-                <div id="processing-status" style="margin-bottom:10px; font-size:14px;">${statusIcon} ${statusText}</div>
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
                 <div class="modal-row">
-                    <label>Правила фильтрации:</label>
-                    <div id="filter-rules-container">${statsHtml || '<div style="color:#999;">Нет доступных столбцов. Добавьте правила вручную.</div>'}</div>
-                    <div style="margin-top:8px; display:flex; gap:8px;">
-                        <button id="add-filter-rule" class="modal-btn">Добавить правило вручную</button>
-                        <button id="modal-apply" class="modal-btn apply-btn">⚡ Применить</button>
-                    </div>
+                    <label>Правила фильтрации ${columnsStats ? '(на основе датасета)' : ''}</label>
+                    ${headerHtml}
+                    <div id="filter-rules-container" style="max-height:400px; overflow-y:auto;">${rulesHtml}</div>
+                    ${!columnsStats ? '<button id="add-filter-rule" class="modal-btn" style="margin-top:6px;">Добавить правило</button>' : ''}
+                </div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
                 </div>
             `;
 
-            // Обработчик добавления ручного правила
-            document.getElementById('add-filter-rule').onclick = () => {
-                const container = document.getElementById('filter-rules-container');
-                const row = document.createElement('div');
-                row.className = 'filter-rule-row';
-                row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
-                row.innerHTML = `
-                    <input type="text" class="filter-col" placeholder="Столбец" style="flex:2;">
-                    <input type="number" class="filter-min" placeholder="Мин" step="any" style="flex:1;">
-                    <input type="number" class="filter-max" placeholder="Макс" step="any" style="flex:1;">
-                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" class="filter-norm"> Норм.</label>
-                    <button class="remove-rule-btn">✕</button>
-                `;
-                container.appendChild(row);
-                row.querySelector('.remove-rule-btn').onclick = () => row.remove();
+            // 4. Функция сброса ширины модалки
+            const resetModalWidth = () => {
+                const m = document.getElementById('modal');
+                if (m) m.style.maxWidth = '';
             };
 
-            // Обработчик удаления для уже существующих правил
-            document.getElementById('filter-rules-container').querySelectorAll('.remove-rule-btn').forEach(btn => {
-                btn.onclick = () => btn.closest('.filter-rule-row').remove();
-            });
-
-            // Кнопка Применить
-            document.getElementById('modal-apply').onclick = () => {
-                // Сохранить правила перед применением
-                this.saveFilterRules(elemId);
-                this.applyElement(elemId);
-            };
-
-            // Переопределяем кнопку Сохранить
+            // 5. Обработчики кнопок
             document.getElementById('modal-save').onclick = () => {
-                this.saveFilterRules(elemId);
+                this.saveFilterRules(elemData, columnsStats);
+                resetModalWidth();
                 Modal.hideModal('modal-overlay');
             };
-            document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
+            document.getElementById('modal-cancel').onclick = () => {
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+
+            document.getElementById('modal-apply').onclick = async () => {
+                this.saveFilterRules(elemData, columnsStats);
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+                await this.applyElement(elemId);
+                // Повторно открываем свойства, теперь статистики загрузятся
+                this.showLayerPropertiesModal(elemId);
+            };
+
+            // 6. Добавление правила (ручной режим)
+            const addBtn = document.getElementById('add-filter-rule');
+            if (addBtn) {
+                addBtn.onclick = () => {
+                    const container = document.getElementById('filter-rules-container');
+                    const row = document.createElement('div');
+                    row.className = 'filter-rule-row';
+                    row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:4px; font-size:12px;';
+                    row.innerHTML = `
+                        <input type="text" placeholder="Столбец" style="flex:1 1 120px;">
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <span style="width:70px;">-</span>
+                        <input type="number" class="filter-min" placeholder="мин" style="width:80px;" step="any">
+                        <input type="number" class="filter-max" placeholder="макс" style="width:80px;" step="any">
+                        <label style="width:55px; display:inline-flex; align-items:center; gap:2px; white-space:nowrap;">
+                            <input type="checkbox" class="filter-norm">
+                        </label>
+                        <button class="remove-rule-btn" style="width:20px;">✕</button>
+                    `;
+                    container.appendChild(row);
+                    row.querySelector('.remove-rule-btn').onclick = () => row.remove();
+                };
+            }
+
+            // 7. Обработчики удаления для уже существующих правил
+            document.querySelectorAll('.remove-rule-btn').forEach(btn => {
+                btn.onclick = () => btn.closest('.filter-rule-row').remove();
+            });
 
             modalOverlay.dataset.elementId = elemId;
             Modal.showModal('modal-overlay');
@@ -691,26 +752,26 @@ const NeuralApp = {
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
     },
 
-    saveFilterRules(elemId) {
-        const elemData = AppState.elements[elemId];
-        if (!elemData) return;
+    saveFilterRules(elemData, columnsStats) {
         const container = document.getElementById('filter-rules-container');
+        if (!container) return;
         const rules = [];
         container.querySelectorAll('.filter-rule-row').forEach(row => {
-            const colInput = row.querySelector('.filter-col');
+            const colInput = row.querySelector('input[type="text"]');
             const minInput = row.querySelector('.filter-min');
             const maxInput = row.querySelector('.filter-max');
-            const normInput = row.querySelector('.filter-norm');
-            const col = colInput ? colInput.value.trim() : (row.dataset.col || '');
-            const minVal = minInput ? (minInput.value !== '' ? parseFloat(minInput.value) : null) : null;
-            const maxVal = maxInput ? (maxInput.value !== '' ? parseFloat(maxInput.value) : null) : null;
-            const normalize = normInput ? normInput.checked : false;
-            if (col) {
-                rules.push({ column: col, min: minVal, max: maxVal, normalize });
+            const normCheck = row.querySelector('.filter-norm');
+            const column = colInput ? colInput.value.trim() : (row.dataset.column || '');
+            const min = minInput && minInput.value !== '' ? parseFloat(minInput.value) : null;
+            const max = maxInput && maxInput.value !== '' ? parseFloat(maxInput.value) : null;
+            const normalize = normCheck ? normCheck.checked : false;
+            if (column) {
+                rules.push({ column, min, max, normalize });
             }
         });
         elemData.props.rules = rules;
-        // Обновим отображение элемента? Может, не требуется.
+        // Сбрасываем кэш обработки, так как правила изменились
+        delete elemData._processing;
     },
 
     async applyElement(elemId) {
