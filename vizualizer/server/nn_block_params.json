@@ -7,6 +7,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#4a90d9",
+    "displayParams": ["filters", "kernel_size", "activation"],
     "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
@@ -18,7 +19,7 @@
     },
     "paramMeta": {
       "filters": { "type": "number", "label": "Фильтры", "min": 1, "step": 1 },
-      "kernel_size": { "type": "array", "label": "Размер ядра (JSON)", "placeholder": "[3, 3]" },
+      "kernel_size": { "type": "array", "label": "Размер ядра", "placeholder": "[3, 3]" },
       "padding": { "type": "select", "label": "Padding", "options": ["valid", "same"] },
       "activation": { "type": "select", "label": "Активация", "options": ["relu", "sigmoid", "tanh", "softmax", "linear", null] },
       "use_bias": { "type": "boolean", "label": "Смещение" },
@@ -34,6 +35,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#4a90d9",
+    "displayParams": ["filters", "kernel_size", "strides"],
     "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
@@ -63,6 +65,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#60a5fa",
+    "displayParams": ["pool_size", "padding"],
     "defaults": {
       "pool_size": [2, 2],
       "padding": "valid"
@@ -80,6 +83,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#f59e0b",
+    "displayParams": ["filters", "kernel_size", "strides"],
     "defaults": {
       "filters": 64,
       "kernel_size": [3, 3],
@@ -109,6 +113,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#10b981",
+    "displayParams": ["size", "interpolation"],
     "defaults": {
       "size": [2, 2],
       "interpolation": "nearest"
@@ -126,6 +131,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#a78bfa",
+    "displayParams": ["momentum", "epsilon"],
     "defaults": {
       "axis": -1,
       "momentum": 0.99,
@@ -149,6 +155,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#f97316",
+    "displayParams": ["units", "activation"],
     "defaults": {
       "units": 1,
       "activation": null,
@@ -172,6 +179,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#eab308",
+    "displayParams": ["rate"],
     "defaults": {
       "rate": 0.1
     },
@@ -187,6 +195,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#06b6d4",
+    "displayParams": ["target_shape"],
     "defaults": {
       "target_shape": [-1, 1, 1]
     },
@@ -202,6 +211,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#84cc16",
+    "displayParams": [],
     "defaults": {},
     "paramMeta": {}
   },
@@ -213,6 +223,7 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#ec4899",
+    "displayParams": ["activation"],
     "defaults": {
       "activation": "relu"
     },
@@ -228,13 +239,14 @@
     "maxInputs": 1,
     "maxOutputs": 10,
     "color": "#8b5cf6",
+    "displayParams": ["paddings", "mode"],
     "defaults": {
       "paddings": [[0, 0], [0, 0]],
       "mode": "CONSTANT",
       "constant_values": 0
     },
     "paramMeta": {
-      "paddings": { "type": "array", "label": "Отступы (JSON)", "placeholder": "[[0, 0], [0, 0]]" },
+      "paddings": { "type": "array", "label": "Отступы", "placeholder": "[[0, 0], [0, 0]]" },
       "mode": { "type": "select", "label": "Режим", "options": ["CONSTANT", "REFLECT", "SYMMETRIC"] },
       "constant_values": { "type": "number", "label": "Константа", "step": "any" }
     }
@@ -247,6 +259,7 @@
     "maxInputs": 10,
     "maxOutputs": 1,
     "color": "#14b8a6",
+    "displayParams": [],
     "defaults": {},
     "paramMeta": {}
   },
@@ -258,6 +271,7 @@
     "maxInputs": 1,
     "maxOutputs": 0,
     "color": "#ef4444",
+    "displayParams": [],
     "defaults": {},
     "paramMeta": {}
   }

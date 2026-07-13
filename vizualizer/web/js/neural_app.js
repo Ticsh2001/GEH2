@@ -289,9 +289,11 @@ const NeuralApp = {
     },
 
     // -------- Генерация структуры ----------
-        generateStructureString() {
+    generateStructureString() {
         const elements = AppState.elements;
         const connections = AppState.connections;
+
+        // 1. Топологическая сортировка (как раньше)
         const inDegree = {};
         const graph = {};
         for (const id of Object.keys(elements)) {
@@ -313,36 +315,64 @@ const NeuralApp = {
             }
         }
 
-        const parts = [];
-        const outMarkers = {}; // id -> marker index
-        let outCounter = 0;
+        // 2. Сопоставляем id -> позиция в порядке
+        const pos = {};
+        sorted.forEach((id, idx) => { pos[id] = idx; });
 
-        // Собираем информацию о skipped connections: какой add ссылается на какой out
-        const addToOuts = {}; // id_add -> [id_out, ...]
-        for (const conn of connections) {
-            const toElem = elements[conn.toElement];
-            if (toElem && (toElem.nnType || toElem.type) === 'add') {
-                if (!addToOuts[conn.toElement]) addToOuts[conn.toElement] = [];
-                // Мы предполагаем, что in-0 – основной поток, остальные – skipped connections
-                if (conn.toPort !== 'in-0') {
-                    addToOuts[conn.toElement].push(conn.fromElement);
-                }
-            }
-        }
+        // 3. Готовим структуры для out и add
+        const outIndices = {};   // id элемента → номер out (если есть разветвление)
+        let outCounter = 0;
+        const parts = [];
+
+        // Вспомогательная функция: все исходящие соединения элемента
+        const getOutEdges = (id) => connections.filter(c => c.fromElement === id);
 
         for (const id of sorted) {
             const elem = elements[id];
             const nnType = elem.nnType || elem.type;
+
             if (nnType === 'out') {
-                const marker = outCounter++;
-                outMarkers[id] = marker;
+                // Специальный слой "out" – просто добавляем, увеличиваем счётчик
+                outIndices[id] = outCounter++;
                 parts.push('out');
-            } else if (nnType === 'add') {
-                const outs = addToOuts[id] || [];
-                const markers = outs.map(outId => outMarkers[outId] !== undefined ? outMarkers[outId] : null).filter(m => m !== null);
-                parts.push(`add{${markers.join(',')}}`);
+                continue;
+            }
+
+            if (nnType === 'add') {
+                // Собираем индексы skip‑соединений (все входы, кроме in-0)
+                const skipIndices = [];
+                for (const conn of connections) {
+                    if (conn.toElement === id && conn.toPort !== 'in-0') {
+                        const srcId = conn.fromElement;
+                        if (outIndices[srcId] !== undefined) {
+                            skipIndices.push(outIndices[srcId]);
+                        }
+                    }
+                }
+                skipIndices.sort((a, b) => a - b);
+                parts.push(`add{${skipIndices.join(',')}}`);
+                continue;
+            }
+
+            // Обычный слой (den, c, re, …)
+            const outEdges = getOutEdges(id);
+            if (outEdges.length > 1) {
+                // Сортируем исходящие по позиции цели – первое будет основным
+                outEdges.sort((a, b) => pos[a.toElement] - pos[b.toElement]);
+                // Для всех, кроме первого, нужно создать out (если ещё не создан)
+                let needOut = false;
+                for (let i = 1; i < outEdges.length; i++) {
+                    // out создаётся один раз для этого элемента
+                    if (!needOut) {
+                        outIndices[id] = outCounter++;
+                        needOut = true;
+                    }
+                }
+                parts.push(nnType);
+                if (needOut) {
+                    parts.push('out');
+                }
             } else {
-                // Учитываем количество одинаковых слоёв подряд? Пока просто добавляем тип
                 parts.push(nnType);
             }
         }

@@ -296,7 +296,16 @@ async refreshProjectList() {
   tbody.innerHTML = `<tr><td colspan="4" class="project-list__empty">Загрузка…</td></tr>`;
   try {
     const result = await Settings.listProjects();
-    this.projectList = result.projects || [];
+    let projects = result.projects || [];
+     if (AppState.project.type === PROJECT_TYPE.NEURAL_TEMPLATE ||
+            AppState.project.type === PROJECT_TYPE.NEURAL_NETWORK) {
+            projects = projects.filter(p => 
+                p.type === 'neural_template' || p.type === 'neural_network'
+            );
+        }
+
+
+    this.projectList = projects;
     this.filteredProjectList = [...this.projectList];
     this.renderProjectList();
   } catch (err) {
