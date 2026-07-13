@@ -9,9 +9,7 @@ const NeuralApp = {
         Settings.init().catch(console.error);
         this.loadConfigurations().catch(console.error);
         await this.fetchBlockParams();
-        // Установить начальный режим и построить палитру
-        this.applyMode('design')  // добавить вместо this.buildPalette()
-        // setupPaletteDragDrop и setupGlobalMouseHandlers уже внутри switchMode
+        this.applyMode('design');  // начальный режим
         this.setupGlobalMouseHandlers();
         this.setupContextMenu();
         this.setupWorkspaceClick();
@@ -29,6 +27,19 @@ const NeuralApp = {
             Modal.showProjectPropertiesModal();
         });
 
+        document.getElementById('project-cancel').addEventListener('click', () => Project.closeProjectListModal());
+        document.getElementById('project-refresh').addEventListener('click', () => Project.refreshProjectList());
+        document.getElementById('project-load').addEventListener('click', () => {
+            if (Project.selectedProjectFilename) {
+                Project.loadProjectFromList(Project.selectedProjectFilename, Project.selectedProjectSource);
+            }
+        });
+        const searchInput = document.getElementById('project-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => Project.filterProjectList(e.target.value));
+        }
+
+        // ВАЖНО: обработчики переключения режимов
         document.getElementById('btn-mode-design').addEventListener('click', () => this.switchMode('design'));
         document.getElementById('btn-mode-training').addEventListener('click', () => this.switchMode('training'));
     },
