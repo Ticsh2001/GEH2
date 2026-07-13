@@ -1571,12 +1571,9 @@ async def apply_nn_processing(payload: dict = Body(...)):
     
 
 @app.delete("/api/nn/data/{element_id}")
-async def delete_nn_data(element_id: str, config: str = Query(...)):
-    datasets_dir = get_datasets_dir(config)
+async def delete_nn_data(element_id: str, config: str = Query(...), code: str = Query(...)):
     data_path = get_dataset_path(config, code, element_id)
     meta_path = get_meta_path(config, code, element_id)
-    data_path = os.path.join(datasets_dir, f"{element_id}.xlsx")
-    meta_path = os.path.join(datasets_dir, f"{element_id}_meta.json")
     try:
         if os.path.exists(data_path):
             os.remove(data_path)
@@ -1596,6 +1593,27 @@ async def get_dataset_columns(element_id: str, config: str = Query(...)):
         df = pd.read_excel(data_path, nrows=0)  # только заголовки
         columns = [c for c in df.columns if c != 'datetime']
         return {"columns": columns}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/nn/data/{element_id}/stats")
+async def get_dataset_stats(element_id: str, config: str = Query(...), code: str = Query(...)):
+    data_path = get_dataset_path(config, code, element_id)
+    if not os.path.exists(data_path):
+        raise HTTPException(status_code=404, detail="Dataset file not found")
+    try:
+        df = pd.read_excel(data_path)
+        stats = {}
+        for col in df.columns:
+            if col == 'datetime':
+                continue
+            numeric_col = pd.to_numeric(df[col], errors='coerce').dropna()
+            if not numeric_col.empty:
+                stats[col] = {
+                    'min': float(numeric_col.min()),
+                    'max': float(numeric_col.max())
+                }
+        return {"columns": stats}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

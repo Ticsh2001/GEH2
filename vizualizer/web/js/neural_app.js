@@ -413,7 +413,7 @@ const NeuralApp = {
     },
 
     // -------- Модальное окно свойств слоя ----------
-    showLayerPropertiesModal(elemId) {
+    async showLayerPropertiesModal(elemId) {
         const elemData = AppState.elements[elemId];
         if (!elemData) return;
         const nnType = elemData.nnType || elemData.type;
@@ -499,72 +499,108 @@ const NeuralApp = {
 
         // ---------- FILTER ----------
         if (nnType === 'filter') {
-            const rules = elemData.props.rules || [];
-            let rulesHtml = rules.map((r, idx) => `
-                <div class="filter-rule-row" style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
-                    <input type="text" value="${r.column || ''}" placeholder="Столбец" id="filter-col-${idx}" style="flex:2;">
-                    <input type="number" value="${r.min ?? ''}" placeholder="Мин" step="any" id="filter-min-${idx}" style="flex:1;">
-                    <input type="number" value="${r.max ?? ''}" placeholder="Макс" step="any" id="filter-max-${idx}" style="flex:1;">
-                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" id="filter-norm-${idx}" ${r.normalize ? 'checked' : ''}> Норм.</label>
-                    <button class="remove-rule-btn" data-idx="${idx}">✕</button>
-                </div>
-            `).join('');
+            // Найти входной элемент
+            const conn = AppState.connections.find(c => c.toElement === elemId && c.toPort === 'in-0');
+            const sourceId = conn ? conn.fromElement : null;
+            let sourceProcessed = false;
+            if (sourceId) {
+                const srcElem = AppState.elements[sourceId];
+                if (srcElem && (srcElem.nnType === 'dataset' || srcElem.nnType === 'filter') && srcElem._processing && srcElem._processing.hash) {
+                    sourceProcessed = true;
+                }
+            }
+
+            const currentRules = elemData.props.rules || [];
+            let statsHtml = '';
+
+            if (sourceId && sourceProcessed) {
+                // Загружаем столбцы и их min/max
+                try {
+                    const resp = await fetch(`/api/nn/data/${sourceId}/stats?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const columns = data.columns || {};
+                        statsHtml = Object.entries(columns).map(([col, stat]) => {
+                            const existingRule = currentRules.find(r => r.column === col) || {};
+                            const minVal = existingRule.min !== undefined ? existingRule.min : '';
+                            const maxVal = existingRule.max !== undefined ? existingRule.max : '';
+                            const norm = existingRule.normalize ? 'checked' : '';
+                            return `<div class="filter-rule-row" data-col="${col}">
+                                <span style="flex:2;">${col} <small>(min: ${stat.min.toFixed(4)}, max: ${stat.max.toFixed(4)})</small></span>
+                                <input type="number" class="filter-min" value="${minVal}" placeholder="Мин" step="any" style="flex:1;">
+                                <input type="number" class="filter-max" value="${maxVal}" placeholder="Макс" step="any" style="flex:1;">
+                                <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" class="filter-norm" ${norm}> Норм.</label>
+                            </div>`;
+                        }).join('');
+                    } else {
+                        statsHtml = '<div style="color:#f97316;">Не удалось загрузить статистику входного файла. Проверьте, что предыдущий элемент применён.</div>';
+                    }
+                } catch (e) {
+                    statsHtml = '<div style="color:#f97316;">Ошибка загрузки статистики.</div>';
+                }
+            } else if (sourceId) {
+                // Входной элемент не обработан или является input-signal
+                const srcElem = AppState.elements[sourceId];
+                if (srcElem && srcElem.type === 'input-signal') {
+                    statsHtml = '<div style="color:#f97316;">⚠️ Фильтрация не может применяться напрямую к входному сигналу. Подключите элемент "Собрать датасет" перед фильтром.</div>';
+                } else {
+                    statsHtml = '<div style="color:#f97316;">Входные данные ещё не подготовлены. Примените предшествующий элемент или нажмите "Применить" для автоматической обработки.</div>';
+                }
+            } else {
+                statsHtml = '<div style="color:#f97316;">Нет входных данных. Подключите элемент к входу.</div>';
+            }
+
+            const processing = elemData._processing;
+            const statusIcon = processing?.hash ? '🟢' : '🔴';
+            const statusText = processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
 
             modalContent.innerHTML = `
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px;">${statusIcon} ${statusText}</div>
                 <div class="modal-row">
                     <label>Правила фильтрации:</label>
-                    <div id="filter-rules-container">${rulesHtml || '<div style="color:#999;">Правил пока нет.</div>'}</div>
-                    <button id="add-filter-rule" class="modal-btn" style="margin-top:6px;">Добавить правило</button>
-                </div>
-                <div style="margin-top:12px; text-align:left;">
-                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                    <div id="filter-rules-container">${statsHtml || '<div style="color:#999;">Нет доступных столбцов. Добавьте правила вручную.</div>'}</div>
+                    <div style="margin-top:8px; display:flex; gap:8px;">
+                        <button id="add-filter-rule" class="modal-btn">Добавить правило вручную</button>
+                        <button id="modal-apply" class="modal-btn apply-btn">⚡ Применить</button>
+                    </div>
                 </div>
             `;
 
-            const container = document.getElementById('filter-rules-container');
-
-            // Обработчик добавления правила
+            // Обработчик добавления ручного правила
             document.getElementById('add-filter-rule').onclick = () => {
-                const idx = container.children.length;
+                const container = document.getElementById('filter-rules-container');
                 const row = document.createElement('div');
                 row.className = 'filter-rule-row';
                 row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
                 row.innerHTML = `
-                    <input type="text" placeholder="Столбец" id="filter-col-${idx}" style="flex:2;">
-                    <input type="number" placeholder="Мин" step="any" id="filter-min-${idx}" style="flex:1;">
-                    <input type="number" placeholder="Макс" step="any" id="filter-max-${idx}" style="flex:1;">
-                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" id="filter-norm-${idx}"> Норм.</label>
-                    <button class="remove-rule-btn" data-idx="${idx}">✕</button>
+                    <input type="text" class="filter-col" placeholder="Столбец" style="flex:2;">
+                    <input type="number" class="filter-min" placeholder="Мин" step="any" style="flex:1;">
+                    <input type="number" class="filter-max" placeholder="Макс" step="any" style="flex:1;">
+                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" class="filter-norm"> Норм.</label>
+                    <button class="remove-rule-btn">✕</button>
                 `;
                 container.appendChild(row);
                 row.querySelector('.remove-rule-btn').onclick = () => row.remove();
             };
-            // Удаление для существующих правил
-            container.querySelectorAll('.remove-rule-btn').forEach(btn => {
+
+            // Обработчик удаления для уже существующих правил
+            document.getElementById('filter-rules-container').querySelectorAll('.remove-rule-btn').forEach(btn => {
                 btn.onclick = () => btn.closest('.filter-rule-row').remove();
             });
 
-            // Переопределяем стандартные кнопки
+            // Кнопка Применить
+            document.getElementById('modal-apply').onclick = () => {
+                // Сохранить правила перед применением
+                this.saveFilterRules(elemId);
+                this.applyElement(elemId);
+            };
+
+            // Переопределяем кнопку Сохранить
             document.getElementById('modal-save').onclick = () => {
-                const rules = [];
-                container.querySelectorAll('.filter-rule-row').forEach(row => {
-                    const idx = [...container.children].indexOf(row);
-                    rules.push({
-                        column: document.getElementById(`filter-col-${idx}`)?.value || '',
-                        min: parseFloat(document.getElementById(`filter-min-${idx}`)?.value) || null,
-                        max: parseFloat(document.getElementById(`filter-max-${idx}`)?.value) || null,
-                        normalize: document.getElementById(`filter-norm-${idx}`)?.checked || false
-                    });
-                });
-                elemData.props.rules = rules;
+                this.saveFilterRules(elemId);
                 Modal.hideModal('modal-overlay');
             };
             document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
-
-            document.getElementById('modal-apply').onclick = () => {
-                document.getElementById('modal-save').click();  // сохранить правила
-                this.applyElement(elemId);
-            };
 
             modalOverlay.dataset.elementId = elemId;
             Modal.showModal('modal-overlay');
@@ -653,6 +689,28 @@ const NeuralApp = {
             Modal.hideModal('modal-overlay');
         };
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
+    },
+
+    saveFilterRules(elemId) {
+        const elemData = AppState.elements[elemId];
+        if (!elemData) return;
+        const container = document.getElementById('filter-rules-container');
+        const rules = [];
+        container.querySelectorAll('.filter-rule-row').forEach(row => {
+            const colInput = row.querySelector('.filter-col');
+            const minInput = row.querySelector('.filter-min');
+            const maxInput = row.querySelector('.filter-max');
+            const normInput = row.querySelector('.filter-norm');
+            const col = colInput ? colInput.value.trim() : (row.dataset.col || '');
+            const minVal = minInput ? (minInput.value !== '' ? parseFloat(minInput.value) : null) : null;
+            const maxVal = maxInput ? (maxInput.value !== '' ? parseFloat(maxInput.value) : null) : null;
+            const normalize = normInput ? normInput.checked : false;
+            if (col) {
+                rules.push({ column: col, min: minVal, max: maxVal, normalize });
+            }
+        });
+        elemData.props.rules = rules;
+        // Обновим отображение элемента? Может, не требуется.
     },
 
     async applyElement(elemId) {

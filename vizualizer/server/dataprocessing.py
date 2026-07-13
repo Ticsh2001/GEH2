@@ -182,7 +182,7 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
                 # Это обработанный элемент – вызываем для него process_element
                 process_element(src_id, project, config, project_code)
                 # После обработки у него должен появиться meta_path
-                src_meta_path = os.path.join(datasets_dir, f"{src_id}_meta.json")
+                src_meta_path = get_meta_path(config, project_code, src_id)
                 if os.path.exists(src_meta_path):
                     with open(src_meta_path, 'r') as f:
                         src_meta = json.load(f)
@@ -206,7 +206,11 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
             meta = json.load(f)
         if meta.get('hash') == current_hash and os.path.exists(data_path):
             # Данные актуальны
-            return current_hash
+            return {
+                "hash": current_hash,
+                "file": os.path.relpath(data_path, get_datasets_dir(config)),
+                "input_hashes": input_hashes
+            }
 
     # 3. Выполнение обработки
     if elem_type == 'dataset':
