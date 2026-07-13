@@ -139,6 +139,53 @@ const NeuralApp = {
                 displayParams: []
             };
 
+            // В training-режиме специальные типы для обработки данных
+            this.blockParams['dataset'] = {
+                name: 'Собрать датасет',
+                type: 'dataset',
+                inputs: 2,           // минимум 2, максимум не ограничен
+                maxInputs: 50,
+                outputs: 1,
+                color: '#06b6d4',
+                displayParams: ['reference_signal', 'interpolation'],
+                defaults: {
+                    reference_signal_index: 0,   // индекс входа-ориентира
+                    interpolation: 'linear'     // метод интерполяции
+                },
+                paramMeta: {
+                    reference_signal_index: {
+                        type: 'number',
+                        label: 'Индекс опорного сигнала (0 – первый)',
+                        min: 0, step: 1
+                    },
+                    interpolation: {
+                        type: 'select',
+                        label: 'Метод интерполяции',
+                        options: ['linear', 'nearest', 'cubic']
+                    }
+                },
+                // эти параметры — входы, а не свойства слоя
+                hasDynamicInputs: true,
+                // у этого элемента выход — всегда «датасет»
+                outputType: 'dataset'
+            };
+
+            this.blockParams['filter'] = {
+                name: 'Фильтрация данных',
+                type: 'filter',
+                inputs: 1,
+                maxInputs: 1,
+                outputs: 1,
+                color: '#f97316',
+                displayParams: ['columns_count'],
+                defaults: {
+                    rules: []   // массив { column, min, max, normalize }
+                },
+                paramMeta: {},   // правила покажем отдельной модалкой
+                hasDynamicInputs: false,
+                outputType: 'dataset'
+            };
+
 
         } catch (e) {
             console.error(e);
@@ -182,7 +229,10 @@ const NeuralApp = {
                 },
                 {
                     title: 'ОБРАБОТКА ДАННЫХ',
-                    items: []  // позже заполним
+                    items: [
+                        { type: 'dataset', name: 'Собрать датасет', color: '#06b6d4' },
+                        { type: 'filter',  name: 'Фильтрация',     color: '#f97316' }
+                    ]
                 },
                 {
                     title: 'НЕЙРОННАЯ СЕТЬ',
@@ -373,10 +423,153 @@ const NeuralApp = {
         const modalTitle = document.getElementById('modal-title');
         const modalContent = document.getElementById('modal-content');
         const modalOverlay = document.getElementById('modal-overlay');
-        modalTitle.textContent = `Свойства слоя: ${cfg.name}`;
+        modalTitle.textContent = `Свойства: ${cfg.name}`;
 
-        const currentProps = elemData.props || {};
-        const paramMeta = cfg.paramMeta || {};
+        // ---------- DATASET ----------
+        if (nnType === 'dataset') {
+            // ... (inputs, refIdx, interpolation) ...
+            const inputs = [];
+            for (let i = 0; i < (elemData.inputs || 2); i++) {
+                const conn = AppState.connections.find(c => c.toElement === elemId && c.toPort === `in-${i}`);
+                let label = `in-${i}`;
+                if (conn) {
+                    const src = AppState.elements[conn.fromElement];
+                    if (src) {
+                        label = src.props?.name || src.nnType || src.id;
+                    }
+                }
+                inputs.push(label);
+            }
+            const processing = elemData._processing;
+            const statusIcon = processing?.hash ? '🟢' : '🔴';
+            const statusText = processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const refIdx = elemData.props.reference_signal_index ?? 0;
+            const interpolation = elemData.props.interpolation ?? 'linear';
+
+            modalContent.innerHTML = `
+                <div class="modal-row">
+                    <label>Опорный сигнал (синхронизация времени):</label>
+                    <select id="prop-ref-index">
+                        ${inputs.map((name, idx) => `<option value="${idx}" ${idx === refIdx ? 'selected' : ''}>${name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="modal-row">
+                    <label>Метод интерполяции:</label>
+                    <select id="prop-interpolation">
+                        <option value="linear" ${interpolation === 'linear' ? 'selected' : ''}>Линейная</option>
+                        <option value="nearest" ${interpolation === 'nearest' ? 'selected' : ''}>Ближайшее</option>
+                        <option value="cubic" ${interpolation === 'cubic' ? 'selected' : ''}>Кубическая</option>
+                    </select>
+                </div>
+                <div class="modal-row">
+                    <label>Количество входов:</label>
+                    <input type="number" id="prop-inputCount" value="${elemData.inputs || 2}" min="2" max="${cfg.maxInputs || 50}" step="1">
+                </div>
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px;">${statusIcon} ${statusText}</div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                </div>
+            `;
+
+            // Переопределяем стандартные кнопки
+            document.getElementById('modal-save').onclick = () => {
+                elemData.props.reference_signal_index = parseInt(document.getElementById('prop-ref-index').value) || 0;
+                elemData.props.interpolation = document.getElementById('prop-interpolation').value;
+                const newInputCount = parseInt(document.getElementById('prop-inputCount').value) || 2;
+                if (newInputCount !== elemData.inputs) {
+                    elemData.inputs = newInputCount;
+                    this.updateElementPorts(elemId);
+                }
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
+
+            // Кнопка "Применить"
+            document.getElementById('modal-apply').onclick = () => {
+                // сначала сохраняем, как при обычном сохранении
+                document.getElementById('modal-save').click();
+                // затем запускаем обработку
+                this.applyElement(elemId);
+            };
+
+            modalOverlay.dataset.elementId = elemId;
+            Modal.showModal('modal-overlay');
+            return;
+        }
+
+        // ---------- FILTER ----------
+        if (nnType === 'filter') {
+            const rules = elemData.props.rules || [];
+            let rulesHtml = rules.map((r, idx) => `
+                <div class="filter-rule-row" style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                    <input type="text" value="${r.column || ''}" placeholder="Столбец" id="filter-col-${idx}" style="flex:2;">
+                    <input type="number" value="${r.min ?? ''}" placeholder="Мин" step="any" id="filter-min-${idx}" style="flex:1;">
+                    <input type="number" value="${r.max ?? ''}" placeholder="Макс" step="any" id="filter-max-${idx}" style="flex:1;">
+                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" id="filter-norm-${idx}" ${r.normalize ? 'checked' : ''}> Норм.</label>
+                    <button class="remove-rule-btn" data-idx="${idx}">✕</button>
+                </div>
+            `).join('');
+
+            modalContent.innerHTML = `
+                <div class="modal-row">
+                    <label>Правила фильтрации:</label>
+                    <div id="filter-rules-container">${rulesHtml || '<div style="color:#999;">Правил пока нет.</div>'}</div>
+                    <button id="add-filter-rule" class="modal-btn" style="margin-top:6px;">Добавить правило</button>
+                </div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                </div>
+            `;
+
+            const container = document.getElementById('filter-rules-container');
+
+            // Обработчик добавления правила
+            document.getElementById('add-filter-rule').onclick = () => {
+                const idx = container.children.length;
+                const row = document.createElement('div');
+                row.className = 'filter-rule-row';
+                row.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
+                row.innerHTML = `
+                    <input type="text" placeholder="Столбец" id="filter-col-${idx}" style="flex:2;">
+                    <input type="number" placeholder="Мин" step="any" id="filter-min-${idx}" style="flex:1;">
+                    <input type="number" placeholder="Макс" step="any" id="filter-max-${idx}" style="flex:1;">
+                    <label style="white-space:nowrap; font-size:12px;"><input type="checkbox" id="filter-norm-${idx}"> Норм.</label>
+                    <button class="remove-rule-btn" data-idx="${idx}">✕</button>
+                `;
+                container.appendChild(row);
+                row.querySelector('.remove-rule-btn').onclick = () => row.remove();
+            };
+            // Удаление для существующих правил
+            container.querySelectorAll('.remove-rule-btn').forEach(btn => {
+                btn.onclick = () => btn.closest('.filter-rule-row').remove();
+            });
+
+            // Переопределяем стандартные кнопки
+            document.getElementById('modal-save').onclick = () => {
+                const rules = [];
+                container.querySelectorAll('.filter-rule-row').forEach(row => {
+                    const idx = [...container.children].indexOf(row);
+                    rules.push({
+                        column: document.getElementById(`filter-col-${idx}`)?.value || '',
+                        min: parseFloat(document.getElementById(`filter-min-${idx}`)?.value) || null,
+                        max: parseFloat(document.getElementById(`filter-max-${idx}`)?.value) || null,
+                        normalize: document.getElementById(`filter-norm-${idx}`)?.checked || false
+                    });
+                });
+                elemData.props.rules = rules;
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
+
+            document.getElementById('modal-apply').onclick = () => {
+                document.getElementById('modal-save').click();  // сохранить правила
+                this.applyElement(elemId);
+            };
+
+            modalOverlay.dataset.elementId = elemId;
+            Modal.showModal('modal-overlay');
+            return;
+        }
 
         let html = '';
 
@@ -460,6 +653,51 @@ const NeuralApp = {
             Modal.hideModal('modal-overlay');
         };
         cancelBtn.onclick = () => Modal.hideModal('modal-overlay');
+    },
+
+    async applyElement(elemId) {
+        const elemData = AppState.elements[elemId];
+        if (!elemData) return;
+
+        // Собираем проект
+        const project = {
+            project: AppState.project,
+            elements: AppState.elements,
+            connections: AppState.connections
+        };
+
+        try {
+            const resp = await fetch('/api/nn/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    element_id: elemId,
+                    project: project,
+                    config: AppState.currentConfig || ''
+                })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Processing failed');
+            }
+            const result = await resp.json();
+            // Внутри then после получения result и обновления elemData._processing
+            const statusEl = document.getElementById('processing-status');
+            if (statusEl) {
+                statusEl.innerHTML = '🟢 Данные актуальны';}
+
+            // Сохраняем метаданные обработки в элемент
+            if (!elemData._processing) elemData._processing = {};
+            elemData._processing.hash = result.hash;
+            elemData._processing.file = result.file;
+            elemData._processing.input_hashes = result.input_hashes;
+            elemData._processing.timestamp = new Date().toISOString();
+
+            alert(`Обработка завершена. Файл: ${result.file}`);
+        } catch (e) {
+            alert('Ошибка обработки: ' + e.message);
+            console.error(e);
+        }
     },
 
     calculateElementHeight(elemId) {
@@ -643,6 +881,11 @@ const NeuralApp = {
             AppState.connections = AppState.connections.filter(c => c.fromElement !== id && c.toElement !== id);
             const elem = document.getElementById(id);
             if (elem) elem.remove();
+            const elemData = AppState.elements[id];
+            if (elemData && ['dataset', 'filter'].includes(elemData.nnType)) {
+                fetch(`/api/nn/data/${id}?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`, { method: 'DELETE' })
+                    .catch(e => console.warn('Failed to delete dataset file', e));
+            }
             delete AppState.elements[id];
         });
         AppState.selectedElement = null;
@@ -702,10 +945,16 @@ const NeuralApp = {
 
             const elements = data.elements || {};
             for (const [id, el] of Object.entries(elements)) {
-                const nnType = el.nnType || el.type;
-                const cfg = this.blockParams[nnType];
-                if (!cfg) continue;
-                this.createNNElement(nnType, el.x, el.y, el.props, id);
+                const nnType = el.nnType;
+                if (nnType && this.blockParams[nnType]) {
+                    // Нейросетевой слой (dataset, filter, c, den, …)
+                    this.createNNElement(nnType, el.x, el.y, el.props, id);
+                } else if (ELEMENT_TYPES[el.type]) {
+                    // Стандартный элемент из основного редактора
+                    Elements.addElement(el.type, el.x, el.y, el.props, id, el.width, el.height);
+                } else {
+                    console.warn('Неизвестный тип элемента при загрузке:', el.type, id);
+                }
             }
 
             AppState.connections = data.connections || [];
@@ -781,11 +1030,10 @@ async saveProject() {
                     if (this.currentMode === 'design') {
                         this.createNNElement(AppState.dragType, pos.x - 75, pos.y - 30);
                     } else if (this.currentMode === 'training') {
-                        // nn-типы обучения
-                        if (AppState.dragType === 'nn-template' || AppState.dragType === 'nn-settings') {
+                        if (this.blockParams[AppState.dragType]) {   // любой тип из nn‑словаря
                             this.createNNElement(AppState.dragType, pos.x - 75, pos.y - 30);
                         } else {
-                            // Стандартные элементы из ELEMENT_TYPES
+                            // Стандартные элементы из основного редактора
                             const config = ELEMENT_TYPES[AppState.dragType];
                             if (config) {
                                 const w = config.minWidth || 120;

@@ -14,6 +14,9 @@ import io
 import requests
 import httpx
 
+from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path
+
+
 
 
 from openpyxl import Workbook
@@ -1553,6 +1556,48 @@ async def get_nn_block_params():
     if isinstance(data, dict):
         data = list(data.values())
     return JSONResponse(content=data)
+
+@app.post("/api/nn/apply")
+async def apply_nn_processing(payload: dict = Body(...)):
+    try:
+        element_id = payload["element_id"]
+        project = payload["project"]
+        config = payload.get("config") or ""
+        project_code = project.get("project", {}).get("code", "unnamed_project")
+        result = process_element(element_id, project, config, project_code)
+        return {"status": "success", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.delete("/api/nn/data/{element_id}")
+async def delete_nn_data(element_id: str, config: str = Query(...)):
+    datasets_dir = get_datasets_dir(config)
+    data_path = get_dataset_path(config, code, element_id)
+    meta_path = get_meta_path(config, code, element_id)
+    data_path = os.path.join(datasets_dir, f"{element_id}.xlsx")
+    meta_path = os.path.join(datasets_dir, f"{element_id}_meta.json")
+    try:
+        if os.path.exists(data_path):
+            os.remove(data_path)
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/nn/data/{element_id}/columns")
+async def get_dataset_columns(element_id: str, config: str = Query(...)):
+    datasets_dir = get_datasets_dir(config)
+    data_path = os.path.join(datasets_dir, f"{element_id}.xlsx")
+    if not os.path.exists(data_path):
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        df = pd.read_excel(data_path, nrows=0)  # только заголовки
+        columns = [c for c in df.columns if c != 'datetime']
+        return {"columns": columns}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
