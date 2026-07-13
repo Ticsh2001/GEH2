@@ -1248,6 +1248,12 @@ async def check_syntax(file: UploadFile = File(...)):
             if re.search(rf'\b{op}\b', code):
                 row_remarks.append(f"Логический оператор {op} – рекомендуется заменить на {'&&' if op=='AND' else '||' if op=='OR' else '!'}")
 
+               # 4b. Одиночные & и | (не являются частью && или ||)
+        if re.search(r'(?<!&)&(?!&)', code):
+            row_remarks.append("Обнаружен одиночный '&'. Возможно, вы имели в виду '&&' (логическое И).")
+        if re.search(r'(?<!\|)\|(?!\|)', code):
+            row_remarks.append("Обнаружен одиночный '|'. Возможно, вы имели в виду '||' (логическое ИЛИ).")
+
         # 5. Аргументы HISTORY*/PREV в кавычках, если начинаются с цифры
         history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
         for fn in history_funcs:
