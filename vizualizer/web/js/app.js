@@ -439,7 +439,13 @@ async autoLoadFromURL() {
 
         const data = await Settings.loadProject(filename, source);
         console.log('[autoLoad] Данные получены:', Object.keys(data));
-
+        if (data.project && (
+            data.project.type === PROJECT_TYPE.NEURAL_TEMPLATE ||
+            data.project.type === PROJECT_TYPE.NEURAL_NETWORK
+        )) {
+            window.location.href = `neural.html?load=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(AppState.currentConfig || '')}`;
+            return;
+        }
         Project._processLoadedData(data);
         console.log('[autoLoad] Проект загружен успешно');
 

@@ -401,23 +401,37 @@ const NeuralApp = {
         const filename = params.get('load');
         if (!filename) return;
         const config = params.get('config') || '';
+        const source = params.get('source') || 'projects';   // ← важно!
         if (config) AppState.currentConfig = config;
+
         try {
-            const data = await Settings.loadProject(filename, 'projects');
+            const data = await Settings.loadProject(filename, source);
             document.getElementById('workspace').innerHTML = '';
             document.getElementById('connections-svg').innerHTML = '';
             resetState();
-            if (data.project) AppState.project = data.project;
+            // Восстанавливаем тип проекта (перезаписываем после resetState)
+            if (data.project) {
+                AppState.project = data.project;
+                // Убедимся, что тип остался нейросетевым
+                if (![PROJECT_TYPE.NEURAL_TEMPLATE, PROJECT_TYPE.NEURAL_NETWORK].includes(AppState.project.type)) {
+                    AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
+                }
+            }
             AppState.connections = data.connections || [];
             AppState.elementCounter = data.counter || 0;
+
             const elements = data.elements || {};
             for (const [id, el] of Object.entries(elements)) {
                 const nnType = el.nnType || el.type;
                 const cfg = this.blockParams[nnType];
-                if (!cfg) continue;
+                if (!cfg) {
+                    console.warn('Неизвестный тип слоя:', nnType);
+                    continue;
+                }
                 this.createNNElement(nnType, el.x, el.y, el.props);
             }
             Connections.drawConnections();
+            Viewport.updateTransform();
         } catch (e) {
             console.error('Ошибка загрузки:', e);
         }
@@ -580,5 +594,7 @@ async saveProject() {
 
 document.addEventListener('DOMContentLoaded', () => {
     resetState();
-    NeuralApp.init();
+    NeuralApp.init().then(() => {
+        NeuralApp.autoLoadFromURL();
+    });
 });

@@ -372,6 +372,15 @@ filterProjectList(query) {
 async loadProjectFromList(filename, source = 'projects') {
   try {
     const data = await Settings.loadProject(filename, source);
+    // Проверяем, не нейросетевой ли проект
+    if (data.project && (
+        data.project.type === PROJECT_TYPE.NEURAL_TEMPLATE ||
+        data.project.type === PROJECT_TYPE.NEURAL_NETWORK
+    )) {
+        // Перенаправляем на конструктор нейросетей
+        window.location.href = `neural.html?load=${encodeURIComponent(filename)}&source=${encodeURIComponent(source)}&config=${encodeURIComponent(AppState.currentConfig || '')}`;
+        return;
+    }
     this._processLoadedData(data);
     this.closeProjectListModal();
     alert(`Проект "${filename}" успешно загружен.`);
