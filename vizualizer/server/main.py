@@ -1249,27 +1249,27 @@ async def check_syntax(file: UploadFile = File(...)):
                 row_remarks.append(f"Логический оператор {op} – рекомендуется заменить на {'&&' if op=='AND' else '||' if op=='OR' else '!'}")
 
                # 4b. Одиночные & и | (не являются частью && или ||)
-        if re.search(r'(?<!&)&(?!&)', code):
+        if re.search(r'(?<![&])&(?![&])', code):
             row_remarks.append("Обнаружен одиночный '&'. Возможно, вы имели в виду '&&' (логическое И).")
-        if re.search(r'(?<!\|)\|(?!\|)', code):
+        if re.search(r'(?<![|])\|(?![|])', code):
             row_remarks.append("Обнаружен одиночный '|'. Возможно, вы имели в виду '||' (логическое ИЛИ).")
 
-        # 5. Аргументы HISTORY*/PREV в кавычках, если начинаются с цифры
+         # 5. Аргументы HISTORY*/PREV – всегда должны быть в кавычках
         history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
         for fn in history_funcs:
             pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
             for m in pattern.finditer(code):
                 arg = m.group('arg').strip()
-                if arg and arg[0].isdigit() and (m.group(1) is None or m.group(1) == ''):
-                    row_remarks.append(f"{fn}: аргумент '{arg}' должен быть в кавычках (начинается с цифры)")
+                if arg and (m.group(1) is None or m.group(1) == ''):
+                    row_remarks.append(f"{fn}: аргумент '{arg}' должен быть в кавычках (обязательно для {fn})")
 
-        # 5b. Первый аргумент INTERPOLATE/GETPOINT – проверка наличия в используемых сигналах
+        # 5b. Аргументы INTERPOLATE/GETPOINT – всегда должны быть в кавычках
         for fn in ['INTERPOLATE', 'GETPOINT']:
             pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
             for m in pattern.finditer(code):
                 arg = m.group('arg').strip()
-                if arg and arg not in input_signals:
-                    row_remarks.append(f"Таблицы '{arg}' нет в используемых параметрах")
+                if arg and (m.group(1) is None or m.group(1) == ''):
+                    row_remarks.append(f"{fn}: аргумент '{arg}' должен быть в кавычках (обязательно для {fn})")
 
         # 6. Неизвестные функции/опечатки
         if not is_constant:
