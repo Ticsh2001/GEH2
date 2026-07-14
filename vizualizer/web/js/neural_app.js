@@ -534,13 +534,13 @@ const NeuralApp = {
             const headerHtml = `
                 <div class="filter-rule-header" style="display:flex; gap:6px; font-weight:bold; font-size:12px; margin-bottom:4px; padding-bottom:4px; border-bottom:1px solid #4a5568;">
                     <span style="flex:1 1 120px;">Столбец</span>
-                    <span style="width:70px;">Мин</span>
-                    <span style="width:70px;">Макс</span>
-                    <span style="width:70px;">Среднее</span>
-                    <span style="width:70px;">Медиана</span>
-                    <span style="width:80px;">Мин.фильтр</span>
-                    <span style="width:80px;">Макс.фильтр</span>
-                    <span style="width:55px;">Норм.</span>
+                    <span style="width:70px;">min</span>
+                    <span style="width:70px;">max</span>
+                    <span style="width:70px;">avg</span>
+                    <span style="width:70px;">med</span>
+                    <span style="width:80px;">Min fltr</span>
+                    <span style="width:80px;">Max fltr</span>
+                    <span style="width:55px;">Norm</span>
                     <span style="width:20px;"></span>
                 </div>`;
 
