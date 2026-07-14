@@ -14,7 +14,7 @@ import io
 import requests
 import httpx
 
-from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path
+from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path, get_output_file
 
 
 
@@ -1572,31 +1572,71 @@ async def apply_nn_processing(payload: dict = Body(...)):
 
 @app.delete("/api/nn/data/{element_id}")
 async def delete_nn_data(element_id: str, config: str = Query(...), code: str = Query(...)):
-    suffixes = ["", "_out0", "_out1"]
-    for suffix in suffixes:
-        data_path = get_dataset_path(config, code, f"{element_id}{suffix}")
-        meta_path = get_meta_path(config, code, f"{element_id}{suffix}")
+    meta_path = get_meta_path(config, code, element_id)
+    paths_to_delete = []
+    if os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+        outputs = meta.get('outputs', {})
+        for port, rel_path in outputs.items():
+            if rel_path:
+                paths_to_delete.append(os.path.join(get_datasets_dir(config), rel_path))
+    # Также удаляем основной файл (на случай, если outputs нет)
+    main_path = get_dataset_path(config, code, element_id)
+    paths_to_delete.append(main_path)
+    paths_to_delete.append(meta_path)
+    # Добавляем возможные старые файлы _out0, _out1, _X, _y для совместимости
+    for suffix in ['_out0', '_out1', '_X', '_y']:
+        p = get_dataset_path(config, code, element_id + suffix)
+        paths_to_delete.append(p)
+        mp = get_meta_path(config, code, element_id + suffix)
+        paths_to_delete.append(mp)
+    # Удаляем все собранные пути
+    for path in set(paths_to_delete):
         try:
-            if os.path.exists(data_path):
-                os.remove(data_path)
-            if os.path.exists(meta_path):
-                os.remove(meta_path)
+            if os.path.exists(path):
+                os.remove(path)
         except Exception as e:
-            print(f"Warning: could not delete {data_path}: {e}")
+            print(f"Warning: could not delete {path}: {e}")
     return {"status": "deleted"}
     
 @app.get("/api/nn/data/{element_id}/columns")
-async def get_dataset_columns(element_id: str, config: str = Query(...)):
-    datasets_dir = get_datasets_dir(config)
-    data_path = os.path.join(datasets_dir, f"{element_id}.xlsx")
+async def get_dataset_columns(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
+    from dataprocessing import get_output_file
+    elem = {'id': element_id}
+    data_path = get_output_file(elem, port, config, code)
     if not os.path.exists(data_path):
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    try:
-        df = pd.read_excel(data_path, nrows=0)  # только заголовки
-        columns = [c for c in df.columns if c != 'datetime']
-        return {"columns": columns}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=404, detail=f"File for port {port} not found")
+    df = pd.read_excel(data_path, nrows=0)
+    return {"columns": [c for c in df.columns if c != 'datetime']}
+
+@app.get("/api/nn/data/{element_id}/timerange")
+async def get_dataset_timerange(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
+    elem = {'id': element_id}
+    data_path = get_output_file(elem, port, config, code)
+    if not os.path.exists(data_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    df = pd.read_excel(data_path)
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    return {"min_date": df['datetime'].min().strftime('%Y-%m-%dT%H:%M:%S'),
+            "max_date": df['datetime'].max().strftime('%Y-%m-%dT%H:%M:%S')}
+
+@app.get("/api/nn/data/{element_id}/stats")
+async def get_dataset_stats(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
+    elem = {'id': element_id}
+    data_path = get_output_file(elem, port, config, code)
+    if not os.path.exists(data_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    df = pd.read_excel(data_path)
+    stats = {}
+    for col in df.columns:
+        if col == 'datetime': continue
+        numeric_col = pd.to_numeric(df[col], errors='coerce').dropna()
+        if not numeric_col.empty:
+            stats[col] = {'min': float(numeric_col.min()), 'max': float(numeric_col.max()),
+                          'mean': float(numeric_col.mean()), 'median': float(numeric_col.median())}
+    return {"columns": stats}
+    return {"columns": stats}
     
 @app.get("/api/nn/data/{element_id}/stats")
 async def get_dataset_stats(element_id: str, config: str = Query(...), code: str = Query(...)):
@@ -1622,20 +1662,15 @@ async def get_dataset_stats(element_id: str, config: str = Query(...), code: str
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/api/nn/data/{element_id}/timerange")
-async def get_dataset_timerange(element_id: str, config: str = Query(...), code: str = Query(...)):
-    data_path = get_dataset_path(config, code, element_id)
+async def get_dataset_timerange(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
+    elem = {'id': element_id}
+    data_path = get_output_file(elem, port, config, code)
     if not os.path.exists(data_path):
-        raise HTTPException(status_code=404, detail="Dataset file not found")
-    try:
-        df = pd.read_excel(data_path)
-        if 'datetime' not in df.columns:
-            raise HTTPException(status_code=400, detail="No datetime column")
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        min_date = df['datetime'].min().strftime('%Y-%m-%dT%H:%M:%S')
-        max_date = df['datetime'].max().strftime('%Y-%m-%dT%H:%M:%S')
-        return {"min_date": min_date, "max_date": max_date}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=404, detail="File not found")
+    df = pd.read_excel(data_path)
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    return {"min_date": df['datetime'].min().strftime('%Y-%m-%dT%H:%M:%S'),
+            "max_date": df['datetime'].max().strftime('%Y-%m-%dT%H:%M:%S')}
 
 
 

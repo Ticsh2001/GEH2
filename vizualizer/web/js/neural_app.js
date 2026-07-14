@@ -220,6 +220,24 @@ const NeuralApp = {
                         label: 'Единица измерения',
                         options: ['seconds', 'minutes', 'hours', 'days', 'weeks', 'months', 'years']
                     }
+                },
+            };
+            this.blockParams['labeler'] = {
+                name: 'Разметка',
+                type: 'labeler',
+                inputs: 1, maxInputs: 1,
+                outputs: 2, maxOutputs: 2,
+                color: '#84cc16',
+                displayParams: ['window_size', 'window_unit'],
+                defaults: {
+                    x_columns: [],
+                    y_column: null,
+                    window_size: 1,
+                    window_unit: 'rows'
+                },
+                paramMeta: {
+                    window_size: { type: 'number', label: 'Размер окна', min: 1, step: 1 },
+                    window_unit: { type: 'select', label: 'Единица окна', options: ['rows', 'seconds', 'minutes', 'hours', 'days'] }
                 }
             };
 
@@ -270,7 +288,8 @@ const NeuralApp = {
                         { type: 'dataset', name: 'Собрать датасет', color: '#06b6d4' },
                         { type: 'filter',  name: 'Фильтрация',     color: '#f97316' },
                         { type: 'timefilter', name: 'Временной фильтр', color: '#8b5cf6' },
-                        { type: 'timeshift', name: 'Временное смещение', color: '#06b6d4' }
+                        { type: 'timeshift', name: 'Временное смещение', color: '#06b6d4' },
+                        { type: 'labeler', name: 'Разметка', color: '#84cc16' }
                     ]
                 },
                 {
@@ -464,6 +483,11 @@ const NeuralApp = {
         const modalOverlay = document.getElementById('modal-overlay');
         modalTitle.textContent = `Свойства: ${cfg.name}`;
 
+        // Определяем входной элемент и порт, с которого берём данные
+        const conn = AppState.connections.find(c => c.toElement === elemId);
+        const srcId = conn ? conn.fromElement : null;
+        const fromPort = conn ? (conn.fromPort || 'out-0') : 'out-0';
+
         // ---------- DATASET ----------
         if (nnType === 'dataset') {
             // ... (inputs, refIdx, interpolation) ...
@@ -545,15 +569,14 @@ const NeuralApp = {
             if (modalEl) modalEl.style.maxWidth = '950px';
 
             // 1. Определяем входной элемент
-            const conn = AppState.connections.find(c => c.toElement === elemId);
-            const srcId = conn ? conn.fromElement : null;
             let columnsStats = null;
 
             if (srcId && AppState.elements[srcId]?._processing?.hash) {
                 try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
-                        code: AppState.project.code || ''
+                        code: AppState.project.code || '',
+                        port: fromPort
                     });
                     const resp = await fetch(`/api/nn/data/${srcId}/stats?${params}`);
                     if (resp.ok) {
@@ -713,23 +736,22 @@ const NeuralApp = {
             if (modalEl) modalEl.style.maxWidth = '700px';
 
             // Определяем входной элемент
-            const conn = AppState.connections.find(c => c.toElement === elemId);
-            const srcId = conn ? conn.fromElement : null;
             let dataRange = null; // { min_date: str, max_date: str }
             if (srcId) {
                 try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
-                        code: AppState.project.code || ''
+                        code: AppState.project.code || '',
+                        port: fromPort
                     });
                     const resp = await fetch(`/api/nn/data/${srcId}/timerange?${params}`);
                     if (resp.ok) {
                         dataRange = await resp.json();
                     }
-                } catch (e) {
-                    console.warn('Не удалось загрузить временной диапазон', e);
+                    } catch (e) {
+                        console.warn('Не удалось загрузить временной диапазон', e);
+                    }
                 }
-            }
 
             const intervals = elemData.props.intervals || [];
             const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
@@ -840,14 +862,15 @@ const NeuralApp = {
         if (nnType === 'timeshift') {
             const modalEl = document.getElementById('modal');
             if (modalEl) modalEl.style.maxWidth = '650px';
-
-            const conn = AppState.connections.find(c => c.toElement === elemId);
-            const srcId = conn ? conn.fromElement : null;
             let dataRange = null;
 
             if (srcId) {
-                try {
-                    const params = new URLSearchParams({ config: AppState.currentConfig || '', code: AppState.project.code || '' });
+                 try {
+                    const params = new URLSearchParams({
+                        config: AppState.currentConfig || '',
+                        code: AppState.project.code || '',
+                        port: fromPort
+                    });
                     const resp = await fetch(`/api/nn/data/${srcId}/timerange?${params}`);
                     if (resp.ok) dataRange = await resp.json();
                 } catch (e) { console.warn('Не удалось загрузить временной диапазон', e); }
@@ -914,6 +937,140 @@ const NeuralApp = {
             Modal.showModal('modal-overlay');
             return;
         }
+        if (nnType === 'labeler') {
+            const modalEl = document.getElementById('modal');
+            if (modalEl) modalEl.style.maxWidth = '900px';
+
+            // Входной датасет
+            let availableColumns = [];
+
+            if (srcId && AppState.elements[srcId]?._processing?.hash) {
+                try {
+                    const params = new URLSearchParams({
+                        config: AppState.currentConfig || '',
+                        code: AppState.project.code || '',
+                        port: fromPort
+                        });
+                    const resp = await fetch(`/api/nn/data/${srcId}/columns?${params}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        availableColumns = data.columns || [];
+                    }
+                } catch (e) { console.warn('Не удалось загрузить столбцы для разметки', e); }
+            }
+
+            const props = elemData.props || {};
+            const xCols = props.x_columns || [];
+            const yCol = props.y_column || null;
+            const wSize = props.window_size ?? 1;
+            const wUnit = props.window_unit ?? 'rows';
+            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
+            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+
+            // Строим HTML
+            const availOptions = availableColumns.map(c => `<option value="${c}">${c}</option>`).join('');
+            const xOptions = xCols.map(c => `<option value="${c}" selected>${c}</option>`).join('');
+            const yOptions = yCol ? `<option value="${yCol}" selected>${yCol}</option>` : '';
+
+            modalContent.innerHTML = `
+                <div id="processing-status" style="margin-bottom:10px;">${statusIcon} ${statusText}</div>
+                <div style="display:flex; gap:20px;">
+                    <div style="flex:1;">
+                        <label>Доступные столбцы</label>
+                        <select id="avail-columns" multiple style="width:100%; height:200px;">${availOptions}</select>
+                    </div>
+                    <div style="display:flex; flex-direction:column; justify-content:center; gap:8px;">
+                        <button id="add-to-x" class="modal-btn">→ X</button>
+                        <button id="add-to-y" class="modal-btn">→ y</button>
+                        <button id="remove-from-x" class="modal-btn">← из X</button>
+                        <button id="remove-from-y" class="modal-btn">← из y</button>
+                    </div>
+                    <div style="flex:1;">
+                        <label>Признаки (X)</label>
+                        <select id="x-columns" multiple style="width:100%; height:200px;">${xOptions}</select>
+                    </div>
+                    <div style="flex:1;">
+                        <label>Целевая (y)</label>
+                        <select id="y-column" size="5" style="width:100%; height:200px;">${yOptions}</select>
+                    </div>
+                </div>
+                <div style="margin-top:15px; display:flex; gap:20px; align-items:center;">
+                    <div>
+                        <label>Размер окна:</label>
+                        <input type="number" id="prop-window-size" value="${wSize}" min="1" step="1" style="width:80px;">
+                        <select id="prop-window-unit">
+                            <option value="rows" ${wUnit==='rows'?'selected':''}>строк</option>
+                            <option value="seconds" ${wUnit==='seconds'?'selected':''}>сек</option>
+                            <option value="minutes" ${wUnit==='minutes'?'selected':''}>мин</option>
+                            <option value="hours" ${wUnit==='hours'?'selected':''}>часов</option>
+                            <option value="days" ${wUnit==='days'?'selected':''}>дней</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:15px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                </div>
+            `;
+
+            // Логика перемещения столбцов
+            const availSelect = document.getElementById('avail-columns');
+            const xSelect = document.getElementById('x-columns');
+            const ySelect = document.getElementById('y-column');
+
+            document.getElementById('add-to-x').onclick = () => {
+                [...availSelect.selectedOptions].forEach(opt => {
+                    if (![...xSelect.options].some(o => o.value === opt.value)) {
+                        xSelect.appendChild(new Option(opt.text, opt.value));
+                    }
+                });
+            };
+            document.getElementById('add-to-y').onclick = () => {
+                const opt = availSelect.selectedOptions[0];
+                if (opt) {
+                    ySelect.innerHTML = '';  // только один
+                    ySelect.appendChild(new Option(opt.text, opt.value));
+                }
+            };
+            document.getElementById('remove-from-x').onclick = () => {
+                [...xSelect.selectedOptions].forEach(opt => opt.remove());
+            };
+            document.getElementById('remove-from-y').onclick = () => {
+                [...ySelect.selectedOptions].forEach(opt => opt.remove());
+            };
+
+            const resetModalWidth = () => { const m = document.getElementById('modal'); if (m) m.style.maxWidth = ''; };
+
+            // Сохранение
+            const saveLabeler = () => {
+                elemData.props.x_columns = [...xSelect.options].map(o => o.value);
+                elemData.props.y_column = ySelect.options.length > 0 ? ySelect.options[0].value : null;
+                elemData.props.window_size = parseInt(document.getElementById('prop-window-size').value) || 1;
+                elemData.props.window_unit = document.getElementById('prop-window-unit').value;
+                delete elemData._processing;
+            };
+
+            document.getElementById('modal-save').onclick = () => {
+                saveLabeler();
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => {
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-apply').onclick = async () => {
+                saveLabeler();
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+                await this.applyElement(elemId);
+                this.showLayerPropertiesModal(elemId);
+            };
+
+            modalOverlay.dataset.elementId = elemId;
+            Modal.showModal('modal-overlay');
+            return;
+        }
+
 
         let html = '';
 
@@ -1248,7 +1405,7 @@ const NeuralApp = {
             const elem = document.getElementById(id);
             if (elem) elem.remove();
             const elemData = AppState.elements[id];
-            if (elemData && ['dataset', 'filter', 'timefilter','timeshift'].includes(elemData.nnType)) {
+            if (elemData && ['dataset', 'filter', 'timefilter','timeshift', 'labeler'].includes(elemData.nnType)) {
                 fetch(`/api/nn/data/${id}?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`, { method: 'DELETE' })
                     .catch(e => console.warn('Failed to delete dataset file', e));
             }

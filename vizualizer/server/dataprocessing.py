@@ -116,7 +116,20 @@ def filter_dataset(df: pd.DataFrame, rules: List[dict]) -> pd.DataFrame:
                     df.loc[valid, col] = 0.0
     return df
 
-def load_input_data(element_id: str, project: dict, config: str,project_code: str,
+
+def get_output_file(elem: dict, port: str, config: str, project_code: str) -> str:
+    meta_path = get_meta_path(config, project_code, elem['id'])
+    outputs = {}
+    if os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+        outputs = meta.get('outputs', {})
+    if outputs and port in outputs and outputs[port]:
+        return os.path.join(get_datasets_dir(config), outputs[port])
+    # fallback – основной файл
+    return get_dataset_path(config, project_code, elem['id'])
+
+def load_input_data(element_id: str, project: dict, config: str, project_code: str,
                     loaded_cache: dict = None) -> Tuple[pd.DataFrame, Dict[str, str]]:
     elements = project.get('elements', {})
     connections = project.get('connections', [])
@@ -129,7 +142,7 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
                 'toPort': conn['toPort'],
                 'fromPort': conn['fromPort'],
                 'fromElement': conn['fromElement']
-                })
+            })
 
     inputs.sort(key=lambda x: int(x['toPort'].split('-')[1]))
 
@@ -142,6 +155,7 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
         src_id = inp['fromElement']
         fromPort = inp['fromPort']
         src_elem = elements[src_id]
+
         if src_elem['type'] == 'input-signal':
             signal_name = src_elem['props'].get('name', '').strip()
             if not signal_name:
@@ -157,21 +171,11 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
             df['value'] = pd.to_numeric(df['value'], errors='coerce')
             signals_data[signal_name] = df
             hashes[src_id] = compute_hash({'name': signal_name, 'rows': len(df)})
-        elif src_elem.get('nnType') == 'timeshift':
-            # Выбираем файл по выходному порту источника
-            suffix = '_out0' if fromPort == 'out-0' else '_out1'
-            path = get_dataset_path(config, project_code, f"{src_id}{suffix}")
-            if not os.path.exists(path):
-                raise ValueError(f"Файл {suffix} для элемента {src_id} не найден")
-            df = pd.read_excel(path)
-            for col in df.columns:
-                if col != 'datetime':
-                    signals_data[col] = df[['datetime', col]].rename(columns={col: 'value'})
-            hashes[src_id] = compute_hash({'file': path, 'mtime': os.path.getmtime(path)})
         else:
-            path = get_dataset_path(config, project_code, src_id)
+            # Все остальные элементы – универсальный доступ через метаданные
+            path = get_output_file(src_elem, fromPort, config, project_code)
             if not os.path.exists(path):
-                raise ValueError(f"Для элемента {src_id} отсутствуют обработанные данные. Примените его сначала.")
+                raise ValueError(f"Файл для элемента {src_id} (порт {fromPort}) не найден")
             df = pd.read_excel(path)
             for col in df.columns:
                 if col != 'datetime':
@@ -187,9 +191,6 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
     ref_name = ref_names[ref_index]
 
     df_combined = build_dataset(signals_data, ref_name, interpolation)
-
-    # Дополнительно: после build_dataset все значения должны быть числовыми,
-    # но на всякий случай ещё раз применим pd.to_numeric (уже есть в функции)
     return df_combined, hashes
 
 def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -224,14 +225,38 @@ def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str) -> Tup
 
     return original, shifted
 
+def apply_labeler(df: pd.DataFrame, x_columns: list, y_column: str,
+                  window_size: int = 1, window_unit: str = 'rows') -> (pd.DataFrame, pd.Series):
+    df = df.copy()
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df = df.sort_values('datetime').reset_index(drop=True)
+
+    # Y
+    y = df[y_column] if y_column else None
+
+    if window_size == 1 and window_unit == 'rows':
+        X = df[x_columns] if x_columns else None
+    else:
+        # Формируем окна
+        X_rows = []
+        y_rows = []
+        for i in range(window_size-1, len(df)):
+            window = df.iloc[i-window_size+1 : i+1]
+            x_vals = {}
+            for col in x_columns:
+                for step in range(window_size):
+                    x_vals[f"{col}_t-{window_size-1-step}"] = window[col].iloc[step]
+            X_rows.append(x_vals)
+            if y is not None:
+                y_rows.append(y.iloc[i])
+        X = pd.DataFrame(X_rows) if X_rows else None
+        y = pd.Series(y_rows) if y_rows else None
+
+    return X, y
 
 
-def process_element(element_id: str, project: dict, config: str, project_code: str) -> str:
-    """
-    Основная функция обработки элемента. Рекурсивно проверяет входные элементы,
-    при необходимости пересчитывает их, затем обрабатывает текущий.
-    Возвращает хэш сохранённого результата.
-    """
+
+def process_element(element_id: str, project: dict, config: str, project_code: str) -> dict:
     elements = project.get('elements', {})
     elem = elements[element_id]
     elem_type = elem.get('nnType') or elem.get('type')
@@ -246,11 +271,8 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
         if conn['toElement'] == element_id:
             src_id = conn['fromElement']
             src_elem = elements[src_id]
-            # Если входной элемент – input-signal, данные загружаются динамически, файла нет.
             if src_elem['type'] != 'input-signal':
-                # Это обработанный элемент – вызываем для него process_element
                 process_element(src_id, project, config, project_code)
-                # После обработки у него должен появиться meta_path
                 src_meta_path = get_meta_path(config, project_code, src_id)
                 if os.path.exists(src_meta_path):
                     with open(src_meta_path, 'r') as f:
@@ -259,7 +281,6 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
                 else:
                     input_hashes[src_id] = ''
             else:
-                # Для input-signal хэш не хранится, будем считать, что данные не меняются
                 input_hashes[src_id] = 'signal_fixed'
 
     # 2. Проверка необходимости пересчёта
@@ -273,101 +294,85 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
     if os.path.exists(meta_path):
         with open(meta_path, 'r') as f:
             meta = json.load(f)
-        if meta.get('hash') == current_hash and os.path.exists(data_path):
-            # Данные актуальны
+        # Проверяем актуальность: хэш совпадает и существует хотя бы один выходной файл
+        outputs_exist = all(
+            os.path.exists(os.path.join(get_datasets_dir(config), rel))
+            for rel in meta.get('outputs', {}).values() if rel
+        )
+        if meta.get('hash') == current_hash and outputs_exist:
             return {
                 "hash": current_hash,
                 "file": os.path.relpath(data_path, get_datasets_dir(config)),
                 "input_hashes": input_hashes
             }
 
-    # 3. Выполнение обработки
+    # 3. Выполнение обработки — теперь для всех типов используется load_input_data
     if elem_type == 'dataset':
         df, _ = load_input_data(element_id, project, config, project_code)
         df.to_excel(data_path, index=False)
-    elif elem_type == 'filter':
-        # Загружаем входной датасет (должен быть ровно один вход)
-        inputs = []
-        for conn in connections:
-            if conn['toElement'] == element_id:
-                inputs.append(conn['fromElement'])
-        if len(inputs) != 1:
-            raise ValueError("Элемент 'Фильтрация данных' должен иметь ровно один вход")
-        src_id = inputs[0]
-        src_elem = elements[src_id]
-        if src_elem['type'] == 'input-signal':
-            # Нелогично, но допустим: загрузим сигнал напрямую? Пока ошибка.
-            raise ValueError("Фильтрация не может применяться напрямую к входному сигналу, используйте 'Собрать датасет'")
-        src_data_path = get_dataset_path(config, project_code, src_id)
-        if not os.path.exists(src_data_path):
-            raise ValueError("Входной датасет не найден. Примените предшествующий элемент.")
-        df = pd.read_excel(src_data_path)
-        rules = elem.get('props', {}).get('rules', [])
-        df = filter_dataset(df, rules)
-        df.to_excel(data_path, index=False)
-    elif elem_type == 'timefilter':
-        inputs = []
-        for conn in connections:
-            if conn['toElement'] == element_id:
-                inputs.append(conn['fromElement'])
-        if len(inputs) != 1:
-            raise ValueError("Временной фильтр должен иметь ровно один вход")
-        src_id = inputs[0]
-        src_data_path = get_dataset_path(config, project_code, src_id)
-        if not os.path.exists(src_data_path):
-            raise ValueError("Входной датасет не найден. Примените предшествующий элемент.")
-        df = pd.read_excel(src_data_path)
-        intervals = elem.get('props', {}).get('intervals', [])
-        df = apply_time_filter(df, intervals)
-        df.to_excel(data_path, index=False)
-    elif elem_type == 'timeshift':
-        inputs = []
-        for conn in connections:
-            if conn['toElement'] == element_id:
-                inputs.append(conn['fromElement'])
-        if len(inputs) != 1:
-            raise ValueError("Временное смещение должно иметь ровно один вход")
-        src_id = inputs[0]
-        src_data_path = get_dataset_path(config, project_code, src_id)
-        if not os.path.exists(src_data_path):
-            raise ValueError("Входной датасет не найден. Примените предшествующий элемент.")
-        df = pd.read_excel(src_data_path)
-        shift_value = elem.get('props', {}).get('shift_value', 1)
-        shift_unit = elem.get('props', {}).get('shift_unit', 'days')
-        df_orig, df_shifted = apply_time_shift(df, shift_value, shift_unit)
+        outputs = {'out-0': os.path.relpath(data_path, get_datasets_dir(config))}
 
-        # Сохраняем два файла
-        out0_path = get_dataset_path(config, project_code, f"{element_id}_out0")
-        out1_path = get_dataset_path(config, project_code, f"{element_id}_out1")
-        df_orig.to_excel(out0_path, index=False)
-        df_shifted.to_excel(out1_path, index=False)
+    elif elem_type in ('filter', 'timefilter', 'timeshift', 'labeler'):
+        # Получаем входной DataFrame через универсальную функцию
+        df, _ = load_input_data(element_id, project, config, project_code)
 
-        # Обновляем data_path и meta_path (используем основной путь для совместимости, но метаданные будут содержать пути)
-        data_path = out0_path  # условно
-            # после обработки timeshift
-        meta = {
-            'hash': current_hash,
-            'timestamp': pd.Timestamp.now().isoformat(),
-            'outputs': {
+        if elem_type == 'filter':
+            rules = elem.get('props', {}).get('rules', [])
+            df = filter_dataset(df, rules)
+            df.to_excel(data_path, index=False)
+            outputs = {'out-0': os.path.relpath(data_path, get_datasets_dir(config))}
+
+        elif elem_type == 'timefilter':
+            intervals = elem.get('props', {}).get('intervals', [])
+            df = apply_time_filter(df, intervals)
+            df.to_excel(data_path, index=False)
+            outputs = {'out-0': os.path.relpath(data_path, get_datasets_dir(config))}
+
+        elif elem_type == 'timeshift':
+            shift_value = elem.get('props', {}).get('shift_value', 1)
+            shift_unit = elem.get('props', {}).get('shift_unit', 'days')
+            df_orig, df_shifted = apply_time_shift(df, shift_value, shift_unit)
+            out0_path = get_dataset_path(config, project_code, f"{element_id}_out0")
+            out1_path = get_dataset_path(config, project_code, f"{element_id}_out1")
+            df_orig.to_excel(out0_path, index=False)
+            df_shifted.to_excel(out1_path, index=False)
+            outputs = {
                 'out-0': os.path.relpath(out0_path, get_datasets_dir(config)),
                 'out-1': os.path.relpath(out1_path, get_datasets_dir(config))
             }
-        }
-        with open(meta_path, 'w', encoding='utf-8') as f:
-            json.dump(meta, f)
-        return {
-            "hash": current_hash,
-            "file": os.path.relpath(out0_path, get_datasets_dir(config)),  # для совместимости
-            "input_hashes": input_hashes}
-    else:
-        raise ValueError(f"Неизвестный тип элемента для обработки: {elem_type}")
+            data_path = out0_path  # для совместимости
 
-    # 4. Сохраняем метаданные с хэшем
+        elif elem_type == 'labeler':
+            props = elem.get('props', {})
+            x_cols = props.get('x_columns', [])
+            y_col = props.get('y_column')
+            w_size = props.get('window_size', 1)
+            w_unit = props.get('window_unit', 'rows')
+            X, y = apply_labeler(df, x_cols, y_col, w_size, w_unit)
+            outX_path = get_dataset_path(config, project_code, f"{element_id}_X")
+            outy_path = get_dataset_path(config, project_code, f"{element_id}_y")
+            if X is not None:
+                X.to_excel(outX_path, index=False)
+            if y is not None:
+                y.to_frame().to_excel(outy_path, index=False)
+            outputs = {
+                'out-0': os.path.relpath(outX_path, get_datasets_dir(config)) if X is not None else None,
+                'out-1': os.path.relpath(outy_path, get_datasets_dir(config)) if y is not None else None
+            }
+            data_path = outX_path if X is not None else outy_path
+    else:
+        raise ValueError(f"Неизвестный тип элемента: {elem_type}")
+
+    # 4. Сохраняем метаданные с outputs
     with open(meta_path, 'w', encoding='utf-8') as f:
-        json.dump({'hash': current_hash, 'timestamp': pd.Timestamp.now().isoformat()}, f)
+        json.dump({
+            'hash': current_hash,
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'outputs': outputs
+        }, f)
 
     return {
         "hash": current_hash,
-        "file": os.path.relpath(data_path, get_datasets_dir(config)),  # относительный путь
+        "file": os.path.relpath(data_path, get_datasets_dir(config)),
         "input_hashes": input_hashes
     }
