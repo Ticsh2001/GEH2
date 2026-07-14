@@ -561,8 +561,6 @@ const NeuralApp = {
                     elemData.inputs = newInputCount;
                     this.updateElementPorts(elemId);
                 }
-                // Сбрасываем кэш обработки, так как настройки изменились
-                delete elemData._processing;
                 Modal.hideModal('modal-overlay');
             };
             document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
@@ -756,7 +754,8 @@ const NeuralApp = {
 
             // Определяем входной элемент
             let dataRange = null; // { min_date: str, max_date: str }
-            if (srcId) {
+            const srcStatus = srcId ? await this.fetchElementStatus(srcId) : null;
+            if (srcId && srcStatus?.outputs?.[fromPort]) {
                 try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
@@ -827,7 +826,6 @@ const NeuralApp = {
                     });
                 });
                 elemData.props.intervals = newIntervals;
-                delete elemData._processing;  // сбрасываем кэш
             };
 
             // Кнопка "Сохранить"
@@ -884,7 +882,8 @@ const NeuralApp = {
             if (modalEl) modalEl.style.maxWidth = '650px';
             let dataRange = null;
 
-            if (srcId) {
+            const srcStatus = srcId ? await this.fetchElementStatus(srcId) : null;
+            if (srcId && srcStatus?.outputs?.[fromPort]) {
                  try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
@@ -938,7 +937,6 @@ const NeuralApp = {
                 const unit = document.getElementById('prop-shift-unit').value;
                 elemData.props.shift_value = val;
                 elemData.props.shift_unit = unit;
-                delete elemData._processing;
                 resetModalWidth();
                 Modal.hideModal('modal-overlay');
             };
@@ -1069,7 +1067,6 @@ const NeuralApp = {
                 elemData.props.y_column = ySelect.options.length > 0 ? ySelect.options[0].value : null;
                 elemData.props.window_size = parseInt(document.getElementById('prop-window-size').value) || 1;
                 elemData.props.window_unit = document.getElementById('prop-window-unit').value;
-                delete elemData._processing;
             };
 
             document.getElementById('modal-save').onclick = () => {
@@ -1199,8 +1196,6 @@ const NeuralApp = {
             }
         });
         elemData.props.rules = rules;
-        // Сбрасываем кэш обработки, так как правила изменились
-        delete elemData._processing;
     },
 
     async applyElement(elemId) {
@@ -1431,7 +1426,17 @@ const NeuralApp = {
             if (elem) elem.remove();
             const elemData = AppState.elements[id];
             if (elemData && ['dataset', 'filter', 'timefilter','timeshift', 'labeler'].includes(elemData.nnType)) {
-                fetch(`/api/nn/data/${id}?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`, { method: 'DELETE' })
+                const cfg = AppState.currentConfig || '';
+                const code = AppState.project.code || '';
+                fetch(`/api/nn/data/${id}?config=${encodeURIComponent(cfg)}&code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.status !== 'deleted') {
+                            console.warn(`Файлы элемента ${id} не найдены на диске (config="${cfg}", code="${code}"). Проверьте, не менялись ли название проекта/конфиг после применения этого элемента.`, result);
+                        } else {
+                            console.log(`Удалены файлы элемента ${id}:`, result.deleted);
+                        }
+                    })
                     .catch(e => console.warn('Failed to delete dataset file', e));
             }
             delete AppState.elements[id];

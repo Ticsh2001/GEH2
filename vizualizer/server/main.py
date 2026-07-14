@@ -1574,7 +1574,8 @@ async def apply_nn_processing(payload: dict = Body(...)):
 async def delete_nn_data(element_id: str, config: str = Query(...), code: str = Query(...)):
     meta_path = get_meta_path(config, code, element_id)
     paths_to_delete = []
-    if os.path.exists(meta_path):
+    had_meta = os.path.exists(meta_path)
+    if had_meta:
         with open(meta_path, 'r') as f:
             meta = json.load(f)
         outputs = meta.get('outputs', {})
@@ -1591,14 +1592,33 @@ async def delete_nn_data(element_id: str, config: str = Query(...), code: str = 
         paths_to_delete.append(p)
         mp = get_meta_path(config, code, element_id + suffix)
         paths_to_delete.append(mp)
-    # Удаляем все собранные пути
+
+    deleted, not_found, errors = [], [], []
     for path in set(paths_to_delete):
-        try:
-            if os.path.exists(path):
+        if os.path.exists(path):
+            try:
                 os.remove(path)
-        except Exception as e:
-            print(f"Warning: could not delete {path}: {e}")
-    return {"status": "deleted"}
+                deleted.append(path)
+            except Exception as e:
+                errors.append({"path": path, "error": str(e)})
+        else:
+            not_found.append(path)
+
+    if not had_meta and not deleted:
+        # Ничего не нашли даже по meta.json — почти всегда это означает,
+        # что config/code при удалении не совпадает с тем, что был при
+        # сохранении (переименование проекта/смена конфига), либо элемент
+        # никогда не применялся.
+        print(f"[delete_nn_data] Нет данных для {element_id} по пути {meta_path} "
+              f"(config={config!r}, code={code!r}). Проверьте, не менялись ли "
+              f"название проекта/конфиг после применения этого элемента.")
+
+    return {
+        "status": "deleted" if deleted else "nothing_found",
+        "deleted": deleted,
+        "not_found": not_found,
+        "errors": errors,
+    }
     
 @app.get("/api/nn/data/{element_id}/columns")
 async def get_dataset_columns(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
