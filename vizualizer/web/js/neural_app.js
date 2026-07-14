@@ -1096,6 +1096,8 @@ const NeuralApp = {
 
 
         let html = '';
+        const paramMeta = cfg.paramMeta || {};
+        const currentProps = { ...cfg.defaults, ...(elemData.props || {}) };
 
         for (const [key, meta] of Object.entries(paramMeta)) {
             const currentVal = currentProps[key] !== undefined ? currentProps[key] : cfg.defaults[key];
