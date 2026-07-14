@@ -186,6 +186,43 @@ const NeuralApp = {
                 outputType: 'dataset'
             };
 
+            this.blockParams['timefilter'] = {
+                name: 'Временной фильтр',
+                type: 'timefilter',
+                inputs: 1,
+                maxInputs: 1,
+                outputs: 1,
+                color: '#8b5cf6',
+                displayParams: [],
+                defaults: {
+                    intervals: []   // массив { from: "YYYY-MM-DDTHH:MM", to: "YYYY-MM-DDTHH:MM" }
+                },
+                paramMeta: {}      // все поля строятся динамически
+            };
+
+            this.blockParams['timeshift'] = {
+                name: 'Временное смещение',
+                type: 'timeshift',
+                inputs: 1,
+                maxInputs: 1,
+                outputs: 2,               // два выхода: оригинал и сдвинутый
+                maxOutputs: 2,
+                color: '#06b6d4',
+                displayParams: ['shift_value', 'shift_unit'],
+                defaults: {
+                    shift_value: 1,
+                    shift_unit: 'days'    // seconds, minutes, hours, days, weeks, months, years
+                },
+                paramMeta: {
+                    shift_value: { type: 'number', label: 'Величина смещения', min: 1, step: 1 },
+                    shift_unit: {
+                        type: 'select',
+                        label: 'Единица измерения',
+                        options: ['seconds', 'minutes', 'hours', 'days', 'weeks', 'months', 'years']
+                    }
+                }
+            };
+
 
         } catch (e) {
             console.error(e);
@@ -231,7 +268,9 @@ const NeuralApp = {
                     title: 'ОБРАБОТКА ДАННЫХ',
                     items: [
                         { type: 'dataset', name: 'Собрать датасет', color: '#06b6d4' },
-                        { type: 'filter',  name: 'Фильтрация',     color: '#f97316' }
+                        { type: 'filter',  name: 'Фильтрация',     color: '#f97316' },
+                        { type: 'timefilter', name: 'Временной фильтр', color: '#8b5cf6' },
+                        { type: 'timeshift', name: 'Временное смещение', color: '#06b6d4' }
                     ]
                 },
                 {
@@ -668,6 +707,214 @@ const NeuralApp = {
             return;
         }
 
+        if (nnType === 'timefilter') {
+            // Расширяем модалку (если нужно)
+            const modalEl = document.getElementById('modal');
+            if (modalEl) modalEl.style.maxWidth = '700px';
+
+            // Определяем входной элемент
+            const conn = AppState.connections.find(c => c.toElement === elemId);
+            const srcId = conn ? conn.fromElement : null;
+            let dataRange = null; // { min_date: str, max_date: str }
+            if (srcId) {
+                try {
+                    const params = new URLSearchParams({
+                        config: AppState.currentConfig || '',
+                        code: AppState.project.code || ''
+                    });
+                    const resp = await fetch(`/api/nn/data/${srcId}/timerange?${params}`);
+                    if (resp.ok) {
+                        dataRange = await resp.json();
+                    }
+                } catch (e) {
+                    console.warn('Не удалось загрузить временной диапазон', e);
+                }
+            }
+
+            const intervals = elemData.props.intervals || [];
+            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
+            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+
+            // Строим HTML для интервалов
+            let intervalsHtml = '';
+            intervals.forEach((inv, idx) => {
+                intervalsHtml += `
+                    <div class="timefilter-interval" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+                        <label>От:</label>
+                        <input type="datetime-local" class="time-from" value="${inv.from || ''}" step="1">
+                        <label>До:</label>
+                        <input type="datetime-local" class="time-to" value="${inv.to || ''}" step="1">
+                        <button class="remove-interval-btn" data-idx="${idx}">✕</button>
+                    </div>`;
+            });
+            if (!intervalsHtml) {
+                intervalsHtml = '<div style="color:#999; font-size:12px;">Интервалы не заданы. Нажмите «+» чтобы добавить.</div>';
+            }
+
+            const rangeInfo = dataRange 
+                ? `<div style="margin-bottom:8px; font-size:13px;">📅 Данные: с <b>${dataRange.min_date}</b> по <b>${dataRange.max_date}</b></div>`
+                : '<div style="margin-bottom:8px; color:#999;">(диапазон неизвестен — примените датасет)</div>';
+
+            modalContent.innerHTML = `
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
+                ${rangeInfo}
+                <div class="modal-row">
+                    <label>Временные интервалы:</label>
+                    <div id="timefilter-intervals-container" style="max-height:300px; overflow-y:auto;">${intervalsHtml}</div>
+                    <button id="add-interval" class="modal-btn" style="margin-top:6px;">+ Добавить интервал</button>
+                </div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                </div>
+            `;
+
+            // Функция сброса ширины модалки
+            const resetModalWidth = () => { const m = document.getElementById('modal'); if (m) m.style.maxWidth = ''; };
+
+            // Сохранение интервалов
+            const saveIntervals = () => {
+                const container = document.getElementById('timefilter-intervals-container');
+                if (!container) return;
+                const newIntervals = [];
+                container.querySelectorAll('.timefilter-interval').forEach(row => {
+                    const fromInput = row.querySelector('.time-from');
+                    const toInput = row.querySelector('.time-to');
+                    newIntervals.push({
+                        from: fromInput ? fromInput.value : '',
+                        to: toInput ? toInput.value : ''
+                    });
+                });
+                elemData.props.intervals = newIntervals;
+                delete elemData._processing;  // сбрасываем кэш
+            };
+
+            // Кнопка "Сохранить"
+            document.getElementById('modal-save').onclick = () => {
+                saveIntervals();
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => {
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+
+            // Кнопка "Применить"
+            document.getElementById('modal-apply').onclick = async () => {
+                saveIntervals();
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+                await this.applyElement(elemId);
+                this.showLayerPropertiesModal(elemId);
+            };
+
+            // Добавление нового интервала
+            document.getElementById('add-interval').onclick = () => {
+                const container = document.getElementById('timefilter-intervals-container');
+                const row = document.createElement('div');
+                row.className = 'timefilter-interval';
+                row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:6px;';
+                row.innerHTML = `
+                    <label>От:</label>
+                    <input type="datetime-local" class="time-from" value="" step="1">
+                    <label>До:</label>
+                    <input type="datetime-local" class="time-to" value="" step="1">
+                    <button class="remove-interval-btn">✕</button>
+                `;
+                container.appendChild(row);
+                row.querySelector('.remove-interval-btn').onclick = () => row.remove();
+                // Убираем заглушку "интервалы не заданы", если была
+                const placeholder = container.querySelector('div[style*="color:#999"]');
+                if (placeholder) placeholder.remove();
+            };
+
+            // Удаление для существующих кнопок
+            document.querySelectorAll('.remove-interval-btn').forEach(btn => {
+                btn.onclick = () => btn.closest('.timefilter-interval').remove();
+            });
+
+            modalOverlay.dataset.elementId = elemId;
+            Modal.showModal('modal-overlay');
+            return;
+        }
+        if (nnType === 'timeshift') {
+            const modalEl = document.getElementById('modal');
+            if (modalEl) modalEl.style.maxWidth = '650px';
+
+            const conn = AppState.connections.find(c => c.toElement === elemId);
+            const srcId = conn ? conn.fromElement : null;
+            let dataRange = null;
+
+            if (srcId) {
+                try {
+                    const params = new URLSearchParams({ config: AppState.currentConfig || '', code: AppState.project.code || '' });
+                    const resp = await fetch(`/api/nn/data/${srcId}/timerange?${params}`);
+                    if (resp.ok) dataRange = await resp.json();
+                } catch (e) { console.warn('Не удалось загрузить временной диапазон', e); }
+            }
+
+            const props = elemData.props || {};
+            const shiftValue = props.shift_value ?? 1;
+            const shiftUnit = props.shift_unit ?? 'days';
+            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
+            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+
+            const rangeInfo = dataRange
+                ? `<div style="margin-bottom:8px; font-size:13px;">📅 Входные данные: с <b>${dataRange.min_date}</b> по <b>${dataRange.max_date}</b></div>`
+                : '<div style="margin-bottom:8px; color:#999;">(диапазон неизвестен — примените датасет)</div>';
+
+            modalContent.innerHTML = `
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
+                ${rangeInfo}
+                <div class="modal-row">
+                    <label>Смещение:</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="number" id="prop-shift-value" value="${shiftValue}" min="1" step="1" style="width:100px;">
+                        <select id="prop-shift-unit">
+                            <option value="seconds" ${shiftUnit === 'seconds' ? 'selected' : ''}>секунд</option>
+                            <option value="minutes" ${shiftUnit === 'minutes' ? 'selected' : ''}>минут</option>
+                            <option value="hours" ${shiftUnit === 'hours' ? 'selected' : ''}>часов</option>
+                            <option value="days" ${shiftUnit === 'days' ? 'selected' : ''}>дней</option>
+                            <option value="weeks" ${shiftUnit === 'weeks' ? 'selected' : ''}>недель</option>
+                            <option value="months" ${shiftUnit === 'months' ? 'selected' : ''}>месяцев</option>
+                            <option value="years" ${shiftUnit === 'years' ? 'selected' : ''}>лет</option>
+                        </select>
+                    </div>
+                    <small style="color:#999;">Сдвиг применяется ко времени. Выход out‑0 — исходные данные, out‑1 — сдвинутые.</small>
+                </div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                </div>
+            `;
+
+            const resetModalWidth = () => { const m = document.getElementById('modal'); if (m) m.style.maxWidth = ''; };
+
+            document.getElementById('modal-save').onclick = () => {
+                const val = parseInt(document.getElementById('prop-shift-value').value) || 1;
+                const unit = document.getElementById('prop-shift-unit').value;
+                elemData.props.shift_value = val;
+                elemData.props.shift_unit = unit;
+                delete elemData._processing;
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => {
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-apply').onclick = async () => {
+                document.getElementById('modal-save').click(); // сохранить настройки
+                resetModalWidth();
+                Modal.hideModal('modal-overlay');
+                await this.applyElement(elemId);
+                this.showLayerPropertiesModal(elemId);
+            };
+
+            modalOverlay.dataset.elementId = elemId;
+            Modal.showModal('modal-overlay');
+            return;
+        }
+
         let html = '';
 
         for (const [key, meta] of Object.entries(paramMeta)) {
@@ -1001,7 +1248,7 @@ const NeuralApp = {
             const elem = document.getElementById(id);
             if (elem) elem.remove();
             const elemData = AppState.elements[id];
-            if (elemData && ['dataset', 'filter'].includes(elemData.nnType)) {
+            if (elemData && ['dataset', 'filter', 'timefilter','timeshift'].includes(elemData.nnType)) {
                 fetch(`/api/nn/data/${id}?config=${encodeURIComponent(AppState.currentConfig || '')}&code=${encodeURIComponent(AppState.project.code || '')}`, { method: 'DELETE' })
                     .catch(e => console.warn('Failed to delete dataset file', e));
             }

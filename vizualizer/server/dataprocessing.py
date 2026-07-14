@@ -63,6 +63,29 @@ def build_dataset(signals_data: Dict[str, pd.DataFrame], ref_signal: str,
     result = result.reset_index()
     return result
 
+def apply_time_filter(df: pd.DataFrame, intervals: List[dict]) -> pd.DataFrame:
+    """Оставляет строки, datetime которых попадает хотя бы в один интервал."""
+    if not intervals:
+        return df
+    df = df.copy()
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    masks = []
+    for inv in intervals:
+        from_dt = pd.to_datetime(inv['from']) if inv['from'] else None
+        to_dt = pd.to_datetime(inv['to']) if inv['to'] else None
+        m = pd.Series(True, index=df.index)
+        if from_dt is not None:
+            m &= df['datetime'] >= from_dt
+        if to_dt is not None:
+            m &= df['datetime'] <= to_dt
+        masks.append(m)
+    if masks:
+        combined_mask = masks[0]
+        for m in masks[1:]:
+            combined_mask |= m
+        df = df[combined_mask]
+    return df
+
 
 def filter_dataset(df: pd.DataFrame, rules: List[dict]) -> pd.DataFrame:
     df = df.copy()
@@ -102,16 +125,22 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
 
     for conn in connections:
         if conn['toElement'] == element_id:
-            inputs.append((conn['toPort'], conn['fromElement']))
+            inputs.append({
+                'toPort': conn['toPort'],
+                'fromPort': conn['fromPort'],
+                'fromElement': conn['fromElement']
+                })
 
-    inputs.sort(key=lambda x: int(x[0].split('-')[1]))
+    inputs.sort(key=lambda x: int(x['toPort'].split('-')[1]))
 
     signals_data = {}
     hashes = {}
     ref_index = elem.get('props', {}).get('reference_signal_index', 0)
     interpolation = elem.get('props', {}).get('interpolation', 'linear')
 
-    for port, src_id in inputs:
+    for inp in inputs:
+        src_id = inp['fromElement']
+        fromPort = inp['fromPort']
         src_elem = elements[src_id]
         if src_elem['type'] == 'input-signal':
             signal_name = src_elem['props'].get('name', '').strip()
@@ -124,17 +153,21 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
                 raise ValueError(f"Данные для сигнала '{signal_name}' не найдены")
 
             df = data_dict[signal_name].copy()
-
-            # 1. Заменяем запятые на точки в значениях
             df['value'] = df['value'].astype(str).str.replace(',', '.', regex=False)
-
-            # 2. Преобразуем в числовой тип (нечисловые строки станут NaN)
             df['value'] = pd.to_numeric(df['value'], errors='coerce')
-
-            # 3. НЕ удаляем строки с NaN, чтобы сохранить исходный индекс времени.
-            #    Интерполяция в build_dataset заполнит пропуски.
             signals_data[signal_name] = df
             hashes[src_id] = compute_hash({'name': signal_name, 'rows': len(df)})
+        elif src_elem.get('nnType') == 'timeshift':
+            # Выбираем файл по выходному порту источника
+            suffix = '_out0' if fromPort == 'out-0' else '_out1'
+            path = get_dataset_path(config, project_code, f"{src_id}{suffix}")
+            if not os.path.exists(path):
+                raise ValueError(f"Файл {suffix} для элемента {src_id} не найден")
+            df = pd.read_excel(path)
+            for col in df.columns:
+                if col != 'datetime':
+                    signals_data[col] = df[['datetime', col]].rename(columns={col: 'value'})
+            hashes[src_id] = compute_hash({'file': path, 'mtime': os.path.getmtime(path)})
         else:
             path = get_dataset_path(config, project_code, src_id)
             if not os.path.exists(path):
@@ -143,8 +176,7 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
             for col in df.columns:
                 if col != 'datetime':
                     signals_data[col] = df[['datetime', col]].rename(columns={col: 'value'})
-            file_hash = compute_hash({'file': path, 'mtime': os.path.getmtime(path)})
-            hashes[src_id] = file_hash
+            hashes[src_id] = compute_hash({'file': path, 'mtime': os.path.getmtime(path)})
 
     if not signals_data:
         raise ValueError("Нет входных данных для построения датасета")
@@ -159,6 +191,40 @@ def load_input_data(element_id: str, project: dict, config: str,project_code: st
     # Дополнительно: после build_dataset все значения должны быть числовыми,
     # но на всякий случай ещё раз применим pd.to_numeric (уже есть в функции)
     return df_combined, hashes
+
+def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Возвращает (df_original, df_shifted).
+    df_original — строки, для которых есть сдвинутая пара (т.е. без последних shift_value единиц).
+    df_shifted — те же строки, но со сдвигом времени.
+    """
+    df = df.copy()
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df = df.sort_values('datetime').reset_index(drop=True)
+
+    # Преобразуем единицу в Timedelta
+    unit_map = {
+        'seconds': 'seconds', 'minutes': 'minutes', 'hours': 'hours',
+        'days': 'days', 'weeks': 'W', 'months': 'M', 'years': 'Y'
+    }
+    if shift_unit in ['months', 'years']:
+        # Для месяцев/лет Timedelta не работает, используем DateOffset
+        if shift_unit == 'months':
+            delta = pd.DateOffset(months=shift_value)
+        else:
+            delta = pd.DateOffset(years=shift_value)
+    else:
+        delta = pd.Timedelta(**{shift_unit: shift_value})
+
+    # Исходные данные (обрезаем последние shift_value строк, потому что для них нет сдвига)
+    original = df.iloc[:-shift_value] if shift_value < len(df) else df.iloc[:0]
+    # Сдвинутые данные: берём те же строки, но добавляем delta к datetime
+    shifted = original.copy()
+    shifted['datetime'] = shifted['datetime'] + delta
+
+    return original, shifted
+
+
 
 def process_element(element_id: str, project: dict, config: str, project_code: str) -> str:
     """
@@ -239,6 +305,60 @@ def process_element(element_id: str, project: dict, config: str, project_code: s
         rules = elem.get('props', {}).get('rules', [])
         df = filter_dataset(df, rules)
         df.to_excel(data_path, index=False)
+    elif elem_type == 'timefilter':
+        inputs = []
+        for conn in connections:
+            if conn['toElement'] == element_id:
+                inputs.append(conn['fromElement'])
+        if len(inputs) != 1:
+            raise ValueError("Временной фильтр должен иметь ровно один вход")
+        src_id = inputs[0]
+        src_data_path = get_dataset_path(config, project_code, src_id)
+        if not os.path.exists(src_data_path):
+            raise ValueError("Входной датасет не найден. Примените предшествующий элемент.")
+        df = pd.read_excel(src_data_path)
+        intervals = elem.get('props', {}).get('intervals', [])
+        df = apply_time_filter(df, intervals)
+        df.to_excel(data_path, index=False)
+    elif elem_type == 'timeshift':
+        inputs = []
+        for conn in connections:
+            if conn['toElement'] == element_id:
+                inputs.append(conn['fromElement'])
+        if len(inputs) != 1:
+            raise ValueError("Временное смещение должно иметь ровно один вход")
+        src_id = inputs[0]
+        src_data_path = get_dataset_path(config, project_code, src_id)
+        if not os.path.exists(src_data_path):
+            raise ValueError("Входной датасет не найден. Примените предшествующий элемент.")
+        df = pd.read_excel(src_data_path)
+        shift_value = elem.get('props', {}).get('shift_value', 1)
+        shift_unit = elem.get('props', {}).get('shift_unit', 'days')
+        df_orig, df_shifted = apply_time_shift(df, shift_value, shift_unit)
+
+        # Сохраняем два файла
+        out0_path = get_dataset_path(config, project_code, f"{element_id}_out0")
+        out1_path = get_dataset_path(config, project_code, f"{element_id}_out1")
+        df_orig.to_excel(out0_path, index=False)
+        df_shifted.to_excel(out1_path, index=False)
+
+        # Обновляем data_path и meta_path (используем основной путь для совместимости, но метаданные будут содержать пути)
+        data_path = out0_path  # условно
+            # после обработки timeshift
+        meta = {
+            'hash': current_hash,
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'outputs': {
+                'out-0': os.path.relpath(out0_path, get_datasets_dir(config)),
+                'out-1': os.path.relpath(out1_path, get_datasets_dir(config))
+            }
+        }
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f)
+        return {
+            "hash": current_hash,
+            "file": os.path.relpath(out0_path, get_datasets_dir(config)),  # для совместимости
+            "input_hashes": input_hashes}
     else:
         raise ValueError(f"Неизвестный тип элемента для обработки: {elem_type}")
 
