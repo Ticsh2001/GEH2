@@ -1604,11 +1604,15 @@ async def delete_nn_data(element_id: str, config: str = Query(...), code: str = 
 async def get_dataset_columns(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
     from dataprocessing import get_output_file
     elem = {'id': element_id}
-    data_path = get_output_file(elem, port, config, code)
+    try:
+        data_path = get_output_file(elem, port, config, code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
     if not os.path.exists(data_path):
-        raise HTTPException(status_code=404, detail=f"File for port {port} not found")
+        raise HTTPException(status_code=404, detail="File not found")
     df = pd.read_excel(data_path, nrows=0)
-    return {"columns": [c for c in df.columns if c != 'datetime']}
+    columns = [c for c in df.columns if c != 'datetime']
+    return {"columns": columns}
 
 @app.get("/api/nn/data/{element_id}/timerange")
 async def get_dataset_timerange(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):

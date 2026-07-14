@@ -119,15 +119,14 @@ def filter_dataset(df: pd.DataFrame, rules: List[dict]) -> pd.DataFrame:
 
 def get_output_file(elem: dict, port: str, config: str, project_code: str) -> str:
     meta_path = get_meta_path(config, project_code, elem['id'])
-    outputs = {}
-    if os.path.exists(meta_path):
-        with open(meta_path, 'r') as f:
-            meta = json.load(f)
-        outputs = meta.get('outputs', {})
-    if outputs and port in outputs and outputs[port]:
-        return os.path.join(get_datasets_dir(config), outputs[port])
-    # fallback – основной файл
-    return get_dataset_path(config, project_code, elem['id'])
+    if not os.path.exists(meta_path):
+        raise FileNotFoundError(f"Метаданные для элемента {elem['id']} не найдены. Примените элемент.")
+    with open(meta_path, 'r') as f:
+        meta = json.load(f)
+    outputs = meta.get('outputs', {})
+    if port not in outputs or not outputs[port]:
+        raise ValueError(f"Порт {port} не содержит данных")
+    return os.path.join(get_datasets_dir(config), outputs[port])
 
 def load_input_data(element_id: str, project: dict, config: str, project_code: str,
                     loaded_cache: dict = None) -> Tuple[pd.DataFrame, Dict[str, str]]:
