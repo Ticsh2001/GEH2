@@ -1711,6 +1711,47 @@ async def get_nn_status(element_id: str, payload: dict = Body(...)):
         return status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/nn/list")
+async def list_processed_elements(config: str = Query(...), code: str = Query(...)):
+    """Возвращает элементы проекта с существующими файлами данных."""
+    datasets_dir = get_datasets_dir(config)
+    if not os.path.exists(datasets_dir):
+        return {"elements": []}
+    elements = []
+    prefix = code + "_"
+    for fname in os.listdir(datasets_dir):
+        if fname.startswith(prefix) and fname.endswith(".xlsx"):
+            element_id = fname[len(prefix):-5]  # убираем префикс и .xlsx
+            meta_path = os.path.join(datasets_dir, f"{code}_{element_id}_meta.json")
+            description = ""
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                description = meta.get('hash', '')[:8]  # короткий хэш для идентификации
+            elements.append({
+                "element_id": element_id,
+                "filename": fname,
+                "description": description
+            })
+    return {"elements": elements}
+
+@app.get("/api/nn/data/{element_id}/full")
+async def get_full_dataset(element_id: str, config: str = Query(...), code: str = Query(...), port: str = Query('out-0')):
+    """Возвращает полный DataFrame в виде JSON."""
+    from dataprocessing import get_output_file
+    elem = {'id': element_id}
+    try:
+        data_path = get_output_file(elem, port, config, code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not os.path.exists(data_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    df = pd.read_excel(data_path)
+    # Преобразуем datetime в строку для JSON
+    if 'datetime' in df.columns:
+        df['datetime'] = df['datetime'].astype(str)
+    return JSONResponse(content=json.loads(df.to_json(orient='records', date_format='iso')))
 
 
 

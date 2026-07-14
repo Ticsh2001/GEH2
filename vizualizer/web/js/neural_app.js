@@ -34,6 +34,17 @@ const NeuralApp = {
                 Project.loadProjectFromList(Project.selectedProjectFilename, Project.selectedProjectSource);
             }
         });
+        document.getElementById('btn-visualize').addEventListener('click', () => {
+            const config = AppState.currentConfig || '';
+            const projectCode = AppState.project.code || '';
+            if (!projectCode) {
+                alert('Сначала сохраните проект (укажите код)');
+                return;
+            }
+            const apiUrl = window.location.origin;
+            const visualizerUrl = `http://${window.location.hostname}:8502/?config=${encodeURIComponent(config)}&code=${encodeURIComponent(projectCode)}&api_url=${encodeURIComponent(apiUrl)}`;
+            window.open(visualizerUrl, '_blank');
+        });
         const searchInput = document.getElementById('project-search');
         if (searchInput) {
             searchInput.addEventListener('input', (e) => Project.filterProjectList(e.target.value));

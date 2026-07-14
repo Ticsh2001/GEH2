@@ -1,228 +1,86 @@
-# neural_visualizer_app.py
 import streamlit as st
 import pandas as pd
-import requests
 import plotly.express as px
-import numpy as np
-from typing import List, Dict, Optional
+import requests
 
 st.set_page_config(page_title="Neural Dataset Visualizer", layout="wide")
-st.title("🧠 Визуализация обработанных датасетов")
+st.title("📊 Визуализация обработанных датасетов")
 
-# Получаем параметры URL
 query_params = st.query_params
 config = query_params.get("config", "")
 api_url = query_params.get("api_url", "http://localhost:8000")
+project_code = query_params.get("code", "")
 
-if not config:
-    st.error("❌ Не указана конфигурация (параметр 'config')")
+if not config or not project_code:
+    st.error("Не заданы config или code проекта")
     st.stop()
 
-def make_url(path: str) -> str:
-    """Добавляет config и api_url к относительному пути."""
-    if api_url:
-        full = f"{api_url}{path}"
-    else:
-        full = path
-    if "?" in full:
-        return f"{full}&config={config}"
-    return f"{full}?config={config}"
-
-# Кэш для списка элементов и данных
-if "elements_cache" not in st.session_state:
-    st.session_state.elements_cache = None
-if "data_cache" not in st.session_state:
-    st.session_state.data_cache = {}
-if "selected_elements" not in st.session_state:
-    st.session_state.selected_elements = {}
-
-def load_available_elements() -> List[Dict]:
-    """Загружает список всех элементов, у которых есть обработанные файлы."""
+@st.cache_data(show_spinner=False)
+def load_elements(_config: str, _code: str) -> list:
     try:
-        resp = requests.get(make_url("/api/nn/list"), timeout=10)
+        resp = requests.get(f"{api_url}/api/nn/list", params={"config": _config, "code": _code})
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("elements", [])
+        return resp.json().get("elements", [])
     except Exception as e:
-        st.error(f"Ошибка загрузки списка элементов: {e}")
+        st.error(f"Ошибка загрузки списка датасетов: {e}")
         return []
 
-def load_element_columns(element_id: str, port: str = "out-0") -> List[str]:
-    """Загружает список столбцов датасета (без datetime)."""
+@st.cache_data(show_spinner=False)
+def load_data(element_id: str, _config: str, _code: str, port: str = "out-0") -> pd.DataFrame:
     try:
-        resp = requests.get(
-            make_url(f"/api/nn/data/{element_id}/columns"),
-            params={"port": port, "code": get_project_code(element_id)},
-            timeout=10
-        )
+        params = {"config": _config, "code": _code, "port": port}
+        resp = requests.get(f"{api_url}/api/nn/data/{element_id}/full", params=params)
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("columns", [])
-    except Exception as e:
-        st.error(f"Ошибка загрузки столбцов для {element_id}: {e}")
-        return []
-
-def load_data(element_id: str, port: str = "out-0") -> Optional[pd.DataFrame]:
-    """Загружает полный DataFrame из обработанного файла."""
-    try:
-        resp = requests.get(
-            make_url(f"/api/nn/data/{element_id}"),
-            params={"port": port, "code": get_project_code(element_id)},
-            timeout=30
-        )
-        resp.raise_for_status()
-        # Предполагаем, что API возвращает JSON с ключом 'data' (список записей)
-        data = resp.json()
-        records = data.get("data", [])
-        if not records:
-            return None
-        df = pd.DataFrame(records)
-        if "datetime" not in df.columns:
-            st.warning(f"В датасете {element_id} отсутствует столбец 'datetime'")
-        else:
-            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-            df = df.dropna(subset=["datetime"])
-            df = df.set_index("datetime").sort_index()
+        df = pd.DataFrame(resp.json())
+        if 'datetime' in df.columns:
+            df['datetime'] = pd.to_datetime(df['datetime'])
         return df
     except Exception as e:
-        st.error(f"Ошибка загрузки данных для {element_id}: {e}")
-        return None
+        st.error(f"Ошибка загрузки данных: {e}")
+        return pd.DataFrame()
 
-def get_project_code(element_id: str) -> str:
-    """
-    Извлекает код проекта из ID элемента или из метаданных.
-    Пока возвращаем значение из session_state или 'unknown'.
-    В будущем можно хранить маппинг.
-    """
-    # Можно получить из API статуса, но пока захардкодим
-    return st.session_state.get("project_code", "unknown")
+elements = load_elements(config, project_code)
 
-# ========== Боковая панель: выбор элементов ==========
-with st.sidebar:
-    st.header("📦 Доступные датасеты")
-    
-    if st.button("🔄 Обновить список"):
-        st.session_state.elements_cache = None
-        st.session_state.data_cache = {}
-        st.rerun()
-    
-    if st.session_state.elements_cache is None:
-        with st.spinner("Загрузка списка..."):
-            st.session_state.elements_cache = load_available_elements()
-    
-    elements = st.session_state.elements_cache
-    if not elements:
-        st.info("Нет обработанных элементов. Примените обработку в конструкторе.")
+if not elements:
+    st.sidebar.warning("Нет сохранённых данных для этого проекта. Примените элементы в конструкторе.")
+    st.stop()
+
+st.sidebar.header("Доступные датасеты")
+selected = []
+for elem in elements:
+    elem_id = elem["element_id"]
+    label = f"{elem_id} ({elem.get('description', '')})"
+    if st.sidebar.checkbox(label, key=f"elem_{elem_id}"):
+        selected.append(elem)
+
+if not selected:
+    st.info("Выберите датасеты для визуализации в боковом меню.")
+    st.stop()
+
+# Загружаем данные и отображаем
+for elem in selected:
+    elem_id = elem["element_id"]
+    st.subheader(f"Датасет: {elem_id}")
+    df = load_data(elem_id, config, project_code)
+    if df.empty:
+        st.warning("Пустой датасет")
+        continue
+    all_cols = [c for c in df.columns if c != 'datetime']
+    selected_cols = st.multiselect(f"Столбцы для {elem_id}", all_cols, default=all_cols[:2] if len(all_cols)>=2 else all_cols, key=f"cols_{elem_id}")
+    if not selected_cols:
+        continue
+    if 'datetime' in df.columns:
+        min_date = df['datetime'].min().date()
+        max_date = df['datetime'].max().date()
+        date_range = st.date_input(f"Диапазон дат для {elem_id}", [min_date, max_date], key=f"dr_{elem_id}")
+        if len(date_range) == 2:
+            start, end = date_range
+            df = df[(df['datetime'].dt.date >= start) & (df['datetime'].dt.date <= end)]
+    if 'datetime' in df.columns:
+        fig = px.line(df, x='datetime', y=selected_cols, title=elem_id)
     else:
-        for elem in elements:
-            elem_id = elem["id"]
-            name = elem.get("name", elem_id)
-            # Кнопка для выбора элемента
-            if st.button(f"{name} ({elem_id})", key=f"btn_{elem_id}"):
-                # Загружаем столбцы при первом выборе
-                if elem_id not in st.session_state.selected_elements:
-                    cols = load_element_columns(elem_id, port="out-0")
-                    st.session_state.selected_elements[elem_id] = {
-                        "name": name,
-                        "columns": cols,
-                        "selected_columns": [],
-                        "loaded": False,
-                        "data": None
-                    }
-                # Загружаем полные данные, если ещё не загружены
-                if not st.session_state.selected_elements[elem_id]["loaded"]:
-                    with st.spinner(f"Загрузка данных {name}..."):
-                        df = load_data(elem_id, port="out-0")
-                        if df is not None:
-                            st.session_state.selected_elements[elem_id]["data"] = df
-                            st.session_state.selected_elements[elem_id]["loaded"] = True
-                        else:
-                            st.warning(f"Не удалось загрузить данные для {name}")
-    
+        fig = px.line(df, y=selected_cols, title=elem_id)
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Статистика:**")
+    st.dataframe(df[selected_cols].describe())
     st.divider()
-    st.subheader("Выбранные для визуализации")
-    # Отображаем уже выбранные элементы с возможностью выбора столбцов
-    for elem_id, info in st.session_state.selected_elements.items():
-        with st.expander(f"📊 {info['name']} ({elem_id})"):
-            if info["columns"]:
-                selected = st.multiselect(
-                    "Столбцы",
-                    info["columns"],
-                    default=info.get("selected_columns", []),
-                    key=f"cols_{elem_id}"
-                )
-                info["selected_columns"] = selected
-            else:
-                st.warning("Нет столбцов")
-            if st.button("❌ Удалить", key=f"del_{elem_id}"):
-                del st.session_state.selected_elements[elem_id]
-                st.rerun()
-
-# ========== Основная область: графики ==========
-if not st.session_state.selected_elements:
-    st.info("👈 Выберите датасет(ы) в боковой панели для начала визуализации.")
-else:
-    for elem_id, info in st.session_state.selected_elements.items():
-        if info["loaded"] and info["selected_columns"]:
-            df = info["data"]
-            if df is None or df.empty:
-                st.warning(f"Нет данных для {info['name']}")
-                continue
-                
-            st.subheader(f"📈 {info['name']} ({elem_id})")
-            
-            # Выбор диапазона дат
-            if isinstance(df.index, pd.DatetimeIndex):
-                min_date = df.index.min().date()
-                max_date = df.index.max().date()
-                date_range = st.date_input(
-                    f"Диапазон дат для {info['name']}",
-                    value=(min_date, max_date),
-                    min_value=min_date,
-                    max_value=max_date,
-                    key=f"dates_{elem_id}"
-                )
-                if len(date_range) == 2:
-                    start, end = date_range
-                    mask = (df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))
-                    df_plot = df.loc[mask]
-                else:
-                    df_plot = df
-            else:
-                df_plot = df
-            
-            # График
-            cols_to_plot = [c for c in info["selected_columns"] if c in df_plot.columns]
-            if cols_to_plot:
-                fig = px.line(
-                    df_plot,
-                    x=df_plot.index,
-                    y=cols_to_plot,
-                    title=f"График {info['name']}",
-                    render_mode="webgl" if len(df_plot) > 10000 else "auto"
-                )
-                fig.update_layout(
-                    height=500,
-                    xaxis_title="Время",
-                    yaxis_title="Значение",
-                    legend_title_text="Столбцы"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Статистика
-                with st.expander(f"📊 Статистика для {info['name']}"):
-                    stats_df = pd.DataFrame(index=cols_to_plot)
-                    stats_df["count"] = df_plot[cols_to_plot].count()
-                    stats_df["min"] = df_plot[cols_to_plot].min()
-                    stats_df["max"] = df_plot[cols_to_plot].max()
-                    stats_df["mean"] = df_plot[cols_to_plot].mean()
-                    stats_df["std"] = df_plot[cols_to_plot].std()
-                    stats_df["median"] = df_plot[cols_to_plot].median()
-                    st.dataframe(stats_df.style.format("{:.4g}"))
-            else:
-                st.info("Выберите столбцы для отображения.")
-        else:
-            if not info["loaded"]:
-                st.info(f"Нажмите кнопку загрузки для {info['name']}")
-            else:
-                st.info(f"Выберите столбцы в боковой панели для {info['name']}")
