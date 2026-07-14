@@ -470,6 +470,24 @@ const NeuralApp = {
         if (body) body.style.height = `${newHeight - 30}px`;
     },
 
+    // Спрашивает у бэкенда, актуальны ли данные элемента (без побочных эффектов).
+    // Заменяет собой чтение локального elemData._processing, который легко
+    // рассинхронизируется с реальным состоянием на диске.
+    async fetchElementStatus(elemId) {
+        const project = { project: AppState.project, elements: AppState.elements, connections: AppState.connections };
+        try {
+            const resp = await fetch(`/api/nn/status/${elemId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project, config: AppState.currentConfig || '' })
+            });
+            return resp.ok ? await resp.json() : { up_to_date: false, outputs: {} };
+        } catch (e) {
+            console.warn('Не удалось получить статус элемента', e);
+            return { up_to_date: false, outputs: {} };
+        }
+    },
+
     // -------- Модальное окно свойств слоя ----------
     async showLayerPropertiesModal(elemId) {
         const elemData = AppState.elements[elemId];
@@ -503,9 +521,9 @@ const NeuralApp = {
                 }
                 inputs.push(label);
             }
-            const processing = elemData._processing;
-            const statusIcon = processing?.hash ? '🟢' : '🔴';
-            const statusText = processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const status = await this.fetchElementStatus(elemId);
+            const statusIcon = status.up_to_date ? '🟢' : '🔴';
+            const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
             const refIdx = elemData.props.reference_signal_index ?? 0;
             const interpolation = elemData.props.interpolation ?? 'linear';
 
@@ -570,8 +588,9 @@ const NeuralApp = {
 
             // 1. Определяем входной элемент
             let columnsStats = null;
+            const srcStatus = srcId ? await this.fetchElementStatus(srcId) : null;
 
-            if (srcId && AppState.elements[srcId]?._processing?.hash) {
+            if (srcId && srcStatus?.outputs?.[fromPort]) {
                 try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
@@ -651,9 +670,9 @@ const NeuralApp = {
             }
 
             // 3. Индикатор статуса
-            const processing = elemData._processing;
-            const statusIcon = processing?.hash ? '🟢' : '🔴';
-            const statusText = processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const status = await this.fetchElementStatus(elemId);
+            const statusIcon = status.up_to_date ? '🟢' : '🔴';
+            const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
 
             modalContent.innerHTML = `
                 <div id="processing-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
@@ -754,8 +773,9 @@ const NeuralApp = {
                 }
 
             const intervals = elemData.props.intervals || [];
-            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
-            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const status = await this.fetchElementStatus(elemId);
+            const statusIcon = status.up_to_date ? '🟢' : '🔴';
+            const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
 
             // Строим HTML для интервалов
             let intervalsHtml = '';
@@ -879,8 +899,9 @@ const NeuralApp = {
             const props = elemData.props || {};
             const shiftValue = props.shift_value ?? 1;
             const shiftUnit = props.shift_unit ?? 'days';
-            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
-            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const status = await this.fetchElementStatus(elemId);
+            const statusIcon = status.up_to_date ? '🟢' : '🔴';
+            const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
 
             const rangeInfo = dataRange
                 ? `<div style="margin-bottom:8px; font-size:13px;">📅 Входные данные: с <b>${dataRange.min_date}</b> по <b>${dataRange.max_date}</b></div>`
@@ -943,8 +964,9 @@ const NeuralApp = {
 
             // Входной датасет
             let availableColumns = [];
+            const srcStatus = srcId ? await this.fetchElementStatus(srcId) : null;
 
-            if (srcId && AppState.elements[srcId]?._processing?.hash) {
+            if (srcId && srcStatus?.outputs?.[fromPort]) {
                 try {
                     const params = new URLSearchParams({
                         config: AppState.currentConfig || '',
@@ -964,8 +986,9 @@ const NeuralApp = {
             const yCol = props.y_column || null;
             const wSize = props.window_size ?? 1;
             const wUnit = props.window_unit ?? 'rows';
-            const statusIcon = elemData._processing?.hash ? '🟢' : '🔴';
-            const statusText = elemData._processing?.hash ? 'Данные актуальны' : 'Данные не сохранены';
+            const status = await this.fetchElementStatus(elemId);
+            const statusIcon = status.up_to_date ? '🟢' : '🔴';
+            const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
 
             // Строим HTML
             const availOptions = availableColumns.map(c => `<option value="${c}">${c}</option>`).join('');

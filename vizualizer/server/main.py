@@ -14,7 +14,7 @@ import io
 import requests
 import httpx
 
-from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path, get_output_file
+from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path, get_output_file, get_element_status
 
 
 
@@ -1675,6 +1675,22 @@ async def get_dataset_timerange(element_id: str, config: str = Query(...), code:
     df['datetime'] = pd.to_datetime(df['datetime'])
     return {"min_date": df['datetime'].min().strftime('%Y-%m-%dT%H:%M:%S'),
             "max_date": df['datetime'].max().strftime('%Y-%m-%dT%H:%M:%S')}
+
+@app.post("/api/nn/status/{element_id}")
+async def get_nn_status(element_id: str, payload: dict = Body(...)):
+    """
+    Лёгкая проверка актуальности данных элемента (без записи файлов).
+    Используется фронтом при каждом открытии модалки свойств,
+    чтобы не полагаться на локальный client-side кэш.
+    """
+    try:
+        project = payload["project"]
+        config = payload.get("config") or ""
+        project_code = project.get("project", {}).get("code", "unnamed_project")
+        status = get_element_status(element_id, project, config, project_code)
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 

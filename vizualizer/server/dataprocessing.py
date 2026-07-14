@@ -255,6 +255,55 @@ def apply_labeler(df: pd.DataFrame, x_columns: list, y_column: str,
 
 
 
+def get_element_status(element_id: str, project: dict, config: str, project_code: str) -> dict:
+    """
+    Чистая (без побочных эффектов) проверка актуальности данных элемента.
+    Ничего не считает и не пишет на диск — только читает meta.json и
+    рекурсивно проверяет входы. Использует тот же алгоритм хэширования,
+    что и process_element(), поэтому 'up_to_date' всегда согласован
+    с тем, что реально вернёт обработка.
+    """
+    elements = project.get('elements', {})
+    elem = elements[element_id]
+    elem_type = elem.get('nnType') or elem.get('type')
+    connections = project.get('connections', [])
+
+    input_hashes = {}
+    inputs_up_to_date = True
+    for conn in connections:
+        if conn['toElement'] == element_id:
+            src_id = conn['fromElement']
+            src_elem = elements[src_id]
+            if src_elem['type'] != 'input-signal':
+                src_status = get_element_status(src_id, project, config, project_code)
+                input_hashes[src_id] = src_status['hash']
+                if not src_status['up_to_date']:
+                    inputs_up_to_date = False
+            else:
+                input_hashes[src_id] = 'signal_fixed'
+
+    current_hash = compute_hash({
+        'props': elem.get('props', {}),
+        'input_hashes': input_hashes,
+        'type': elem_type
+    })
+
+    meta_path = get_meta_path(config, project_code, element_id)
+    outputs = {}
+    up_to_date = False
+    if os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+        outputs = meta.get('outputs', {})
+        outputs_exist = all(
+            os.path.exists(os.path.join(get_datasets_dir(config), rel))
+            for rel in outputs.values() if rel
+        )
+        up_to_date = inputs_up_to_date and meta.get('hash') == current_hash and outputs_exist
+
+    return {'hash': current_hash, 'up_to_date': up_to_date, 'outputs': outputs}
+
+
 def process_element(element_id: str, project: dict, config: str, project_code: str) -> dict:
     elements = project.get('elements', {})
     elem = elements[element_id]
