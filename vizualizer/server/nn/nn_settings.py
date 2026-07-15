@@ -19,7 +19,7 @@ import json
 
 import tensorflow as tf
 
-SETTINGS_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'training_params.json')
+SETTINGS_SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'training_params.json')
 
 OPTIMIZER_CLASSES = {
     'adam': tf.keras.optimizers.Adam,

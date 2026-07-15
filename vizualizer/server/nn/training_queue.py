@@ -37,6 +37,9 @@ JOBS_DIR = os.environ.get('TRAINING_JOBS_DIR', os.path.join(os.path.dirname(__fi
 WORKER_SCRIPT = os.environ.get('TRAIN_WORKER_SCRIPT', os.path.join(os.path.dirname(__file__), 'train_worker.py'))
 POLL_INTERVAL_SEC = float(os.environ.get('TRAINING_DISPATCH_INTERVAL', '3'))
 
+TRAINING_USER = os.environ.get('TRAINING_USER', 'tishchenkova@lofi.pgt')
+
+
 os.makedirs(JOBS_DIR, exist_ok=True)
 
 _dispatcher_task: Optional[asyncio.Task] = None
@@ -64,6 +67,7 @@ def _metrics_path(job_id: str) -> str:
 def _write_job(job_id: str, data: dict):
     with open(_job_path(job_id), 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    
 
 
 def get_job(job_id: str) -> Optional[dict]:
@@ -137,6 +141,8 @@ def enqueue_job(config: str, project_code: str, element_id: str, design_code: st
     """
     job_id = uuid.uuid4().hex[:12]
     os.makedirs(_job_dir(job_id), exist_ok=True)
+    os.chmod(_job_dir(job_id), 0o777)
+    os.chmod(JOBS_DIR, 0o777)           # на случай, если корневая папка была создана без прав
     job = {
         'job_id': job_id,
         'config': config,
@@ -155,6 +161,7 @@ def enqueue_job(config: str, project_code: str, element_id: str, design_code: st
         'progress': {'epoch': 0, 'total_epochs': settings.get('epochs')},
     }
     _write_job(job_id, job)
+    os.chmod(_job_path(job_id), 0o666)
     return job_id
 
 
@@ -226,9 +233,8 @@ async def _dispatch_loop():
                         job['started_at'] = _now_iso()
                         _write_job(job['job_id'], job)
                         _current_process = subprocess.Popen(
-                            [sys.executable, WORKER_SCRIPT, job['job_id']],
-                            cwd=os.path.dirname(WORKER_SCRIPT) or '.',
-                        )
+                            ['sudo', '-u', TRAINING_USER, sys.executable, WORKER_SCRIPT, job['job_id']],
+                            cwd=os.path.dirname(WORKER_SCRIPT) or '.',)
                         _current_job_id = job['job_id']
         except Exception as e:
             print(f"[training_queue] dispatcher error: {e}")

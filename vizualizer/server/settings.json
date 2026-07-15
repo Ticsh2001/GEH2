@@ -3,6 +3,7 @@
   "projectDataFolder": "projects",
   "templateDataFolder": "templates",
   "signalArchiveFolder": "archive",
+  "trainedModelsFolder": "models",
   "tablesFolder": "tables",
   "visualizerPort": 8501,
   "adminAuthor": "Виктор Тищенко",

@@ -365,6 +365,8 @@ const NeuralApp = {
 
     createNNElement(type, x, y, props = {}, elemId = null) {
         const cfg = this.blockParams[type];
+        const inputLabels = cfg.inputNames || [];
+
         if (!cfg) return null;
         const id = elemId || `${type}_${++AppState.elementCounter}`;
         const inputs = (props.inputCount !== undefined) ? props.inputCount : cfg.inputs;
@@ -414,7 +416,14 @@ const NeuralApp = {
             <div class="element-header" style="background:${cfg.color};">${cfg.name}</div>
             <div class="element-body" style="display:flex; align-items:center; justify-content:center; height:${height - 30}px;">
                 <div class="ports-left" style="display:flex; flex-direction:column; justify-content:center;">
-                    ${Array.from({length: inputs}, (_, i) => `<div class="port input any-port" data-port="in-${i}" data-element="${id}" title="Вход ${i+1}"></div>`).join('')}
+                    ${Array.from({length: inputs}, (_, i) => {
+                        const label = inputLabels[i] || '';
+                        return `
+                            <div style="position:relative; display:flex; align-items:center; margin:2px 0;">
+                                <div class="port input any-port" data-port="in-${i}" data-element="${id}" title="${label || 'Вход '+(i+1)}"></div>
+                                ${label ? `<span style="position:absolute; left:20px; white-space:nowrap; font-size:9px; color:#e0e0e0; pointer-events:none; background:rgba(0,0,0,0.6); padding:1px 3px; border-radius:2px;">${label}</span>` : ''}
+                            </div>`;
+                    }).join('')}
                 </div>
                 <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:0;">
                     ${paramLines.length > 0 
@@ -1902,16 +1911,31 @@ async saveProject() {
     async loadTrainingParams() {
         try {
             const resp = await fetch('/api/training-params');
-            if (resp.ok) {
-                const data = await resp.json();
-                // Обновляем параметры для элемента "Настройка"
-                if (this.blockParams['nn-settings']) {
-                    this.blockParams['nn-settings'].defaults = { ...data.defaults };
-                    this.blockParams['nn-settings'].paramMeta = { ...data.paramMeta };
-                }
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const rawParams = await resp.json();
+
+            const defaults = {};
+            const paramMeta = {};
+
+            for (const [key, meta] of Object.entries(rawParams)) {
+                defaults[key] = meta.default;
+                paramMeta[key] = {
+                    type: meta.type,
+                    label: meta.label,
+                    options: meta.options || undefined,
+                    min: meta.min,
+                    max: meta.max,
+                    step: meta.step,
+                    placeholder: meta.placeholder || undefined,
+                };
+            }
+
+            if (this.blockParams['nn-settings']) {
+                this.blockParams['nn-settings'].defaults = defaults;
+                this.blockParams['nn-settings'].paramMeta = paramMeta;
             }
         } catch (e) {
-            console.warn('Не удалось загрузить параметры обучения', e);
+            console.error('Ошибка загрузки training-params:', e);
         }
     },
 
