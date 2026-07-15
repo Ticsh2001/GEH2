@@ -1,0 +1,115 @@
+{
+  "optimizer": {
+    "label": "Оптимизатор",
+    "type": "select",
+    "options": ["adam", "sgd", "rmsprop", "adagrad", "adamw", "nadam"],
+    "default": "adam",
+    "target": "optimizer_name"
+  },
+  "learning_rate": {
+    "label": "Скорость обучения (learning rate)",
+    "type": "number",
+    "default": 0.001,
+    "min": 0.0000001,
+    "max": 1,
+    "step": 0.0001,
+    "target": "optimizer_kwarg",
+    "optimizer_arg": "learning_rate"
+  },
+  "loss": {
+    "label": "Функция потерь",
+    "type": "select",
+    "options": ["mse", "mae", "huber", "log_cosh",
+                "binary_crossentropy", "categorical_crossentropy", "sparse_categorical_crossentropy"],
+    "default": "mse",
+    "target": "compile",
+    "compile_arg": "loss"
+  },
+  "metrics": {
+    "label": "Метрики (список, JSON-массив)",
+    "type": "array",
+    "default": ["mae"],
+    "target": "compile",
+    "compile_arg": "metrics"
+  },
+  "epochs": {
+    "label": "Количество эпох",
+    "type": "number",
+    "default": 50,
+    "min": 1,
+    "step": 1,
+    "target": "fit",
+    "fit_arg": "epochs"
+  },
+  "batch_size": {
+    "label": "Размер батча",
+    "type": "number",
+    "default": 32,
+    "min": 1,
+    "step": 1,
+    "target": "fit",
+    "fit_arg": "batch_size"
+  },
+  "shuffle": {
+    "label": "Перемешивать данные (shuffle)",
+    "type": "boolean",
+    "default": true,
+    "target": "fit",
+    "fit_arg": "shuffle"
+  },
+  "validation_split": {
+    "label": "Доля валидации (если не подключён X_val/Y_val)",
+    "type": "number",
+    "default": 0.0,
+    "min": 0,
+    "max": 0.9,
+    "step": 0.05,
+    "target": "fit",
+    "fit_arg": "validation_split"
+  },
+  "early_stopping": {
+    "label": "Ранняя остановка (EarlyStopping)",
+    "type": "boolean",
+    "default": false,
+    "target": "callback",
+    "callback": "early_stopping"
+  },
+  "early_stopping_patience": {
+    "label": "EarlyStopping: patience (эпох без улучшения)",
+    "type": "number",
+    "default": 10,
+    "min": 1,
+    "step": 1,
+    "target": "callback_arg",
+    "callback": "early_stopping",
+    "callback_arg": "patience"
+  },
+  "reduce_lr_on_plateau": {
+    "label": "Снижать learning rate на плато (ReduceLROnPlateau)",
+    "type": "boolean",
+    "default": false,
+    "target": "callback",
+    "callback": "reduce_lr"
+  },
+  "reduce_lr_factor": {
+    "label": "ReduceLROnPlateau: множитель снижения LR",
+    "type": "number",
+    "default": 0.5,
+    "min": 0.01,
+    "max": 0.99,
+    "step": 0.01,
+    "target": "callback_arg",
+    "callback": "reduce_lr",
+    "callback_arg": "factor"
+  },
+  "reduce_lr_patience": {
+    "label": "ReduceLROnPlateau: patience (эпох без улучшения)",
+    "type": "number",
+    "default": 5,
+    "min": 1,
+    "step": 1,
+    "target": "callback_arg",
+    "callback": "reduce_lr",
+    "callback_arg": "patience"
+  }
+}

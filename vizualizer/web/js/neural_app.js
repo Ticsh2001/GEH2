@@ -9,6 +9,7 @@ const NeuralApp = {
         Settings.init().catch(console.error);
         this.loadConfigurations().catch(console.error);
         await this.fetchBlockParams();
+        await this.loadTrainingParams();
         this.applyMode('design');  // начальный режим
         this.setupGlobalMouseHandlers();
         this.setupContextMenu();
@@ -131,15 +132,7 @@ const NeuralApp = {
             this.blockParams = {};
             items.forEach(item => { this.blockParams[item.type] = item; });
             this.designBlockTypes = new Set(Object.keys(this.blockParams));
-            this.blockParams['nn-template'] = {
-                name: 'Шаблон',
-                inputs: 0, outputs: 1,
-                maxInputs: 1, maxOutputs: 10,
-                color: '#f97316',
-                defaults: {},
-                paramMeta: {},
-                displayParams: []
-            };
+
             this.blockParams['nn-settings'] = {
                 name: 'Настройка',
                 inputs: 0, outputs: 1,
@@ -250,6 +243,22 @@ const NeuralApp = {
                     window_size: { type: 'number', label: 'Размер окна', min: 1, step: 1 },
                     window_unit: { type: 'select', label: 'Единица окна', options: ['rows', 'seconds', 'minutes', 'hours', 'days'] }
                 }
+            };
+            
+            this.blockParams['nn-template'] = {
+                name: 'Шаблон',
+                // Порты фиксированы и именованы — это главный элемент обучения
+                inputs: 5, maxInputs: 5,
+                inputNames: ['settings', 'X_train', 'Y_train', 'X_val', 'Y_val'],
+                outputs: 0, maxOutputs: 0,
+                color: '#f97316',
+                defaults: {
+                    design_code: ''
+                },
+                paramMeta: {
+                    design_code: { type: 'text', label: 'Код проекта дизайна (ККС)' }
+                },
+                displayParams: ['design_code']
             };
 
 
@@ -1103,6 +1112,156 @@ const NeuralApp = {
         }
 
 
+        
+        if (nnType === 'nn-template') {
+            const status = await this.fetchTemplateStatus(elemId);
+        
+            let statusIcon = '⚪', statusText = 'Не обучена';
+            if (status.job && (status.job.status === 'queued' || status.job.status === 'running')) {
+                statusIcon = '🟡';
+                statusText = status.job.status === 'running' ? 'Обучается…' : 'В очереди на обучение';
+            } else if (status.trained && status.up_to_date) {
+                statusIcon = '🟢'; statusText = 'Обучена, актуальна';
+            } else if (status.trained && !status.up_to_date) {
+                statusIcon = '🔴'; statusText = 'Обучена, но данные/дизайн изменились — требуется переобучение';
+            }
+        
+            // ВАЖНО: нативный <datalist> заменён на самодельный dropdown — браузеры
+            // (особенно Chrome) непредсказуемо не показывают подсказки <datalist>,
+            // когда options обновляются программно уже после фокуса на поле. Данные
+            // при этом реально приходят (это подтверждено — design-code-list.innerHTML
+            // содержал правильную опцию), просто UI молчит.
+            modalContent.innerHTML = `
+                <div id="template-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
+                <div class="modal-row" style="position:relative;">
+                    <label>Код проекта дизайна нейросети (ККС):</label>
+                    <input type="text" id="prop-design-code"
+                        value="${elemData.props.design_code || ''}"
+                        placeholder="Начните вводить или используйте *" autocomplete="off">
+                    <div id="design-code-dropdown" style="
+                        display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
+                        background:#1f2937; border:1px solid #374151; border-radius:6px;
+                        max-height:180px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+                    "></div>
+                </div>
+                <div id="template-train-progress" style="margin-top:8px; font-size:12px; color:#9ca3af;"></div>
+                <div style="margin-top:12px; text-align:left;">
+                    <button class="modal-btn apply-btn" id="modal-train" ${status.job ? 'disabled' : ''}>🚀 Обучить</button>
+                </div>
+            `;
+        
+            // Автокомплит: тянем варианты по мере ввода (поддерживаем '*' как маску)
+            // Замена стандартных кнопок (убираем старые обработчики)
+            const saveBtn = document.getElementById('modal-save');
+            const cancelBtn = document.getElementById('modal-cancel');
+            if (saveBtn) saveBtn.replaceWith(saveBtn.cloneNode(true));
+            if (cancelBtn) cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+            const designInput = document.getElementById('prop-design-code');
+            const dropdown = document.getElementById('design-code-dropdown');
+            let debounceTimer = null;
+        
+            const renderDropdown = (designs) => {
+                if (!designs || designs.length === 0) {
+                    dropdown.style.display = 'none';
+                    dropdown.innerHTML = '';
+                    return;
+                }
+                dropdown.innerHTML = designs.map(code => `
+                    <div class="design-suggestion" data-code="${code}" style="
+                        padding:6px 10px; cursor:pointer; font-size:13px; color:#e5e7eb;
+                    ">${code}</div>
+                `).join('');
+                dropdown.style.display = 'block';
+                dropdown.querySelectorAll('.design-suggestion').forEach(row => {
+                    row.addEventListener('mouseenter', () => row.style.background = '#374151');
+                    row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+                    row.addEventListener('mousedown', (e) => {
+                        // mousedown (не click) — чтобы успеть сработать до blur поля
+                        e.preventDefault();
+                        designInput.value = row.dataset.code;
+                        dropdown.style.display = 'none';
+                    });
+                });
+            };
+        
+            const fetchDesigns = async () => {
+                const q = designInput.value || '';
+                try {
+                    const params = new URLSearchParams({ config: AppState.currentConfig || '', query: q });
+                    const resp = await fetch(`/api/nn/designs?${params}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        renderDropdown(data.designs || []);
+                    }
+                } catch (e) { console.warn('Не удалось получить список дизайнов', e); }
+            };
+        
+            designInput.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(fetchDesigns, 200);
+            });
+            designInput.addEventListener('focus', fetchDesigns);
+            document.addEventListener('click', (e) => {
+                if (e.target !== designInput && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+            // подгружаем сразу при открытии модалки
+            fetchDesigns();
+        
+            document.getElementById('modal-save').onclick = () => {
+                elemData.props.design_code = designInput.value.trim();
+                Modal.hideModal('modal-overlay');
+            };
+            document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
+        
+            document.getElementById('modal-train').onclick = async () => {
+                elemData.props.design_code = designInput.value.trim();
+                if (!elemData.props.design_code) {
+                    alert('Укажите код проекта дизайна нейросети');
+                    return;
+                }
+                if (!AppState.project.code) {
+                    alert('Сначала сохраните проект — иначе обучение будет некому отдать после закрытия вкладки.');
+                    return;
+                }
+                // Требуем сохранить именно текущую (актуальную) версию проекта перед постановкой в очередь
+                if (!confirm('Перед обучением проект будет сохранён. Продолжить?')) return;
+                await this.saveProject();
+        
+                const project = { project: AppState.project, elements: AppState.elements, connections: AppState.connections };
+                try {
+                    const resp = await fetch('/api/nn/train', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            element_id: elemId, project, config: AppState.currentConfig || '',
+                            user: AppState.currentUser
+                        })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok) { alert('Ошибка постановки в очередь: ' + (data.detail || resp.statusText)); return; }
+        
+                    if (data.status === 'already_trained') {
+                        alert('Модель уже обучена на этих данных и дизайне — переобучение не требуется.');
+                        this.showLayerPropertiesModal(elemId);
+                        return;
+                    }
+                    document.getElementById('modal-train').disabled = true;
+                    this.pollTrainingProgress(elemId, data.job_id);
+                } catch (e) {
+                    alert('Не удалось запустить обучение: ' + e.message);
+                }
+            };
+        
+            Modal.showModal('modal-overlay');
+            return;
+        }
+   
+
+
+
+
         let html = '';
         const paramMeta = cfg.paramMeta || {};
         const currentProps = { ...cfg.defaults, ...(elemData.props || {}) };
@@ -1207,6 +1366,88 @@ const NeuralApp = {
             }
         });
         elemData.props.rules = rules;
+    },
+
+    async fetchTemplateStatus(elemId) {
+        const project = { project: AppState.project, elements: AppState.elements, connections: AppState.connections };
+        try {
+            const resp = await fetch(`/api/nn/template/status/${elemId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project, config: AppState.currentConfig || '' })
+            });
+            return resp.ok ? await resp.json() : { trained: false, up_to_date: false, job: null };
+        } catch (e) {
+            console.warn('Не удалось получить статус шаблона', e);
+            return { trained: false, up_to_date: false, job: null };
+        }
+    },
+
+ 
+    // Поллинг прогресса обучения. Пока просто текстом эпоха/loss — полноценный
+    // график будет отдельной задачей (метрики уже пишутся бэком в metrics.jsonl,
+    // см. GET /api/nn/train/status/{job_id} -> {..., metrics: [...]}).
+    pollTrainingProgress(elemId, jobId) {
+        const progressEl = document.getElementById('template-train-progress');
+        const statusEl = document.getElementById('template-status');
+        const tick = async () => {
+            // модалка могла закрыться/смениться — прекращаем поллинг
+            if (document.getElementById('modal-overlay')?.dataset.elementId !== elemId &&
+                !document.getElementById('template-train-progress')) {
+                return;
+            }
+            try {
+                const resp = await fetch(`/api/nn/train/status/${jobId}`);
+                if (!resp.ok) return;
+                const job = await resp.json();
+    
+                if (progressEl) {
+                    if (job.status === 'queued') {
+                        progressEl.textContent = `В очереди, позиция: ${job.queue_position ?? '?'}`;
+                    } else if (job.status === 'running') {
+                        const p = job.progress || {};
+                        const last = p.last_metrics || {};
+                        progressEl.textContent = `Эпоха ${p.epoch || 0}/${p.total_epochs || '?'} — loss: ${last.loss?.toFixed?.(4) ?? '-'}`;
+                    }
+                }
+    
+                if (job.status === 'done') {
+                    if (statusEl) { statusEl.textContent = '🟢 Обучена, актуальна'; }
+                    if (progressEl) progressEl.textContent = 'Обучение завершено успешно.';
+                    return; // стоп поллинга
+                }
+                if (job.status === 'error') {
+                    if (statusEl) { statusEl.textContent = '🔴 Ошибка обучения'; }
+                    if (progressEl) progressEl.textContent = job.error ? job.error.split('\n').pop() : 'Неизвестная ошибка';
+                    return;
+                }
+                setTimeout(tick, 3000);
+            } catch (e) {
+                setTimeout(tick, 5000);
+            }
+        };
+        tick();
+    },
+ 
+    // Вызывается после загрузки проекта — красит все элементы "Шаблон" по статусу обучения
+    async refreshTemplateStatuses() {
+        const templateIds = Object.keys(AppState.elements).filter(id =>
+            (AppState.elements[id].nnType || AppState.elements[id].type) === 'nn-template');
+        for (const id of templateIds) {
+            const status = await this.fetchTemplateStatus(id);
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.classList.remove('nn-template-trained', 'nn-template-outdated', 'nn-template-untrained', 'nn-template-busy');
+            if (status.job && (status.job.status === 'queued' || status.job.status === 'running')) {
+                el.classList.add('nn-template-busy');
+            } else if (status.trained && status.up_to_date) {
+                el.classList.add('nn-template-trained');
+            } else if (status.trained) {
+                el.classList.add('nn-template-outdated');
+            } else {
+                el.classList.add('nn-template-untrained');
+            }
+        }
     },
 
     async applyElement(elemId) {
@@ -1656,6 +1897,22 @@ async saveProject() {
             document.getElementById('context-menu').style.display = 'none';
             this.copySelectedElements();
         });
+    },
+
+    async loadTrainingParams() {
+        try {
+            const resp = await fetch('/api/training-params');
+            if (resp.ok) {
+                const data = await resp.json();
+                // Обновляем параметры для элемента "Настройка"
+                if (this.blockParams['nn-settings']) {
+                    this.blockParams['nn-settings'].defaults = { ...data.defaults };
+                    this.blockParams['nn-settings'].paramMeta = { ...data.paramMeta };
+                }
+            }
+        } catch (e) {
+            console.warn('Не удалось загрузить параметры обучения', e);
+        }
     },
 
     setupWorkspaceClick() {

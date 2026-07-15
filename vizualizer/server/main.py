@@ -14,6 +14,9 @@ import io
 import requests
 import httpx
 
+import nn.training_queue as tq
+import nn.nn_template as nn_template
+
 from dataprocessing import process_element, get_datasets_dir, get_dataset_path, get_meta_path, get_output_file, get_element_status
 
 
@@ -1752,6 +1755,241 @@ async def get_full_dataset(element_id: str, config: str = Query(...), code: str 
     if 'datetime' in df.columns:
         df['datetime'] = df['datetime'].astype(str)
     return JSONResponse(content=json.loads(df.to_json(orient='records', date_format='iso')))
+
+
+
+
+
+@app.on_event("startup")
+async def _start_training_dispatcher():
+    nn_template.set_config_path(config_path)
+    # Если design-проекты сети у вас сохраняются с project.type == "template" —
+    # main.save_project() уводит их в глобальную templateDataFolder, а не в
+    # projectDataFolder/<config>. Эта строка добавляет её в область поиска
+    # list_design_projects()/load_design_project(). Если у вас всё лежит в
+    # projectDataFolder — эта строка ничего не сломает, просто добавит ещё
+    # один (скорее всего пустой для дизайнов) каталог в скан.
+    nn_template.set_template_dir(lambda: _abs_folder("templateDataFolder"))
+    tq.start_dispatcher()
+ 
+# Диагностика: если после этого поиск всё ещё пустой — временно включите
+# подробный лог сканирования файлов проектов (что нашли, какие у них
+# project.type / element_types / is_design), запустив сервер с переменной
+# окружения NN_TEMPLATE_DEBUG=1, например:
+#     NN_TEMPLATE_DEBUG=1 uvicorn main:app ...
+# В логе появится по одной строке на каждый просканированный .json —
+# сразу будет видно, находит ли скрипт файл дизайна вообще, и если да —
+# почему is_design_project() возвращает False.
+ 
+ 
+# ---------------------------------------------------------------------------
+# Автокомплит: список кодов (ККС) дизайн-проектов сети для поля в модалке
+# ---------------------------------------------------------------------------
+ 
+@app.get("/api/nn/designs")
+async def list_nn_designs(config: str = Query(...), query: str = Query('')):
+    try:
+        codes = nn_template.list_design_projects(config, query)
+        return {"designs": codes}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+# ВРЕМЕННЫЙ debug-эндпоинт — удалить после того, как разберёмся с поиском
+# дизайнов. Открыть в браузере: /api/nn/designs/debug?config=TEC_20
+# Покажет прямо в теле ответа: реальный абсолютный путь к папке проектов,
+# какие .json файлы там есть, code/type/element_types каждого, и почему
+# is_design_project() принял или отклонил файл.
+@app.get("/api/nn/designs/debug")
+async def debug_nn_designs(config: str = Query(...)):
+    return nn_template.debug_scan(config)
+ 
+ 
+# ---------------------------------------------------------------------------
+# Статус элемента "Шаблон" (обучен / актуален / идёт обучение) —
+# дёргается фронтом при открытии проекта и при открытии модалки свойств
+# ---------------------------------------------------------------------------
+ 
+@app.post("/api/nn/template/status/{element_id}")
+async def get_template_status(element_id: str, payload: dict = Body(...)):
+    try:
+        project = payload["project"]
+        config = payload.get("config") or ""
+        project_code = project.get("project", {}).get("code", "unnamed_project")
+ 
+        def _job_lookup(el_id, proj_code):
+            return tq.find_active_job_for_element(el_id, proj_code)
+ 
+        status = nn_template.get_template_status(element_id, project, config, project_code,
+                                                   current_job_lookup=_job_lookup)
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+# ---------------------------------------------------------------------------
+# Постановка обучения в очередь
+# ---------------------------------------------------------------------------
+ 
+# Порты элемента "Шаблон" в порядке, зафиксированном на фронте (см. neural_app.js):
+# in-0 = settings, in-1 = X_train, in-2 = Y_train, in-3 = X_val, in-4 = Y_val
+TEMPLATE_PORT_MAP = {
+    'in-0': 'settings',
+    'in-1': 'X_train',
+    'in-2': 'Y_train',
+    'in-3': 'X_val',
+    'in-4': 'Y_val',
+}
+ 
+ 
+@app.post("/api/nn/train")
+async def start_training(payload: dict = Body(...)):
+    """
+    payload = {
+        "element_id": ...,
+        "project": {...},          # как и в остальных nn-эндпоинтах
+        "config": ...,
+        "user": "имя пользователя" # из AppState.currentUser на фронте
+    }
+    """
+    try:
+        element_id = payload["element_id"]
+        project = payload["project"]
+        config = payload.get("config") or ""
+        user = payload.get("user") or "Аноним"
+        project_code = project.get("project", {}).get("code", "")
+ 
+        # 1. Проект должен быть сохранён — иначе после закрытия вкладки
+        #    некуда будет вернуться проверять статус обучения.
+        if not project_code:
+            raise HTTPException(status_code=400, detail="Сначала сохраните проект (укажите код)")
+ 
+        elements = project.get("elements", {})
+        elem = elements.get(element_id)
+        if not elem:
+            raise HTTPException(status_code=404, detail="Элемент не найден")
+ 
+        design_code = elem.get("props", {}).get("design_code", "").strip()
+        if not design_code:
+            raise HTTPException(status_code=400, detail="Не указан код проекта дизайна нейросети")
+ 
+        # 2. Уже есть активная задача на этот элемент — не дублируем
+        existing = tq.find_active_job_for_element(element_id, project_code)
+        if existing:
+            return {"status": existing["status"], "job_id": existing["job_id"], "already_queued": True}
+ 
+        # 3. Собираем входные файлы по портам (settings/X_train/Y_train/X_val/Y_val)
+        connections = project.get("connections", [])
+        conn_by_port = {c["toPort"]: c for c in connections if c["toElement"] == element_id}
+ 
+        input_paths = {}
+        input_hashes = {}
+        settings_props = {}
+ 
+        for port, role in TEMPLATE_PORT_MAP.items():
+            conn = conn_by_port.get(port)
+            if not conn:
+                if role != 'settings':  # settings опционален, остальные обязательны
+                    raise HTTPException(status_code=400,
+                                         detail=f"Не подключён вход '{role}' элемента Шаблон")
+                continue
+            src_id = conn["fromElement"]
+            src_elem = elements[src_id]
+            from_port = conn.get("fromPort", "out-0")
+ 
+            if role == 'settings':
+                # элемент "Настройка" отдаёт свои props напрямую, без файла на диске
+                settings_props = dict(src_elem.get("props", {}))
+                continue
+ 
+            src_status = get_element_status(src_id, project, config, project_code)
+            if not src_status["up_to_date"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Данные для входа '{role}' не актуальны — примените элемент '{src_id}'"
+                )
+            path = get_output_file(src_elem, from_port, config, project_code)
+            input_paths[role] = path
+            input_hashes[src_id] = src_status["hash"]
+ 
+        # 4. Проверяем актуальность обучения — если уже обучено на этих же
+        #    данных/дизайне/настройках, не гоняем GPU впустую
+        design_project = nn_template.load_design_project(config, design_code)
+        d_hash = nn_template.design_hash(design_project)
+        train_hash = nn_template.compute_train_hash(design_code, d_hash, settings_props, input_hashes)
+ 
+        meta_path = nn_template.get_model_meta_path(config, project_code, element_id)
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if meta.get("train_hash") == train_hash and \
+               os.path.exists(nn_template.get_model_path(config, project_code, element_id)):
+                return {"status": "already_trained", "job_id": None}
+ 
+        # 5. Ставим в очередь
+        job_id = tq.enqueue_job(
+            config=config,
+            project_code=project_code,
+            element_id=element_id,
+            design_code=design_code,
+            user=user,
+            settings=settings_props,
+            inputs=input_paths,
+            train_hash=train_hash,
+        )
+        # input_hashes понадобятся воркеру для записи в meta.json — допишем в job
+        job = tq.get_job(job_id)
+        job["input_hashes"] = input_hashes
+        tq._write_job(job_id, job)
+ 
+        return {"status": "queued", "job_id": job_id, "queue_position": tq.queue_position(job_id)}
+ 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+ 
+# ---------------------------------------------------------------------------
+# Статус конкретного job'а (для поллинга прогресса/метрик с фронта)
+# ---------------------------------------------------------------------------
+ 
+@app.get("/api/nn/train/status/{job_id}")
+async def get_train_job_status(job_id: str):
+    job = tq.get_job_with_metrics(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задача обучения не найдена")
+    job["queue_position"] = tq.queue_position(job_id)
+    return job
+ 
+ 
+@app.post("/api/nn/train/cancel/{job_id}")
+async def cancel_train_job(job_id: str):
+    ok = tq.cancel_job(job_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Задача уже выполняется или завершена — отменить нельзя")
+    return {"status": "cancelled"}
+ 
+ 
+@app.get("/api/nn/train/queue")
+async def get_train_queue(config: str = Query(...)):
+    jobs = tq.list_jobs(config=config, statuses=["queued", "running"])
+    return {"jobs": jobs, "running_job_id": tq.current_running_job_id()}
+
+
+@app.get("/api/training-params")
+async def get_training_params():
+    json_path = os.path.join(BASE_DIR, "training_params.json")
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="training_params.json not found")
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
+
+    
+
+
+
 
 
 
