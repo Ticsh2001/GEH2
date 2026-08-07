@@ -11,6 +11,7 @@ from datetime import datetime, time
 from io import BytesIO
 from code_signal import register_tables
 import re
+from water_steam import h_ps, h_pt, ps, s_pt, t_ps, ts
 
 from code_signal import compute_code_signal, sanitize_numeric_column, evaluate_code_expression, CodeEvaluationError
 from visualizer_state import (
@@ -573,6 +574,13 @@ def compute_streaming_signal(
             return float(_interp_1d(y, x, np.array([yq], dtype=np.float64))[0])
 
         return np.nan
+    
+    ENTHALPY_PS = lambda p, s: h_ps(float(p), float(s)) if not _is_nan(p) and not _is_nan(s) else np.nan
+    ENTHALPY_PT = lambda p, t: h_pt(float(p), float(t)) if not _is_nan(p) and not _is_nan(t) else np.nan
+    PRESSURE_SATURATION = lambda t: ps(float(t)) if not _is_nan(t) else np.nan
+    TEMPERATURE_SATURATION = lambda p: ts(float(p)) if not _is_nan(p) else np.nan
+    ENTROPY_PT = lambda p, t: s_pt(float(p), float(t)) if not _is_nan(p) and not _is_nan(t) else np.nan
+    TEMPERATURE_PS = lambda p, s: t_ps(float(p), float(s)) if not _is_nan(p) and not _is_nan(s) else np.nan
 
     # =========================================================================
     # Datetime-массив для HISTORYGRADIENT (нужны временные метки)
@@ -602,6 +610,12 @@ def compute_streaming_signal(
             "MED": MED,
             "ROUND": ROUND,
             "GETPOINT": GETPOINT,
+            "ENTHALPY_PS": ENTHALPY_PS,
+            "ENTHALPY_PT": ENTHALPY_PT,
+            "PRESSURE_SATURATION": PRESSURE_SATURATION,
+            "TEMPERATURE_SATURATION": TEMPERATURE_SATURATION,
+            "ENTROPY_PT": ENTROPY_PT,
+            "TEMPERATURE_PS": TEMPERATURE_PS,
             # PREV(self)
             "__prev_self__": result[i - 1] if i > 0 else np.nan,
         }

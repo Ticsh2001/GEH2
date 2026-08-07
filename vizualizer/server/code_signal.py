@@ -5,6 +5,41 @@ from typing import List, Tuple, Dict
 
 import numpy as np
 import pandas as pd
+from water_steam import h_ps, h_pt, ps, s_pt, t_ps, ts
+
+def ENTHALPY_PS(p, s):
+    p_series = _ensure_series(p)
+    s_series = _ensure_series(s)
+    res = [h_ps(float(pi), float(si)) for pi, si in zip(p_series.values, s_series.values)]
+    return pd.Series(res, index=index)
+
+def ENTHALPY_PT(p, t):
+     p_series = _ensure_series(p)
+     t_series = _ensure_series(t)
+     res = [h_pt(float(pi), float(ti)) for pi, ti in zip(p_series.values, t_series.values)]
+     return pd.Series(res, index=index)
+
+def PRESSURE_SATURATION(t):
+    t_series = _ensure_series(t)
+    res = [ps(float(ti)) for ti in t_series.values]
+    return pd.Series(res, index=index)
+
+def TEMPERATURE_SATURATION(p):
+    p_series = _ensure_series(p)
+    res = [ts(float(pi)) for pi in p_series.values]
+    return pd.Series(res, index=index)
+
+def ENTROPY_PT(p, t):
+    p_series = _ensure_series(p)
+    t_series = _ensure_series(t)
+    res = [s_pt(float(pi), float(ti)) for pi, ti in zip(p_series.values, t_series.values)]
+    return pd.Series(res, index=index)
+
+def TEMPERATURE_PS(p, s):
+    p_series = _ensure_series(p)
+    s_series = _ensure_series(s)
+    res = [t_ps(float(pi), float(si)) for pi, si in zip(p_series.values, s_series.values)]
+    return pd.Series(res, index=index)
 
 
 def _knn_interpolate(features: np.ndarray, targets: np.ndarray, query_points: np.ndarray, k: int = 5) -> np.ndarray:
@@ -534,6 +569,12 @@ def evaluate_code_expression(code_str: str, df_all: pd.DataFrame) -> Tuple[pd.Se
         "HISTORYGRADIENT": HISTORYGRADIENT,
         "GETPOINT": GETPOINT,
         "INTERPOLATE": INTERPOLATE,
+        "ENTHALPY_PS": ENTHALPY_PS,
+        "ENTHALPY_PT": ENTHALPY_PT,
+        "PRESSURE_SATURATION": PRESSURE_SATURATION,
+        "TEMPERATURE_SATURATION": TEMPERATURE_SATURATION,
+        "ENTROPY_PT": ENTROPY_PT,
+        "TEMPERATURE_PS": TEMPERATURE_PS,
     }
     env["X"] = "X"
     env["Y"] = "Y"
