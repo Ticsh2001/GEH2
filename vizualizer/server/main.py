@@ -580,7 +580,7 @@ def startup():
     settings = load_settings()
     STATE["settings"] = settings
 
-    # Определяем список конфигураций по подпапкам в projects
+        # Определяем список конфигураций по подпапкам в projects
     project_base = _abs_folder("projectDataFolder")
     configs = []
     if project_base and os.path.isdir(project_base):
@@ -590,16 +590,33 @@ def startup():
         ])
     STATE["configurations"] = configs
 
-    # Создаём подпапки для каждой конфигурации во всех нужных папках
+    # Проверяем, изменились ли шаблоны (общие для всех конфигураций)
+    templates_changed = False
+    if os.path.exists(TEMPLATES_PATH):
+        from update_projects import _file_hash, HASH_PATH
+        new_hash = _file_hash(TEMPLATES_PATH)
+        old_hash = None
+        if os.path.exists(HASH_PATH):
+            with open(HASH_PATH, "r", encoding="utf-8") as f:
+                old_hash = f.read().strip()
+        if new_hash != old_hash:
+            templates_changed = True
+
+    # Создаём подпапки и при необходимости обновляем проекты
     for config in configs:
         ensure_config_dirs(config)
-        # При необходимости можно прогнать обновление проектов по шаблонам для каждой конфигурации
-        proj_dir = config_path("projectDataFolder", config)
-        if proj_dir:
-            update_projects_if_templates_changed(
-                project_dir=proj_dir,
-                templates_path=TEMPLATES_PATH
-            )
+        if templates_changed:
+            proj_dir = config_path("projectDataFolder", config)
+            if proj_dir:
+                update_projects_if_templates_changed(
+                    project_dir=proj_dir,
+                    templates_path=TEMPLATES_PATH
+                )
+
+    # Сохраняем новый хэш только один раз после обработки всех конфигураций
+    if templates_changed:
+        with open(HASH_PATH, "w", encoding="utf-8") as f:
+            f.write(new_hash)
 
     # Глобальные ресурсы
     STATE["templates"] = load_templates()

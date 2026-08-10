@@ -90,7 +90,7 @@ def update_projects_if_templates_changed(project_dir: str, templates_path: str):
             print(f"[ERROR] failed {fname}: {e}")
             raise
 
-    with open(HASH_PATH, "w", encoding="utf-8") as f:
-        f.write(new_hash)
+    #with open(HASH_PATH, "w", encoding="utf-8") as f:
+    #    f.write(new_hash)
 
     print("[OK] All projects regenerated.")
