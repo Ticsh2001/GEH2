@@ -47,15 +47,7 @@ def _unique_preserve_order(items):
 
 def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
     """
-    Python-версия твоей JS-функции prepareCodeForSystem.
-
-    Логика:
-    1) AND -> &&, OR -> ||, NOT -> !
-    2) § -> _
-    3) Одиночное = -> ==
-    4) Добавляет P перед input-signal, начинающимися с цифры
-    5) Для спецфункций оборачивает первый аргумент в кавычки и убирает у него P перед цифрой
-    6) Заменяет унарный минус на -1 * перед P<digit> и перед (...)
+    Python-версия JS-функции prepareCodeForSystem с поддержкой термодинамических функций.
     """
     if not code_str or not isinstance(code_str, str):
         return code_str
@@ -67,10 +59,10 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
     out = re.sub(r"\bOR\b", "||", out)
     out = re.sub(r"\bNOT\b", "!", out)
 
-    # 2) § -> _
+    # 2) § → _
     out = out.replace("§", "_")
 
-    # 3) Одиночное '=' -> '==', но не трогаем >= <= != ==
+    # 3) Одиночное '=' → '==', не трогаем >= <= != ==
     out = re.sub(r"(?<![<>=!])=(?![=])", "==", out)
 
     # 4) Добавляем 'P' перед input-signal, начинающимися с цифры
@@ -88,24 +80,18 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
         unique_signals = _unique_preserve_order(used_signals)
         starts_with_digit = [name for name in unique_signals if re.match(r"^\d", name)]
 
-        # identClass в духе JS:
-        # буквы/цифры/underscore/кириллица/точка
-        # В Python \w уже покрывает unicode-буквы/цифры/_
-        # поэтому используем [\w.]
         for sig in starts_with_digit:
             pattern = re.compile(rf"(^|[^\w.])({re.escape(sig)})(?![\w.])")
             out = pattern.sub(r"\1P\2", out)
-
     except Exception as e:
-        print(f"[WARN] prepare_code_for_system: не удалось обработать список сигналов: {e}")
+        print(f"[WARN] prepare_code_for_system: {e}")
 
-    # 5) Для спецфункций — убираем P перед числовым именем и оборачиваем первый аргумент в кавычки
+    # 5) Спецфункции (PREV, HISTORY*, GETPOINT, INTERPOLATE) — кавычки и снятие P
     fn_list = [
         "PREV", "GETPOINT", "INTERPOLATE",
         "HISTORYAVG", "HISTORYCOUNT", "HISTORYSUM",
         "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT"
     ]
-
     for fn in fn_list:
         pattern = re.compile(rf"\b{fn}\s*\(\s*([^,\)]+)")
 
@@ -113,22 +99,96 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
             p1 = match.group(1)
             if re.match(r"^['\"]", p1.strip()):
                 return match.group(0)
-
             arg = p1.strip()
             arg = re.sub(r"^P(?=\d)", "", arg)
             return f"{fn}('{arg}'"
 
         out = pattern.sub(repl, out)
 
-    # 6) Унарный минус -> -1 * 
-    # перед сигналами вида P<digit>
+    # 6) Термодинамические функции: замена имени + оборачивание сигналов в {}
+    thermo_map = {
+        "ENTHALPY_PS": "enthalpy_ps",
+        "ENTHALPY_PT": "enthalpy_pt",
+        "PRESSURE_SATURATION": "pressure_saturation",
+        "TEMPERATURE_SATURATION": "temperature_saturation",
+        "ENTROPY_PT": "entropy_pt",
+        "TEMPERATURE_PS": "temperature_ps"
+    }
+
+    def _split_args_top_level(s):
+        """Разбивает строку аргументов по запятым верхнего уровня (с учётом скобок)."""
+        parts = []
+        depth = 0
+        current = ""
+        for ch in s:
+            if ch == '(':
+                depth += 1
+                current += ch
+            elif ch == ')':
+                depth -= 1
+                current += ch
+            elif ch == ',' and depth == 0:
+                parts.append(current.strip())
+                current = ""
+            else:
+                current += ch
+        if current.strip():
+            parts.append(current.strip())
+        return parts
+
+    def _process_thermo_args(args_str):
+        """Оборачивает все идентификаторы (KKS-коды) в фигурные скобки, числа не трогает."""
+        def replace_ident(match):
+            token = match.group(0)
+            # Если это число (целое или с плавающей точкой), оставляем как есть
+            if re.match(r"^\d+(\.\d+)?$", token):
+                return token
+            # Снимаем префикс P, если он есть и следующая цифра
+            code = token
+            if code.startswith('P') and len(code) > 1 and re.match(r"\d", code[1]):
+                code = code[1:]
+            return f"{{{code}}}"
+
+        processed_args = []
+        for arg in _split_args_top_level(args_str):
+            # Замена идентификаторов в аргументе
+            arg = re.sub(
+                r"(?<![a-zA-Z0-9_§.])P?(?:\d+\.?\d*|[A-Za-z_§][A-Za-z0-9_§]*)(?![a-zA-Z0-9_§.])",
+                replace_ident,
+                arg
+            )
+            processed_args.append(arg)
+        return ', '.join(processed_args)
+
+    for upper, lower in thermo_map.items():
+        idx = 0
+        while True:
+            pos = out.find(upper + '(', idx)
+            if pos == -1:
+                break
+            # Ищем закрывающую скобку с учётом вложенности
+            paren_open = pos + len(upper) + 1
+            depth = 1
+            i = paren_open
+            while i < len(out) and depth > 0:
+                if out[i] == '(':
+                    depth += 1
+                elif out[i] == ')':
+                    depth -= 1
+                i += 1
+            paren_close = i - 1
+            args_str = out[paren_open:paren_close]
+            processed_args = _process_thermo_args(args_str)
+            new_call = f"{lower}({processed_args})"
+            out = out[:pos] + new_call + out[paren_close + 1:]
+            idx = pos + len(new_call)
+
+    # 7) Унарный минус → -1 *
     out = re.sub(
         r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)",
         r"\1-1 * ",
         out
     )
-
-    # перед выражениями в скобках
     out = re.sub(
         r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()",
         r"\1-1 * ",

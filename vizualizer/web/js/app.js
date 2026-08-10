@@ -563,7 +563,7 @@ prepareCodeForSystem(codeStr) {
             .filter(e => e && e.type === 'input-signal')
             .map(e => (e.props?.name || e.id || '').trim())
             .filter(name => !!name)
-            .map(name => name.replace(/§/g, '_')); // Приводим имена к формату после замены § на _
+            .map(name => name.replace(/§/g, '_'));
 
         const unique = Array.from(new Set(usedSignals));
         const startsWithDigit = unique.filter(name => /^\d/.test(name));
@@ -596,13 +596,62 @@ prepareCodeForSystem(codeStr) {
         });
     }
 
-    // 6) 🆕 Заменяем унарные минусы на умножение на -1
-    // Унарный минус может стоять после: начала строки, (, операторов, запятой, пробелов
-    
-    // Заменяем унарный минус перед сигналами, начинающимися с P и цифры
+    // ======== ОБРАБОТКА ТЕРМОДИНАМИЧЕСКИХ ФУНКЦИЙ ========
+    const thermoFuncs = {
+        'ENTHALPY_PS': 'enthalpy_ps',
+        'ENTHALPY_PT': 'enthalpy_pt',
+        'PRESSURE_SATURATION': 'pressure_saturation',
+        'TEMPERATURE_SATURATION': 'temperature_saturation',
+        'ENTROPY_PT': 'entropy_pt',
+        'TEMPERATURE_PS': 'temperature_ps'
+    };
+
+    for (const [upperName, lowerName] of Object.entries(thermoFuncs)) {
+        let idx = 0;
+        while ((idx = out.indexOf(upperName + '(', idx)) !== -1) {
+            const funcStart = idx;
+            const parenOpen = idx + upperName.length + 1;
+            let depth = 1;
+            let i = parenOpen;
+            while (i < out.length && depth > 0) {
+                if (out[i] === '(') depth++;
+                else if (out[i] === ')') depth--;
+                i++;
+            }
+            const parenClose = i - 1;
+            const argsStr = out.substring(parenOpen, parenClose);
+            const args = splitArgsTopLevel(argsStr);   // глобальная функция из utils.js
+
+            const processedArgs = args.map(arg => {
+                let processed = arg.trim();
+                // Оборачиваем идентификаторы (KKS-коды) в фигурные скобки, но не числа
+                processed = processed.replace(
+                    /(?<![A-Za-z0-9_§.])P?(?:\d+\.?\d*|[A-Za-z_§][A-Za-z0-9_§]*)(?![A-Za-z0-9_§.])/g,
+                    (match) => {
+                        // Если это число (целое или с плавающей точкой), не оборачиваем
+                        if (/^\d+(\.\d+)?$/.test(match)) {
+                            return match;
+                        }
+                        // Снимаем префикс P, если он есть и следующий символ – цифра (сигнал, начинающийся с цифры)
+                        let code = match;
+                        if (code.startsWith('P') && code.length > 1 && /^\d/.test(code[1])) {
+                            code = code.substring(1);
+                        }
+                        // Оборачиваем в фигурные скобки
+                        return `{${code}}`;
+                    }
+                );
+                return processed;
+            });
+
+            const newFuncCall = `${lowerName}(${processedArgs.join(', ')})`;
+            out = out.substring(0, funcStart) + newFuncCall + out.substring(parenClose + 1);
+            idx = funcStart + newFuncCall.length;
+        }
+    }
+
+    // 6) Заменяем унарные минусы на умножение на -1
     out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)/g, '$1-1 * ');
-    
-    // Заменяем унарный минус перед выражениями в скобках
     out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()/g, '$1-1 * ');
 
     return out;
