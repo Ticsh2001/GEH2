@@ -18,7 +18,7 @@ def _h_ps_scalar(p: float, s: float) -> float:
     try:
         T = _Backward2_T_Ps(p, s)
         steam = IAPWS97(P=p, T=T)
-        if steam.phase in ('vapor', 'supercritical'):
+        if steam.phase.lower() in ('vapor', 'supercritical', 'gas','two-phase'):
             return steam.h
         return -1.0
     except Exception:
@@ -32,7 +32,7 @@ def _h_pt_scalar(p: float, t: float) -> float:
         return -1.0
     try:
         steam = IAPWS97(P=p, T=t + 273.15)
-        if steam.phase in ('vapor', 'supercritical'):
+        if steam.phase.lower() in ('vapor', 'supercritical', 'gas'):
             return steam.h
         return -1.0
     except Exception:
@@ -57,7 +57,7 @@ def _s_pt_scalar(p: float, t: float) -> float:
         return -1.0
     try:
         steam = IAPWS97(P=p, T=t + 273.15)
-        if steam.phase in ('vapor', 'supercritical'):
+        if steam.phase.lower() in ('vapor', 'supercritical', 'gas'):
             return steam.s
         return -1.0
     except Exception:
@@ -72,7 +72,7 @@ def _t_ps_scalar(p: float, s: float) -> float:
     try:
         T_K = _Backward2_T_Ps(p, s)
         steam = IAPWS97(P=p, T=T_K)
-        if steam.phase in ('vapor', 'supercritical'):
+        if steam.phase.lower() in ('vapor', 'supercritical', 'gas'):
             return T_K - 273.15
         return -1.0
     except Exception:
