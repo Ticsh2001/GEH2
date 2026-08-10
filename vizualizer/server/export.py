@@ -115,6 +115,16 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
         "TEMPERATURE_PS": "temperature_ps"
     }
 
+    # Список всех известных функций (кроме термодинамических), которые не нужно оборачивать
+    KNOWN_FUNCTIONS = {
+        "WHEN", "ABS", "EXP", "POW", "LOG", "LOG10",
+        "MIN", "MAX", "AVG", "MED", "ROUND",
+        "PREV", "GETPOINT", "INTERPOLATE",
+        "HISTORYAVG", "HISTORYCOUNT", "HISTORYSUM",
+        "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT",
+        "X", "Y"  # X и Y используются в GETPOINT
+    }
+
     def _split_args_top_level(s):
         """Разбивает строку аргументов по запятым верхнего уровня (с учётом скобок)."""
         parts = []
@@ -137,11 +147,14 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
         return parts
 
     def _process_thermo_args(args_str):
-        """Оборачивает все идентификаторы (KKS-коды) в фигурные скобки, числа не трогает."""
+        """Оборачивает все идентификаторы (KKS-коды) в фигурные скобки, числа и функции не трогает."""
         def replace_ident(match):
             token = match.group(0)
             # Если это число (целое или с плавающей точкой), оставляем как есть
             if re.match(r"^\d+(\.\d+)?$", token):
+                return token
+            # Если это известная функция (из списка), оставляем без изменений
+            if token.upper() in KNOWN_FUNCTIONS or token.upper() in thermo_map:
                 return token
             # Снимаем префикс P, если он есть и следующая цифра
             code = token

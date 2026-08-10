@@ -574,7 +574,6 @@ prepareCodeForSystem(codeStr) {
             const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
             out = out.replace(re, `$1P$2`);
         }
-
     } catch (e) {
         console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
     }
@@ -588,7 +587,6 @@ prepareCodeForSystem(codeStr) {
 
     for (const fn of fnList) {
         const re = new RegExp(`\\b${fn}\\s*\\(\\s*([^,\\)]+)`, 'g');
-
         out = out.replace(re, (match, p1) => {
             if (/^['"]/.test(p1.trim())) return match;
             let arg = p1.trim().replace(/^P(?=\d)/, '');
@@ -606,6 +604,21 @@ prepareCodeForSystem(codeStr) {
         'TEMPERATURE_PS': 'temperature_ps'
     };
 
+    // Список ВСЕХ известных функций, которые не должны оборачиваться в фигурные скобки
+    const knownFunctions = new Set([
+        'WHEN', 'ABS', 'EXP', 'POW', 'LOG', 'LOG10',
+        'MIN', 'MAX', 'AVG', 'MED', 'ROUND',
+        'PREV', 'GETPOINT', 'INTERPOLATE',
+        'HISTORYAVG', 'HISTORYCOUNT', 'HISTORYSUM',
+        'HISTORYMAX', 'HISTORYMIN', 'HISTORYDIFF', 'HISTORYGRADIENT',
+        'X', 'Y'
+    ]);
+    // Добавляем также имена термодинамических функций (уже в нижнем регистре и верхнем)
+    for (const k of Object.keys(thermoFuncs)) {
+        knownFunctions.add(k);
+        knownFunctions.add(thermoFuncs[k]);
+    }
+
     for (const [upperName, lowerName] of Object.entries(thermoFuncs)) {
         let idx = 0;
         while ((idx = out.indexOf(upperName + '(', idx)) !== -1) {
@@ -620,19 +633,23 @@ prepareCodeForSystem(codeStr) {
             }
             const parenClose = i - 1;
             const argsStr = out.substring(parenOpen, parenClose);
-            const args = splitArgsTopLevel(argsStr);   // глобальная функция из utils.js
+            const args = splitArgsTopLevel(argsStr);
 
             const processedArgs = args.map(arg => {
                 let processed = arg.trim();
-                // Оборачиваем идентификаторы (KKS-коды) в фигурные скобки, но не числа
+                // Оборачиваем идентификаторы (KKS-коды) в фигурные скобки, но не числа и не функции
                 processed = processed.replace(
                     /(?<![A-Za-z0-9_§.])P?(?:\d+\.?\d*|[A-Za-z_§][A-Za-z0-9_§]*)(?![A-Za-z0-9_§.])/g,
                     (match) => {
-                        // Если это число (целое или с плавающей точкой), не оборачиваем
+                        // Если это число – не трогаем
                         if (/^\d+(\.\d+)?$/.test(match)) {
                             return match;
                         }
-                        // Снимаем префикс P, если он есть и следующий символ – цифра (сигнал, начинающийся с цифры)
+                        // Если это известная функция – не трогаем
+                        if (knownFunctions.has(match.toUpperCase()) || knownFunctions.has(match.toLowerCase())) {
+                            return match;
+                        }
+                        // Снимаем префикс P, если он есть и следующий символ – цифра
                         let code = match;
                         if (code.startsWith('P') && code.length > 1 && /^\d/.test(code[1])) {
                             code = code.substring(1);
