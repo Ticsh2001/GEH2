@@ -1333,6 +1333,48 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("📥 Данные сигналов еще не загружены.")
+    st.divider()
+    st.subheader("💾 Сохранить синтетический сигнал в архив")
+    if st.session_state.get("code_signal_name") and st.session_state.signals_data is not None:
+        signal_to_save = st.session_state.code_signal_name
+        df_all = get_all_signals_df()
+        if df_all is not None and signal_to_save in df_all.columns:
+            df_sig = df_all[[signal_to_save]].copy().dropna()
+            if not df_sig.empty:
+                st.write(f"Сигнал: **{signal_to_save}**")
+                st.write(f"Записей: {len(df_sig)}")
+
+                kks = st.text_input("Введите KKS для сохранения в архив", value=signal_to_save,
+                                    help="Имя файла и название столбца будет равно этому KKS")
+                if kks.strip():
+                    if st.button("📥 Сохранить в архив"):
+                        csv_df = pd.DataFrame({
+                            "DATE": df_sig.index.strftime("%d.%m.%Y"),
+                            "TIME": df_sig.index.strftime("%H:%M:%S"),
+                            kks.strip(): df_sig[signal_to_save].values
+                        })
+                        csv_buffer = BytesIO()
+                        csv_df.to_csv(csv_buffer, sep=";", index=False, encoding="utf-8")
+                        csv_buffer.seek(0)
+
+                        filename = f"{kks.strip()}.csv"
+                        upload_url = make_url(f"{api_url}/api/upload-signal-csv")
+                        try:
+                            resp = requests.post(
+                                upload_url,
+                                files={"file": (filename, csv_buffer, "text/csv")}
+                            )
+                            resp.raise_for_status()
+                            st.success(f"Сигнал сохранён в архив как {filename}")
+                            st.info("Теперь его можно использовать как базовый сигнал в Dataset Builder.")
+                        except Exception as e:
+                            st.error(f"Ошибка сохранения: {e}")
+            else:
+                st.info("Нет данных для сохранения")
+        else:
+            st.info("Сигнал не найден в общем DataFrame")
+    else:
+        st.info("Нет синтетического сигнала для сохранения. Вычислите CODE.")
 
 
 def find_nearest_index_in_range(valid_index, target_time, x_start, x_end):

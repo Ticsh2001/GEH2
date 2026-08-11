@@ -660,6 +660,27 @@ def api_tables(q: str = "", limit: int = 50, config: str = Query(...)):
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 
+@app.post("/api/upload-signal-csv")
+async def upload_signal_csv(file: UploadFile = File(...), config: str = Query(...)):
+    """
+    Сохраняет загруженный CSV‑файл в папку архива сигналов для заданной конфигурации.
+    Файл должен содержать колонки DATE, TIME и хотя бы один столбец со значением сигнала.
+    """
+    archive_dir = config_path("signalArchiveFolder", config)
+    if not archive_dir:
+        raise HTTPException(status_code=500, detail="signalArchiveFolder not configured")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    # Проверяем имя файла
+    if not file.filename or '..' in file.filename or '/' in file.filename or '\\' in file.filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    destination = os.path.join(archive_dir, file.filename)
+    with open(destination, "wb") as buffer:
+        buffer.write(await file.read())
+
+    return {"status": "ok", "filename": file.filename}
+
 @app.get("/api/signals")
 def api_signals(q: str = "", limit: int = 50, config: str = Query(...)):
     signals = get_signals_for_config(config)
