@@ -217,11 +217,15 @@ def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str) -> Tup
     else:
         delta = pd.Timedelta(**{shift_unit: shift_value})
 
+   
+    # Сдвинутые данные: берём те же строки, но добавляем delta к datetime
+    shifted = df.copy()
+    start = df['datetime'][0]
+    print(start)
+    shifted = shifted[shifted['datetime'] >= start + delta]
     # Исходные данные (обрезаем последние shift_value строк, потому что для них нет сдвига)
     original = df.iloc[:-shift_value] if shift_value < len(df) else df.iloc[:0]
-    # Сдвинутые данные: берём те же строки, но добавляем delta к datetime
-    shifted = original.copy()
-    shifted['datetime'] = shifted['datetime'] + delta
+    #shifted['datetime'] = shifted['datetime'] + delta
 
     return original, shifted
 

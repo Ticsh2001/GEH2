@@ -13,14 +13,24 @@ def _h_ps_scalar(p: float, s: float) -> float:
     '''
     Вспомогательная функция
     '''
-    if p < 0 or s < 0:
+    if p <= 0 or s < 0:
         return -1.0
     try:
-        T = _Backward2_T_Ps(p, s)
-        steam = IAPWS97(P=p, T=T)
-        if steam.phase.lower() in ('vapour', 'supercritical', 'gas','two-phase'):
+        sat_liq = IAPWS97(P=p, x=0)
+        sat_vap = IAPWS97(P=p, x=1)
+        s_f, s_g = sat_liq.s, sat_vap.s
+        if s < s_f:
+            return -1.0
+        elif s <= s_g:
+            x = (s - s_f) / (s_g - s_f)
+            steam = IAPWS97(P=p, x=x)
             return steam.h
-        return -1.0
+        else:
+            T = _Backward2_T_Ps(p, s)
+            steam = IAPWS97(P=p, T=T)
+            if steam.phase.lower() in ('vapour', 'supercritical', 'gas'):
+                return steam.h
+            return -1.0
     except Exception:
         return -1.0
     
@@ -32,6 +42,7 @@ def _h_pt_scalar(p: float, t: float) -> float:
         return -1.0
     try:
         steam = IAPWS97(P=p, T=t + 273.15)
+        print(steam.phase)
         if steam.phase.lower() in ('vapour', 'supercritical', 'gas'):
             return steam.h
         return -1.0

@@ -150,9 +150,21 @@ def run(job_id: str):
         batch_size = int(fit_kwargs.pop('batch_size', 32))
 
         validation_data = (X_val, Y_val) if X_val is not None and Y_val is not None else None
+
+        callbacks = [MetricsLoggerCallback(job_id, epochs)]
+        # Путь для временного файла с весами лучшей модели (внутри папки job'а)
+        best_weights_path = os.path.join(tq._job_dir(job_id), 'best_weights.weights.h5')
         if validation_data is not None:
             # validation_split несовместим с явным validation_data — X_val/Y_val в приоритете
             fit_kwargs.pop('validation_split', None)
+            callbacks.append(tf.keras.callbacks.ModelCheckpoint(
+                best_weights_path,
+                monitor='val_loss',
+                save_best_only=True,
+                save_weights_only=True,   # <-- сохраняем только веса
+                mode='min',
+                verbose=0))
+        callbacks.extend(extra_callbacks)
 
         model.fit(
             X_train, Y_train,
@@ -160,12 +172,18 @@ def run(job_id: str):
             epochs=epochs,
             batch_size=batch_size,
             verbose=2,
-            callbacks=[MetricsLoggerCallback(job_id, epochs)] + extra_callbacks,
+            callbacks=callbacks,
             **fit_kwargs,
         )
 
         model_path = nn_template.get_model_path(config, job['project_code'], job['element_id'])
-        model.save(model_path)
+        if validation_data is not None and os.path.exists(best_weights_path):
+            # Загружаем лучшие веса и сохраняем полную модель
+            model.load_weights(best_weights_path)
+            model.save(model_path)
+            os.remove(best_weights_path)         # убираем временный файл
+        else:
+            model.save(model_path)
 
         meta = {
             'design_code': design_code,
@@ -194,7 +212,6 @@ def run(job_id: str):
         job['finished_at'] = _now_iso()
         tq._write_job(job_id, job)
         sys.exit(1)
-
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
