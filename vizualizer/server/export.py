@@ -47,65 +47,12 @@ def _unique_preserve_order(items):
 
 def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
     """
-    Python-версия JS-функции prepareCodeForSystem с поддержкой термодинамических функций.
+    Python-версия JS-функции prepareCodeForSystem с поддержкой двух режимов.
     """
     if not code_str or not isinstance(code_str, str):
         return code_str
 
-    out = code_str
-
-    # 1) Логические операторы
-    out = re.sub(r"\bAND\b", "&&", out)
-    out = re.sub(r"\bOR\b", "||", out)
-    out = re.sub(r"\bNOT\b", "!", out)
-
-    # 2) § → _
-    out = out.replace("§", "_")
-
-    # 3) Одиночное '=' → '==', не трогаем >= <= != ==
-    out = re.sub(r"(?<![<>=!])=(?![=])", "==", out)
-
-    # 4) Добавляем 'P' перед input-signal, начинающимися с цифры
-    try:
-        used_signals = []
-        for name in (input_signal_names or []):
-            if name is None:
-                continue
-            name = str(name).strip()
-            if not name:
-                continue
-            name = name.replace("§", "_")
-            used_signals.append(name)
-
-        unique_signals = _unique_preserve_order(used_signals)
-        starts_with_digit = [name for name in unique_signals if re.match(r"^\d", name)]
-
-        for sig in starts_with_digit:
-            pattern = re.compile(rf"(^|[^\w.])({re.escape(sig)})(?![\w.])")
-            out = pattern.sub(r"\1P\2", out)
-    except Exception as e:
-        print(f"[WARN] prepare_code_for_system: {e}")
-
-    # 5) Спецфункции (PREV, HISTORY*, GETPOINT, INTERPOLATE) — кавычки и снятие P
-    fn_list = [
-        "PREV", "GETPOINT", "INTERPOLATE",
-        "HISTORYAVG", "HISTORYCOUNT", "HISTORYSUM",
-        "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT"
-    ]
-    for fn in fn_list:
-        pattern = re.compile(rf"\b{fn}\s*\(\s*([^,\)]+)")
-
-        def repl(match):
-            p1 = match.group(1)
-            if re.match(r"^['\"]", p1.strip()):
-                return match.group(0)
-            arg = p1.strip()
-            arg = re.sub(r"^P(?=\d)", "", arg)
-            return f"{fn}('{arg}'"
-
-        out = pattern.sub(repl, out)
-
-    # 6) Термодинамические функции: замена имени + оборачивание сигналов в {}
+    # Проверяем наличие термодинамических функций
     thermo_map = {
         "ENTHALPY_PS": "enthalpy_ps",
         "ENTHALPY_PT": "enthalpy_pt",
@@ -114,99 +61,128 @@ def prepare_code_for_system(code_str: str, input_signal_names=None) -> str:
         "ENTROPY_PT": "entropy_pt",
         "TEMPERATURE_PS": "temperature_ps"
     }
+    has_thermo = any(fn + '(' in code_str for fn in thermo_map)
 
-    # Список всех известных функций (кроме термодинамических), которые не нужно оборачивать
-    KNOWN_FUNCTIONS = {
-        "WHEN", "ABS", "EXP", "POW", "LOG", "LOG10",
-        "MIN", "MAX", "AVG", "MED", "ROUND",
-        "PREV", "GETPOINT", "INTERPOLATE",
-        "HISTORYAVG", "HISTORYCOUNT", "HISTORYSUM",
-        "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT",
-        "X", "Y"  # X и Y используются в GETPOINT
+    if not has_thermo:
+        # ===== СТАРЫЙ РЕЖИМ (без изменений) =====
+        out = code_str
+
+        out = re.sub(r"\bAND\b", "&&", out)
+        out = re.sub(r"\bOR\b", "||", out)
+        out = re.sub(r"\bNOT\b", "!", out)
+
+        out = out.replace("§", "_")
+
+        out = re.sub(r"(?<![<>=!])=(?![=])", "==", out)
+
+        try:
+            used_signals = []
+            for name in (input_signal_names or []):
+                if name is None:
+                    continue
+                name = str(name).strip()
+                if not name:
+                    continue
+                name = name.replace("§", "_")
+                used_signals.append(name)
+
+            unique_signals = _unique_preserve_order(used_signals)
+            starts_with_digit = [name for name in unique_signals if re.match(r"^\d", name)]
+
+            for sig in starts_with_digit:
+                pattern = re.compile(rf"(^|[^\w.])({re.escape(sig)})(?![\w.])")
+                out = pattern.sub(r"\1P\2", out)
+        except Exception as e:
+            print(f"[WARN] prepare_code_for_system: {e}")
+
+        fn_list = [
+            "PREV", "GETPOINT", "INTERPOLATE",
+            "HISTORYAVG", "HISTORYCOUNT", "HISTORYSUM",
+            "HISTORYMAX", "HISTORYMIN", "HISTORYDIFF", "HISTORYGRADIENT"
+        ]
+        for fn in fn_list:
+            pattern = re.compile(rf"\b{fn}\s*\(\s*([^,\)]+)")
+            def repl(match):
+                p1 = match.group(1)
+                if re.match(r"^['\"]", p1.strip()):
+                    return match.group(0)
+                arg = p1.strip()
+                arg = re.sub(r"^P(?=\d)", "", arg)
+                return f"{fn}('{arg}'"
+            out = pattern.sub(repl, out)
+
+        out = re.sub(r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)", r"\1-1 * ", out)
+        out = re.sub(r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()", r"\1-1 * ", out)
+
+        return out
+
+    # ===== НОВЫЙ РЕЖИМ =====
+    out = code_str
+
+    # 1. Логические операторы → строчные слова
+    out = re.sub(r"\bAND\b", "and", out)
+    out = re.sub(r"\bOR\b", "or", out)
+    out = re.sub(r"\bNOT\b", "not", out)
+
+    # 2. § → _
+    out = out.replace("§", "_")
+
+    # 3. Одиночное '=' → '=='
+    out = re.sub(r"(?<![<>=!])=(?![=])", "==", out)
+
+    # 4. Переводим имена функций в нижний регистр
+    function_name_map = {
+        "WHEN": "when",
+        "ABS": "abs",
+        "EXP": "exp",
+        "POW": "pow",
+        "LOG": "log",
+        "LOG10": "log10",
+        "MIN": "min",
+        "MAX": "max",
+        "AVG": "avg",
+        "MED": "med",
+        "ROUND": "round",
+        "VARIANCE": "variance",
+        "STDEV": "stdev",
+        "HISTORYAVG": "history_avg",
+        "HISTORYMIN": "history_min",
+        "HISTORYMAX": "history_max",
+        "HISTORYDIFF": "history_diff",
+        "HISTORYDIFFMAX": "history_diff_max",
+        "PREV": "prev",
+        "GETPOINT": "getpoint",
+        "INTERPOLATE": "interpolate",
+        "ENTHALPY_PS": "enthalpy_ps",
+        "ENTHALPY_PT": "enthalpy_pt",
+        "PRESSURE_SATURATION": "pressure_saturation",
+        "TEMPERATURE_SATURATION": "temperature_saturation",
+        "ENTROPY_PT": "entropy_pt",
+        "TEMPERATURE_PS": "temperature_ps"
     }
 
-    def _split_args_top_level(s):
-        """Разбивает строку аргументов по запятым верхнего уровня (с учётом скобок)."""
-        parts = []
-        depth = 0
-        current = ""
-        for ch in s:
-            if ch == '(':
-                depth += 1
-                current += ch
-            elif ch == ')':
-                depth -= 1
-                current += ch
-            elif ch == ',' and depth == 0:
-                parts.append(current.strip())
-                current = ""
-            else:
-                current += ch
-        if current.strip():
-            parts.append(current.strip())
-        return parts
+    for upper, lower in function_name_map.items():
+        # Замена только перед открывающей скобкой
+        out = re.sub(r'\b' + re.escape(upper) + r'\s*\(', lower + '(', out)
 
-    def _process_thermo_args(args_str):
-        """Оборачивает все идентификаторы (KKS-коды) в фигурные скобки, числа и функции не трогает."""
-        def replace_ident(match):
-            token = match.group(0)
-            # Если это число (целое или с плавающей точкой), оставляем как есть
-            if re.match(r"^\d+(\.\d+)?$", token):
-                return token
-            # Если это известная функция (из списка), оставляем без изменений
-            if token.upper() in KNOWN_FUNCTIONS or token.upper() in thermo_map:
-                return token
-            # Снимаем префикс P, если он есть и следующая цифра
-            code = token
-            if code.startswith('P') and len(code) > 1 and re.match(r"\d", code[1]):
-                code = code[1:]
-            return f"{{{code}}}"
+    # 5. Оборачиваем оставшиеся идентификаторы в фигурные скобки
+    known_functions = set(function_name_map.values()) | {"and", "or", "not"}
 
-        processed_args = []
-        for arg in _split_args_top_level(args_str):
-            # Замена идентификаторов в аргументе
-            arg = re.sub(
-                r"(?<![a-zA-Z0-9_§.])P?(?:\d+\.?\d*|[A-Za-z_§][A-Za-z0-9_§]*)(?![a-zA-Z0-9_§.])",
-                replace_ident,
-                arg
-            )
-            processed_args.append(arg)
-        return ', '.join(processed_args)
+    def wrap_identifier(match):
+        token = match.group(0)
+        if re.match(r"^\d+(\.\d+)?(e[+-]?\d+)?$", token, re.IGNORECASE):
+            return token
+        if token.lower() in known_functions:
+            return token
+        return "{" + token + "}"
 
-    for upper, lower in thermo_map.items():
-        idx = 0
-        while True:
-            pos = out.find(upper + '(', idx)
-            if pos == -1:
-                break
-            # Ищем закрывающую скобку с учётом вложенности
-            paren_open = pos + len(upper) + 1
-            depth = 1
-            i = paren_open
-            while i < len(out) and depth > 0:
-                if out[i] == '(':
-                    depth += 1
-                elif out[i] == ')':
-                    depth -= 1
-                i += 1
-            paren_close = i - 1
-            args_str = out[paren_open:paren_close]
-            processed_args = _process_thermo_args(args_str)
-            new_call = f"{lower}({processed_args})"
-            out = out[:pos] + new_call + out[paren_close + 1:]
-            idx = pos + len(new_call)
-
-    # 7) Унарный минус → -1 *
     out = re.sub(
-        r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)",
-        r"\1-1 * ",
+        r"(?<![A-Za-z0-9_§.])[A-Za-z0-9_§]+(?![A-Za-z0-9_§.])",
+        wrap_identifier,
         out
     )
-    out = re.sub(
-        r"(^|[(+*/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()",
-        r"\1-1 * ",
-        out
-    )
+
+    # 6. Унарный минус в новом режиме не обрабатываем
 
     return out
 

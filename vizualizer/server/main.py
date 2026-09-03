@@ -1297,6 +1297,10 @@ async def check_syntax(file: UploadFile = File(...)):
             row_remarks.append("Обнаружен одиночный '&'. Возможно, вы имели в виду '&&' (логическое И).")
         if re.search(r'(?<![|])\|(?![|])', code):
             row_remarks.append("Обнаружен одиночный '|'. Возможно, вы имели в виду '||' (логическое ИЛИ).")
+        # 4c. Проверка одиночного '=' (вместо '==')
+        code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+        if re.search(r'(?<![<>=!])=(?![=])', code_no_strings):
+                row_remarks.append("Обнаружен одиночный '='. Возможно, вы имели в виду '==' (сравнение).")
 
          # 5. Аргументы HISTORY*/PREV – всегда должны быть в кавычках
         history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
@@ -1363,8 +1367,37 @@ async def check_syntax(file: UploadFile = File(...)):
                 if pattern_sig.search(code_without_strings):
                     row_remarks.append(f"Сигнал '{sig}' начинается с цифры – необходимо добавить префикс P")
 
+        # 10. Проверка "голых" сигналов в логических условиях
+        if not is_constant:
+            code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+            for sig in input_signals:
+                sig_u = sig.replace('§', '_')
+                # Возможные варианты написания сигнала (с учётом префикса P для цифровых)
+                candidates = {sig, sig_u}
+                if sig[0].isdigit():
+                    candidates.add('P' + sig)
+                    candidates.add('P' + sig_u)
+
+                for cand in candidates:
+                    # Ищем вхождения вида (сигнал) с возможными пробелами
+                    pattern = re.compile(rf'\(\s*({re.escape(cand)})\s*\)')
+                    for m in pattern.finditer(code_no_strings):
+                        token = m.group(1)
+                        # Проверяем, не является ли это аргументом функции:
+                        # перед скобкой не должно быть имени функции/сигнала
+                        before = code_no_strings[:m.start()]
+                        if re.search(r'[A-Za-z0-9_§]\s*$', before):
+                            continue
+                        row_remarks.append(
+                            f"Сигнал '{token}' используется как логическое условие без сравнения или оператора. "
+                            "Возможно, пропущен оператор (например, = 1)."
+                        )
+                        break  # для каждого сигнала достаточно одного замечания
+
         if row_remarks:
             remarks.append({"row": row_num, "remarks": row_remarks})
+
+        
 
     return remarks
 

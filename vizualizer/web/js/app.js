@@ -544,57 +544,7 @@ openSignalVisualizer() {
 prepareCodeForSystem(codeStr) {
     if (!codeStr || typeof codeStr !== 'string') return codeStr;
 
-    let out = codeStr;
-
-    // 1) Заменяем логические операторы
-    out = out.replace(/\bAND\b/g, '&&')
-             .replace(/\bOR\b/g, '||')
-             .replace(/\bNOT\b/g, '!');
-
-    // 2) § → _
-    out = out.replace(/§/g, '_');
-
-    // 3) Заменяем одиночное '=' на '==', но не трогаем '>=', '<=', '!=', '=='
-    out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
-
-    // 4) Добавляем 'P' перед именами input-signal, начинающимися с цифры
-    try {
-        const usedSignals = Object.values(AppState.elements || {})
-            .filter(e => e && e.type === 'input-signal')
-            .map(e => (e.props?.name || e.id || '').trim())
-            .filter(name => !!name)
-            .map(name => name.replace(/§/g, '_'));
-
-        const unique = Array.from(new Set(usedSignals));
-        const startsWithDigit = unique.filter(name => /^\d/.test(name));
-        const identClass = 'A-Za-z0-9_\\u0400-\\u04FF_\\.'; 
-        const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-        for (const sig of startsWithDigit) {
-            const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
-            out = out.replace(re, `$1P$2`);
-        }
-    } catch (e) {
-        console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
-    }
-
-    // 5) Для спецфункций — не добавляем P и оборачиваем первый аргумент в кавычки
-    const fnList = [
-        'PREV', 'GETPOINT', 'INTERPOLATE',
-        'HISTORYAVG', 'HISTORYCOUNT', 'HISTORYSUM',
-        'HISTORYMAX', 'HISTORYMIN', 'HISTORYDIFF', 'HISTORYGRADIENT'
-    ];
-
-    for (const fn of fnList) {
-        const re = new RegExp(`\\b${fn}\\s*\\(\\s*([^,\\)]+)`, 'g');
-        out = out.replace(re, (match, p1) => {
-            if (/^['"]/.test(p1.trim())) return match;
-            let arg = p1.trim().replace(/^P(?=\d)/, '');
-            return `${fn}('${arg}'`;
-        });
-    }
-
-    // ======== ОБРАБОТКА ТЕРМОДИНАМИЧЕСКИХ ФУНКЦИЙ ========
+    // Проверяем, есть ли термодинамические функции
     const thermoFuncs = {
         'ENTHALPY_PS': 'enthalpy_ps',
         'ENTHALPY_PT': 'enthalpy_pt',
@@ -603,73 +553,140 @@ prepareCodeForSystem(codeStr) {
         'ENTROPY_PT': 'entropy_pt',
         'TEMPERATURE_PS': 'temperature_ps'
     };
+    const hasThermo = Object.keys(thermoFuncs).some(fn => codeStr.includes(fn + '('));
 
-    // Список ВСЕХ известных функций, которые не должны оборачиваться в фигурные скобки
-    const knownFunctions = new Set([
-        'WHEN', 'ABS', 'EXP', 'POW', 'LOG', 'LOG10',
-        'MIN', 'MAX', 'AVG', 'MED', 'ROUND',
-        'PREV', 'GETPOINT', 'INTERPOLATE',
-        'HISTORYAVG', 'HISTORYCOUNT', 'HISTORYSUM',
-        'HISTORYMAX', 'HISTORYMIN', 'HISTORYDIFF', 'HISTORYGRADIENT',
-        'X', 'Y'
-    ]);
-    // Добавляем также имена термодинамических функций (уже в нижнем регистре и верхнем)
-    for (const k of Object.keys(thermoFuncs)) {
-        knownFunctions.add(k);
-        knownFunctions.add(thermoFuncs[k]);
-    }
+    if (!hasThermo) {
+        // ===== СТАРЫЙ РЕЖИМ (как было) =====
+        let out = codeStr;
 
-    for (const [upperName, lowerName] of Object.entries(thermoFuncs)) {
-        let idx = 0;
-        while ((idx = out.indexOf(upperName + '(', idx)) !== -1) {
-            const funcStart = idx;
-            const parenOpen = idx + upperName.length + 1;
-            let depth = 1;
-            let i = parenOpen;
-            while (i < out.length && depth > 0) {
-                if (out[i] === '(') depth++;
-                else if (out[i] === ')') depth--;
-                i++;
+        out = out.replace(/\bAND\b/g, '&&')
+                 .replace(/\bOR\b/g, '||')
+                 .replace(/\bNOT\b/g, '!');
+
+        out = out.replace(/§/g, '_');
+
+        out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
+
+        try {
+            const usedSignals = Object.values(AppState.elements || {})
+                .filter(e => e && e.type === 'input-signal')
+                .map(e => (e.props?.name || e.id || '').trim())
+                .filter(name => !!name)
+                .map(name => name.replace(/§/g, '_'));
+
+            const unique = Array.from(new Set(usedSignals));
+            const startsWithDigit = unique.filter(name => /^\d/.test(name));
+            const identClass = 'A-Za-z0-9_\\u0400-\\u04FF_\\.'; 
+            const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            for (const sig of startsWithDigit) {
+                const re = new RegExp(`(^|[^${identClass}])(${esc(sig)})(?![${identClass}])`, 'g');
+                out = out.replace(re, `$1P$2`);
             }
-            const parenClose = i - 1;
-            const argsStr = out.substring(parenOpen, parenClose);
-            const args = splitArgsTopLevel(argsStr);
-
-            const processedArgs = args.map(arg => {
-                let processed = arg.trim();
-                // Оборачиваем идентификаторы (KKS-коды) в фигурные скобки, но не числа и не функции
-                processed = processed.replace(
-                    /(?<![A-Za-z0-9_§.])P?(?:\d+\.?\d*|[A-Za-z_§][A-Za-z0-9_§]*)(?![A-Za-z0-9_§.])/g,
-                    (match) => {
-                        // Если это число – не трогаем
-                        if (/^\d+(\.\d+)?$/.test(match)) {
-                            return match;
-                        }
-                        // Если это известная функция – не трогаем
-                        if (knownFunctions.has(match.toUpperCase()) || knownFunctions.has(match.toLowerCase())) {
-                            return match;
-                        }
-                        // Снимаем префикс P, если он есть и следующий символ – цифра
-                        let code = match;
-                        if (code.startsWith('P') && code.length > 1 && /^\d/.test(code[1])) {
-                            code = code.substring(1);
-                        }
-                        // Оборачиваем в фигурные скобки
-                        return `{${code}}`;
-                    }
-                );
-                return processed;
-            });
-
-            const newFuncCall = `${lowerName}(${processedArgs.join(', ')})`;
-            out = out.substring(0, funcStart) + newFuncCall + out.substring(parenClose + 1);
-            idx = funcStart + newFuncCall.length;
+        } catch (e) {
+            console.warn('prepareCodeForSystem: не удалось обработать список сигналов', e);
         }
+
+        const fnList = [
+            'PREV', 'GETPOINT', 'INTERPOLATE',
+            'HISTORYAVG', 'HISTORYCOUNT', 'HISTORYSUM',
+            'HISTORYMAX', 'HISTORYMIN', 'HISTORYDIFF', 'HISTORYGRADIENT'
+        ];
+
+        for (const fn of fnList) {
+            const re = new RegExp(`\\b${fn}\\s*\\(\\s*([^,\\)]+)`, 'g');
+            out = out.replace(re, (match, p1) => {
+                if (/^['"]/.test(p1.trim())) return match;
+                let arg = p1.trim().replace(/^P(?=\d)/, '');
+                return `${fn}('${arg}'`;
+            });
+        }
+
+        // Унарный минус
+        out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)/g, '$1-1 * ');
+        out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()/g, '$1-1 * ');
+
+        return out;
     }
 
-    // 6) Заменяем унарные минусы на умножение на -1
-    out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=P\d)/g, '$1-1 * ');
-    out = out.replace(/(^|[(+*\/%,\s!-]|==|!=|<=|>=|<|>|&&|\|\|)-(?=\()/g, '$1-1 * ');
+    // ===== НОВЫЙ РЕЖИМ (если есть термодинамические функции) =====
+    let out = codeStr;
+
+    // 1. Логические операторы → строчные слова
+    out = out.replace(/\bAND\b/g, 'and')
+             .replace(/\bOR\b/g, 'or')
+             .replace(/\bNOT\b/g, 'not');
+
+    // 2. § → _
+    out = out.replace(/§/g, '_');
+
+    // 3. Одиночное '=' → '==', исключая >= <= != ==
+    out = out.replace(/(?<![<>=!])=(?![=])/g, '==');
+
+    // 4. Переводим имена функций в нижний регистр
+    //    Статистические, условные, исторические, термодинамические.
+    const functionNameMap = {
+        'WHEN': 'when',
+        'ABS': 'abs',
+        'EXP': 'exp',
+        'POW': 'pow',
+        'LOG': 'log',
+        'LOG10': 'log10',
+        'MIN': 'min',
+        'MAX': 'max',
+        'AVG': 'avg',
+        'MED': 'med',
+        'ROUND': 'round',
+        'VARIANCE': 'variance',
+        'STDEV': 'stdev',
+        'HISTORYAVG': 'history_avg',
+        'HISTORYMIN': 'history_min',
+        'HISTORYMAX': 'history_max',
+        'HISTORYDIFF': 'history_diff',
+        'HISTORYDIFFMAX': 'history_diff_max',
+        'PREV': 'prev',
+        'GETPOINT': 'getpoint',
+        'INTERPOLATE': 'interpolate',
+        // термодинамические
+        'ENTHALPY_PS': 'enthalpy_ps',
+        'ENTHALPY_PT': 'enthalpy_pt',
+        'PRESSURE_SATURATION': 'pressure_saturation',
+        'TEMPERATURE_SATURATION': 'temperature_saturation',
+        'ENTROPY_PT': 'entropy_pt',
+        'TEMPERATURE_PS': 'temperature_ps'
+    };
+
+    for (const [upper, lower] of Object.entries(functionNameMap)) {
+        // Заменяем только перед открывающей скобкой
+        out = out.replace(new RegExp('\\b' + upper + '\\s*\\(', 'g'), lower + '(');
+    }
+
+    // 5. Оборачиваем оставшиеся идентификаторы (KKS) в фигурные скобки
+    const knownFunctionsSet = new Set([
+        'when', 'abs', 'exp', 'pow', 'log', 'log10',
+        'min', 'max', 'avg', 'med', 'round', 'variance', 'stdev',
+        'history_avg', 'history_min', 'history_max', 'history_diff', 'history_diff_max',
+        'prev', 'getpoint', 'interpolate',
+        'enthalpy_ps', 'enthalpy_pt', 'pressure_saturation',
+        'temperature_saturation', 'entropy_pt', 'temperature_ps',
+        'and', 'or', 'not'
+    ]);
+
+    out = out.replace(
+        /(?<![A-Za-z0-9_§.])[A-Za-z0-9_§]+(?![A-Za-z0-9_§.])/g,
+        (match) => {
+            // Числа (целые, дробные, экспоненциальные) не трогаем
+            if (/^\d+(\.\d+)?(e[+-]?\d+)?$/i.test(match)) return match;
+            // Известные функции и ключевые слова не оборачиваем
+            if (knownFunctionsSet.has(match.toLowerCase())) return match;
+            // Всё остальное считаем KKS и оборачиваем
+            return `{${match}}`;
+        }
+    );
+
+    // 6. Унарный минус в новом режиме не требуется, но если нужно:
+    //    out = out.replace(/(^|[^A-Za-z0-9_])(-)(?=\{)/g, '$1-1 * ');
+    //    Пока оставляем без изменений.
 
     return out;
 },

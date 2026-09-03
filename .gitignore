@@ -44,3 +44,11 @@ vizualizer/server/__pycache__/code_signal.cpython-313.pyc
 vizualizer/server/__pycache__/code_signal.cpython-313.pyc
 vizualizer/server/__pycache__/main.cpython-313.pyc
 vizualizer/server/__pycache__/visualizer_state.cpython-313.pyc
+.vscode/settings.json
+llm_aggregate/Params.xlsx
+llm_aggregate/agg/Params_2.xlsx
+llm_aggregate/signals_folder/tec20_analog_gt_st.csv
+llm_aggregate/signals_folder/tec20_analog_tmo.csv
+llm_aggregate/agg/Params_3.xlsx
+llm_aggregate/agg/Params_1.xlsx
+.vscode/settings.json
