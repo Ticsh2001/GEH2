@@ -107,14 +107,21 @@ def filter_dataset(df: pd.DataFrame, rules: List[dict]) -> pd.DataFrame:
         df = df[mask]
         # Нормализация – только для не‑NaN значений
         if rule.get('normalize'):
-            valid = numeric_col.notna() & np.isfinite(numeric_col)
-            if valid.any():
-                min_val = numeric_col[valid].min()
-                max_val = numeric_col[valid].max()
-                if max_val > min_val:
-                    df.loc[valid, col] = (numeric_col[valid] - min_val) / (max_val - min_val)
+            mn = rule.get('min')
+            mx = rule.get('max')
+            if mn is None or mx is None:
+                # fallback на старое поведение для обратной совместимости
+                valid = numeric_col.notna() & np.isfinite(numeric_col)
+                if valid.any():
+                    mn = float(numeric_col[valid].min())
+                    mx = float(numeric_col[valid].max())
                 else:
-                    df.loc[valid, col] = 0.0
+                    continue
+            valid = numeric_col.notna() & np.isfinite(numeric_col)
+            if mx > mn:
+                df.loc[valid, col] = (numeric_col[valid] - mn) / (mx - mn)
+            else:
+                df.loc[valid, col] = 0.0
     return df
 
 

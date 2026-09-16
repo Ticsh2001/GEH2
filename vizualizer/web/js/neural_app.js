@@ -1367,8 +1367,13 @@ const NeuralApp = {
             const maxInput = row.querySelector('.filter-max');
             const normCheck = row.querySelector('.filter-norm');
             const column = colInput ? colInput.value.trim() : (row.dataset.column || '');
-            const min = minInput && minInput.value !== '' ? parseFloat(minInput.value) : null;
-            const max = maxInput && maxInput.value !== '' ? parseFloat(maxInput.value) : null;
+            const stat = (columnsStats && columnsStats[column]) || null;
+                // Введённое пользователем значение, если поле не пустое.
+            const userMin = minInput && minInput.value !== '' ? parseFloat(minInput.value) : null;
+            const userMax = maxInput && maxInput.value !== '' ? parseFloat(maxInput.value) : null;
+
+            const min = (userMin !== null) ? userMin : (stat ? stat.min : null);
+            const max = (userMax !== null) ? userMax : (stat ? stat.max : null);
             const normalize = normCheck ? normCheck.checked : false;
             if (column) {
                 rules.push({ column, min, max, normalize });

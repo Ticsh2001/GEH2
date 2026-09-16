@@ -52,3 +52,5 @@ llm_aggregate/signals_folder/tec20_analog_tmo.csv
 llm_aggregate/agg/Params_3.xlsx
 llm_aggregate/agg/Params_1.xlsx
 .vscode/settings.json
+model_conpiler/__pycache__/nn_inference_runtime.cpython-312.pyc
+.vscode/settings.json

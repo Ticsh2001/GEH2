@@ -1,0 +1,427 @@
+{
+  "version": "1.0",
+  "project": {
+    "code": "10MAD11FT013_014_MAX_2023",
+    "type": "neural_network",
+    "description": "pattern_simple (200 epoch) --- best!",
+    "dimension": "",
+    "possibleCause": "",
+    "guidelines": "",
+    "templateArgs": {},
+    "author": "",
+    "lastModifiedBy": "",
+    "lastModifiedAt": "",
+    "visualizer_state": null,
+    "status": "draft",
+    "statusComment": "",
+    "statusHistory": []
+  },
+  "elements": {
+    "input_signal_3": {
+      "id": "input_signal_3",
+      "type": "input-signal",
+      "x": 325.7142857142858,
+      "y": 246.1428571428571,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "10MKA01CE903§§XQ01",
+        "signalType": "undefined",
+        "dimension": "МВт",
+        "description": "~Мощность ПТ, МВт",
+        "comment": ""
+      }
+    },
+    "input_signal_4": {
+      "id": "input_signal_4",
+      "type": "input-signal",
+      "x": 327.5714285714286,
+      "y": 333.1428571428571,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "10MAV42CT001A§§XQ01",
+        "signalType": "undefined",
+        "dimension": "°C",
+        "description": "ТЕМП за СМ ТЕМП У-КЛ $ TEMP D/STR LO TEMP CTRL-V, °C",
+        "comment": ""
+      }
+    },
+    "input_signal_5": {
+      "id": "input_signal_5",
+      "type": "input-signal",
+      "x": 327.57142857142856,
+      "y": 419.00000000000006,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "10MAV42CP016§§XQ01",
+        "signalType": "undefined",
+        "dimension": "bar",
+        "description": "КОЛЛ СМАЗ МАСЛ 1 $ LUBE OIL HEADER 1, bar",
+        "comment": ""
+      }
+    },
+    "timeshift_8": {
+      "id": "timeshift_8",
+      "type": "nn-layer",
+      "nnType": "timeshift",
+      "x": 958.6666666666666,
+      "y": 265.85281385281394,
+      "width": 150,
+      "height": 94,
+      "props": {
+        "shift_value": 48,
+        "shift_unit": "hours",
+        "inputCount": 1
+      },
+      "inputs": 1,
+      "outputs": 2,
+      "_processing": {
+        "hash": "2dcb7593626c1220fdb73e53c07e6a34378275c5bd1d567a41df401e3d52906f",
+        "file": "10MAD11FT013_014_MAX_2023_timeshift_8_out0.xlsx",
+        "input_hashes": {
+          "filter_12": "cfe0edfd965ee44bbf19e64c2f078f81327a44a95cd9dba2e0276bdbb1ca668a"
+        },
+        "timestamp": "2026-08-14T10:54:15.957Z"
+      }
+    },
+    "filter_12": {
+      "id": "filter_12",
+      "type": "nn-layer",
+      "nnType": "filter",
+      "x": 793.4285714285714,
+      "y": 201,
+      "width": 150,
+      "height": 70,
+      "props": {
+        "rules": [
+          {
+            "column": "10MAD11FT013_014_MAX",
+            "min": 75,
+            "max": 140,
+            "normalize": false
+          },
+          {
+            "column": "10MKA01CE903§§XQ01",
+            "min": 40,
+            "max": 140,
+            "normalize": false
+          },
+          {
+            "column": "10MAV42CT001A§§XQ01",
+            "min": null,
+            "max": null,
+            "normalize": false
+          },
+          {
+            "column": "10MAV42CP016§§XQ01",
+            "min": 0,
+            "max": 6,
+            "normalize": false
+          }
+        ],
+        "inputCount": 1
+      },
+      "inputs": 1,
+      "outputs": 1,
+      "_processing": {
+        "hash": "cfe0edfd965ee44bbf19e64c2f078f81327a44a95cd9dba2e0276bdbb1ca668a",
+        "file": "10MAD11FT013_014_MAX_2023_filter_12.xlsx",
+        "input_hashes": {
+          "timefilter_19": "9439f89e2be38e5354f29ef3b105f3263d77f409e83846835c25325826ac9fb5"
+        },
+        "timestamp": "2026-08-14T10:54:04.568Z"
+      }
+    },
+    "labeler_13": {
+      "id": "labeler_13",
+      "type": "nn-layer",
+      "nnType": "labeler",
+      "x": 1138,
+      "y": 157,
+      "width": 150,
+      "height": 94,
+      "props": {
+        "x_columns": [
+          "10MKA01CE903§§XQ01",
+          "10MAV42CT001A§§XQ01",
+          "10MAV42CP016§§XQ01",
+          "10MAD11FT013_014_MAX"
+        ],
+        "y_column": null,
+        "window_size": 48,
+        "window_unit": "rows",
+        "inputCount": 1
+      },
+      "inputs": 1,
+      "outputs": 2,
+      "_processing": {
+        "hash": "b227fa49148ed9bc003122946bdbb2313ba792ee4a7d5e105cd96efd03e1c05c",
+        "file": "10MAD11FT013_014_MAX_2023_labeler_13_X.xlsx",
+        "input_hashes": {
+          "timeshift_8": "ad44271e5e4835ce22a8f6df93f605be8bcd5be547a15c5beabd0bc130141585"
+        },
+        "timestamp": "2026-08-17T11:07:49.866Z"
+      }
+    },
+    "labeler_14": {
+      "id": "labeler_14",
+      "type": "nn-layer",
+      "nnType": "labeler",
+      "x": 1139,
+      "y": 393,
+      "width": 150,
+      "height": 94,
+      "props": {
+        "x_columns": [],
+        "y_column": "10MAD11FT013_014_MAX",
+        "window_size": 1,
+        "window_unit": "rows",
+        "inputCount": 1
+      },
+      "inputs": 1,
+      "outputs": 2,
+      "_processing": {
+        "hash": "0db5df8fd6a2d2ac3d817ec1f494e5e54e0083d884418ea6574e4a2a62ba4a9f",
+        "file": "10MAD11FT013_014_MAX_2023_labeler_14_y.xlsx",
+        "input_hashes": {
+          "timeshift_8": "ad44271e5e4835ce22a8f6df93f605be8bcd5be547a15c5beabd0bc130141585"
+        },
+        "timestamp": "2026-08-17T11:07:55.644Z"
+      }
+    },
+    "nn-template_15": {
+      "id": "nn-template_15",
+      "type": "nn-layer",
+      "nnType": "nn-template",
+      "x": 1475.7916666666667,
+      "y": 227.0535714285714,
+      "width": 150,
+      "height": 166,
+      "props": {
+        "design_code": "pattern_simple_3",
+        "inputCount": 5
+      },
+      "inputs": 5,
+      "outputs": 0
+    },
+    "nn-settings_16": {
+      "id": "nn-settings_16",
+      "type": "nn-layer",
+      "nnType": "nn-settings",
+      "x": 1281.7983725940383,
+      "y": 57.24978044830995,
+      "width": 150,
+      "height": 70,
+      "props": {
+        "optimizer": "adam",
+        "learning_rate": 0.001,
+        "loss": "mae",
+        "metrics": [
+          "mae"
+        ],
+        "epochs": 200,
+        "batch_size": 64,
+        "shuffle": true,
+        "validation_split": 0.2,
+        "early_stopping": false,
+        "early_stopping_patience": 20,
+        "reduce_lr_on_plateau": false,
+        "reduce_lr_factor": 0.5,
+        "reduce_lr_patience": 5,
+        "inputCount": 0
+      },
+      "inputs": 0,
+      "outputs": 1
+    },
+    "dataset_17": {
+      "id": "dataset_17",
+      "type": "nn-layer",
+      "nnType": "dataset",
+      "x": 498.1000934439048,
+      "y": 247.00156570440004,
+      "width": 150,
+      "height": 142,
+      "props": {
+        "reference_signal_index": 0,
+        "interpolation": "linear",
+        "inputCount": 4
+      },
+      "inputs": 4,
+      "outputs": 1,
+      "_processing": {
+        "hash": "6964eee62fea43f101720bd12421f5fb4d8bb43e6d2d8fd36125a08b317f8591",
+        "file": "10MAD11FT013_014_MAX_2023_dataset_17.xlsx",
+        "input_hashes": {
+          "input_signal_5": "signal_fixed",
+          "input_signal_18": "signal_fixed",
+          "input_signal_3": "signal_fixed",
+          "input_signal_4": "signal_fixed"
+        },
+        "timestamp": "2026-08-12T14:17:23.457Z"
+      }
+    },
+    "input_signal_18": {
+      "id": "input_signal_18",
+      "type": "input-signal",
+      "x": 327.52866487247627,
+      "y": 161.11844911853225,
+      "width": 150,
+      "height": 50,
+      "props": {
+        "name": "10MAD11FT013_014_MAX",
+        "signalType": "undefined",
+        "dimension": "С",
+        "description": "Максимальные значения температуры баббита на термопарах первого опорного подшипника внизу",
+        "comment": ""
+      }
+    },
+    "timefilter_19": {
+      "id": "timefilter_19",
+      "type": "nn-layer",
+      "nnType": "timefilter",
+      "x": 648.5230791902553,
+      "y": 428.42489944311,
+      "width": 150,
+      "height": 70,
+      "props": {
+        "intervals": [
+          {
+            "from": "2023-01-01T00:00",
+            "to": "2023-07-12T00:00"
+          },
+          {
+            "from": "2023-09-15T04:00",
+            "to": "2024-01-01T00:00"
+          }
+        ],
+        "inputCount": 1
+      },
+      "inputs": 1,
+      "outputs": 1,
+      "_processing": {
+        "hash": "9439f89e2be38e5354f29ef3b105f3263d77f409e83846835c25325826ac9fb5",
+        "file": "10MAD11FT013_014_MAX_2023_timefilter_19.xlsx",
+        "input_hashes": {
+          "dataset_17": "6964eee62fea43f101720bd12421f5fb4d8bb43e6d2d8fd36125a08b317f8591"
+        },
+        "timestamp": "2026-08-14T10:52:31.608Z"
+      }
+    }
+  },
+  "connections": [
+    {
+      "fromElement": "filter_12",
+      "fromPort": "out-0",
+      "toElement": "timeshift_8",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "timeshift_8",
+      "fromPort": "out-0",
+      "toElement": "labeler_13",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "timeshift_8",
+      "fromPort": "out-1",
+      "toElement": "labeler_14",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "labeler_13",
+      "fromPort": "out-0",
+      "toElement": "nn-template_15",
+      "toPort": "in-1",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "labeler_13",
+      "fromPort": "out-0",
+      "toElement": "nn-template_15",
+      "toPort": "in-3",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "labeler_14",
+      "fromPort": "out-1",
+      "toElement": "nn-template_15",
+      "toPort": "in-4",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "labeler_14",
+      "fromPort": "out-1",
+      "toElement": "nn-template_15",
+      "toPort": "in-2",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "nn-settings_16",
+      "fromPort": "out-0",
+      "toElement": "nn-template_15",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "input_signal_5",
+      "fromPort": "out-0",
+      "toElement": "dataset_17",
+      "toPort": "in-4",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_18",
+      "fromPort": "out-0",
+      "toElement": "dataset_17",
+      "toPort": "in-0",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_3",
+      "fromPort": "out-0",
+      "toElement": "dataset_17",
+      "toPort": "in-1",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_4",
+      "fromPort": "out-0",
+      "toElement": "dataset_17",
+      "toPort": "in-2",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "input_signal_5",
+      "fromPort": "out-0",
+      "toElement": "dataset_17",
+      "toPort": "in-3",
+      "signalType": "numeric"
+    },
+    {
+      "fromElement": "dataset_17",
+      "fromPort": "out-0",
+      "toElement": "timefilter_19",
+      "toPort": "in-0",
+      "signalType": "any"
+    },
+    {
+      "fromElement": "timefilter_19",
+      "fromPort": "out-0",
+      "toElement": "filter_12",
+      "toPort": "in-0",
+      "signalType": "any"
+    }
+  ],
+  "counter": 19,
+  "viewport": {
+    "zoom": 1,
+    "panX": -261.61398828116444,
+    "panY": 99.02964774538879
+  },
+  "code": "input-signal_input-signal_input-signal_out_nn-settings_input-signal_dataset_timefilter_filter_timeshift_out_labeler_out_labeler_out_nn-template"
+}

@@ -1,0 +1,94 @@
+{
+  "config_version": "2.0",
+  "runtime_version": "2.0.0",
+  "generated_at": "2026-09-16T09:19:25+00:00",
+  "project": {
+    "code": "10MAD11FT013_014_MAX_2023",
+    "description": "pattern_simple (200 epoch) --- best!"
+  },
+  "input_contract": {
+    "resample_freq": "30min",
+    "datetime_format": "%d.%m.%Y %H:%M:%S",
+    "min_history_rows": 48
+  },
+  "inputs": [
+    {
+      "name": "10MAD11FT013_014_MAX",
+      "dimension": "С",
+      "description": "Максимальные значения температуры баббита на термопарах первого опорного подшипника внизу",
+      "comment": ""
+    },
+    {
+      "name": "10MKA01CE903§§XQ01",
+      "dimension": "МВт",
+      "description": "~Мощность ПТ, МВт",
+      "comment": ""
+    },
+    {
+      "name": "10MAV42CT001A§§XQ01",
+      "dimension": "°C",
+      "description": "ТЕМП за СМ ТЕМП У-КЛ $ TEMP D/STR LO TEMP CTRL-V, °C",
+      "comment": ""
+    },
+    {
+      "name": "10MAV42CP016§§XQ01",
+      "dimension": "bar",
+      "description": "КОЛЛ СМАЗ МАСЛ 1 $ LUBE OIL HEADER 1, bar",
+      "comment": ""
+    }
+  ],
+  "chain": [
+    {
+      "type": "dataset",
+      "ref_signal_index": 0,
+      "interpolation": "linear",
+      "inputs": [
+        "10MAD11FT013_014_MAX",
+        "10MKA01CE903§§XQ01",
+        "10MAV42CT001A§§XQ01",
+        "10MAV42CP016§§XQ01"
+      ]
+    },
+    {
+      "type": "filter",
+      "rules": [
+        {
+          "column": "10MAD11FT013_014_MAX",
+          "min": 75,
+          "max": 140,
+          "normalize": false
+        },
+        {
+          "column": "10MKA01CE903§§XQ01",
+          "min": 40,
+          "max": 140,
+          "normalize": false
+        },
+        {
+          "column": "10MAV42CT001A§§XQ01",
+          "min": null,
+          "max": null,
+          "normalize": false
+        },
+        {
+          "column": "10MAV42CP016§§XQ01",
+          "min": 0,
+          "max": 6,
+          "normalize": false
+        }
+      ]
+    },
+    {
+      "type": "labeler",
+      "x_columns": [
+        "10MKA01CE903§§XQ01",
+        "10MAV42CT001A§§XQ01",
+        "10MAV42CP016§§XQ01",
+        "10MAD11FT013_014_MAX"
+      ],
+      "y_column": null,
+      "window_size": 48,
+      "window_unit": "rows"
+    }
+  ]
+}

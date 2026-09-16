@@ -1,0 +1,28 @@
+{
+  "design_code": "pattern_simple_3",
+  "design_hash": "7c0740acdda9d34a43998720901798a6d3a8f00808145bd369b7edabbe0e6ce2",
+  "settings": {
+    "optimizer": "adam",
+    "learning_rate": 0.001,
+    "loss": "mae",
+    "metrics": [
+      "mae"
+    ],
+    "epochs": 200,
+    "batch_size": 64,
+    "shuffle": true,
+    "validation_split": 0.2,
+    "early_stopping": false,
+    "early_stopping_patience": 20,
+    "reduce_lr_on_plateau": false,
+    "reduce_lr_factor": 0.5,
+    "reduce_lr_patience": 5
+  },
+  "input_hashes": {
+    "labeler_13": "b227fa49148ed9bc003122946bdbb2313ba792ee4a7d5e105cd96efd03e1c05c",
+    "labeler_14": "0db5df8fd6a2d2ac3d817ec1f494e5e54e0083d884418ea6574e4a2a62ba4a9f"
+  },
+  "train_hash": "c3f0f97deb2b78f6bbabaeec0524a281b6b5249b3026c5698814bf1536fd51d9",
+  "trained_at": "2026-08-17T16:15:49",
+  "job_id": "d14c62232b49"
+}
