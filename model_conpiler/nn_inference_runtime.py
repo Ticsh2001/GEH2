@@ -1,80 +1,19 @@
 """
-nn_inference_runtime — единая среда инференса для проектов neural_network.
-
-Модуль НИКОГДА не перегенерируется под конкретный проект. Проект
-описывается JSON-конфигом (generate_inference_config.py); среда читает
-конфиг, применяет цепочку входной предобработки (chain_input), выполняет
-инференс, применяет выходные преобразования (chain_output) и сдвиг
-времени (prediction_shift), возвращает результат в виде словаря.
-
-Публичный API
--------------
-    from nn_inference_runtime import InferenceSession
-
-    session = InferenceSession.from_config_file(
-        config_path="inference_<code>.config.json",
-        model_path="model.keras",
-        metadata_path="meta.json",     # опционально, информационно
-    )
-    print(session.metadata())
-    print(session.chain_summary())
-
-    result = session.predict({"SIGNAL_A": arr_a, ...})
-    # result = {<KKS>: ndarray (M, 2) [datetime, value], ...}
-
-CLI
----
-    python nn_inference_runtime.py \
-        --config cfg.json \
-        --model model.keras \
-        --metadata meta.json \
-        --signal SIGNAL_A=sig_a.npy \
-        [--info]
-
-Формат конфига (версия 1.0)
----------------------------
-    {
-      "config_version": "1.0",
-      "runtime_version": "1.0",
-      "generated_at": "...",
-      "project": {"code": [...], "description": [...]},
-      "input_contract": {
-        "resample_freq": "30min",
-        "datetime_format": "%d.%m.%Y %H:%M:%S",
-        "min_history_rows": 48,
-        "min_history_time": "24h"
-      },
-      "prediction_shift": {<KKS>: {"value": N, "unit": U} | null},
-      "inputs": [{"name", "dimension", "description", "comment"}, ...],
-      "chain_input": [
-        {"type": "dataset", ...},
-        {"type": "normalize", "rules": [...]},   // опционально
-        {"type": "labeler", ...}
-      ],
-      "chain_output": {
-        <KKS>: [{"type": "denormalize", "min": ..., "max": ...}]
-      }
-    }
+nn_inference_runtime — единая среда инференса моделей.
 """
 __version__ = "1.0"
 
-import argparse
 import json
-import logging
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from datetime import datetime, timezone
-logger = logging.getLogger("nn_inference_runtime")
 
 
 # =============================================================================
-# Чистые трансформации
-# (портированы из dataprocessing.py; кэширование и файловый ввод-вывод
-#  удалены, семантика сохранена)
+# Методы обработки сигналов
 # =============================================================================
 
 def build_dataset(signals_data, ref_signal, interpolation='linear'):
@@ -119,13 +58,12 @@ def _collect_range_violations(df, ts, range_checks):
     Возвращает list длиной len(df), где элемент i — список dict'ов:
         {"column": str, "value": float, "min": float|None,
          "max": float|None, "timestamp": str}
-    Строки с NaN / non-finite не считаются нарушением.
     """
     violations = [[] for _ in range(len(df))]
     if not range_checks:
         return violations
 
-    fmt = None  # форматируем время лениво, только если есть нарушение
+    fmt = None
 
     for rule in range_checks:
         col = rule.get("column")
@@ -161,9 +99,6 @@ def _collect_range_violations(df, ts, range_checks):
 
 def filter_dataset(df, rules):
     """Убрать строки вне [min, max]; опционально min-max нормализация.
-
-    Оставлено для обратной совместимости со старыми конфигами. В новых
-    конфигах вместо filter используется отдельный шаг normalize.
     """
     df = df.copy()
     for rule in rules:
@@ -201,9 +136,7 @@ def filter_dataset(df, rules):
 def normalize_dataset(df, rules):
     """Нормализовать столбцы по заранее сохранённым [min, max].
 
-    В отличие от filter_dataset НЕ усекает строки — только приводит
-    значения к [0, 1]. Используется на инференсе, где дроп строк не нужен.
-
+    Приводит значения к [0, 1]. Используется на инференсе, где дроп строк не нужен.
     Правила имеют вид {'column': <имя>, 'min': <float>, 'max': <float>}.
     NaN-строки не трогаются.
     """
@@ -257,9 +190,6 @@ def apply_time_filter(df, intervals):
 
 def apply_time_shift(df, shift_value, shift_unit):
     """Вернуть (df_original, df_shifted).
-
-    Поведение воспроизводит dataprocessing.apply_time_shift.
-    На X-пути используется только out-0.
     """
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
@@ -282,10 +212,7 @@ def apply_time_shift(df, shift_value, shift_unit):
 
 
 def apply_labeler(df, x_columns, y_column, window_size=1, window_unit='rows'):
-    """Собрать X (признаки с окном) и/или y из df.
-
-    При window_size > 1 каждая строка X содержит последние `window_size`
-    значений каждого x-столбца. Имена столбцов: '{col}_t-{k}'.
+    """Собрать X (признаки с окном).
     """
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
@@ -315,11 +242,6 @@ def apply_labeler(df, x_columns, y_column, window_size=1, window_unit='rows'):
 
 def resample_to_fixed_grid(df, freq):
     """Линейно интерполировать сигнал на регулярную сетку с шагом `freq`.
-
-    - Дубликаты меток времени схлопываются (побеждает последнее значение).
-    - Строки с NaT отбрасываются.
-    - Выход покрывает [min(datetime), max(datetime)] с шагом `freq`.
-    - Интерполяция линейная по времени; на краях — ffill/bfill.
     """
     df = df.dropna(subset=['datetime']).sort_values('datetime')
     df = df.drop_duplicates(subset='datetime', keep='last')
@@ -340,12 +262,11 @@ def resample_to_fixed_grid(df, freq):
 
 
 # =============================================================================
-# Прогон цепочки
+# Методы прохода цепочки преобразований
 # =============================================================================
 
 def _raw_to_signal_frames(raw_signals, ordered_names, datetime_format):
     """{имя: ndarray (N, 2)} -> {имя: DataFrame[datetime, value]}.
-
     Столбец 0 парсится по формату `datetime_format`; строки, которые не
     удалось распарсить, отбрасываются. Столбец 1 приводится к числу.
     """
@@ -372,14 +293,7 @@ def _raw_to_signal_frames(raw_signals, ordered_names, datetime_format):
 def _run_chain_input(chain_input, raw_signals, *, min_history_rows,
                      resample_freq, datetime_format, range_checks=None):
     """Применить цепочку X-преобразований.
-
-    Возвращает (X, ts_window_start, violations, window_size):
-      X              : ndarray (M, K) — признаки для модели
-      ts_window_start: ndarray datetime64[ns] (M,) — время первой строки
-                       окна каждой X-строки
-      violations     : list длиной len(df) ДО labeler'а; для каждой строки —
-                       список нарушений границ (см. _collect_range_violations)
-      window_size    : размер окна labeler'а (1, если labeler отсутствует)
+   
     """
     if not chain_input:
         raise RuntimeError("Пустая цепочка — нечего выполнять")
@@ -408,7 +322,6 @@ def _run_chain_input(chain_input, raw_signals, *, min_history_rows,
     df = build_dataset(signal_frames, ref_name, first.get('interpolation', 'linear'))
     ts = pd.to_datetime(df['datetime']).reset_index(drop=True)
 
-    # Диагностика диапазонов — на «сырых» значениях, ДО normalize.
     violations = _collect_range_violations(df, ts, range_checks or [])
 
     window_size = 1
@@ -466,7 +379,6 @@ class InferenceSession:
     """Единая сессия инференса, управляемая конфигом проекта."""
 
     def __init__(self, config, model_path=None, metadata_path=None):
-        # --- проверка версии ---
         rt_req = config.get('runtime_version')
         if rt_req and rt_req != __version__:
             raise RuntimeError(
@@ -506,7 +418,6 @@ class InferenceSession:
             cfg = json.load(f)
         return cls(cfg, model_path=model_path, metadata_path=metadata_path)
 
-    # --- 1. Метаданные ---------------------------------------------------
 
     def metadata(self):
         """Вернуть метаданные модели и входных сигналов в виде словаря."""
@@ -514,7 +425,6 @@ class InferenceSession:
             'project_code': list(self._project.get('code') or []),
             'project_description': list(self._project.get('description') or []),
             'config_version': self._config.get('config_version'),
-            'runtime_version': self._config.get('runtime_version'),
             'input_contract': dict(self._contract),
             'prediction_shift': dict(self._prediction_shift),
             'chain_output': dict(self._chain_output),
@@ -531,7 +441,6 @@ class InferenceSession:
                 for s in self._inputs
             ],
         }
-
         if self._metadata_path:
             try:
                 with open(self._metadata_path, 'r', encoding='utf-8') as f:
@@ -543,8 +452,6 @@ class InferenceSession:
                 pass
 
         return md
-
-    # --- 2. Описание цепочек --------------------------------------------
 
     def describe_chain(self):
         """Структурное описание chain_input."""
@@ -569,15 +476,14 @@ class InferenceSession:
                          "без отбрасывания строк.")
                 params = {'n_rules': len(rules), 'rules': rules}
             elif t == 'filter':
-                label = ("[совместимость] Усечение строк и опционально "
-                         "нормализация.")
+                label = ("Фильтрация строк")
                 params = {'n_rules': len(step.get('rules', [])),
                           'rules': step.get('rules', [])}
             elif t == 'timefilter':
-                label = "[совместимость] Фильтр по временным интервалам."
+                label = "Фильтр по временным интервалам."
                 params = {'intervals': step.get('intervals', [])}
             elif t == 'timeshift':
-                label = "[совместимость] Временное смещение."
+                label = "Временное смещение."
                 params = {'shift_value': step.get('shift_value'),
                           'shift_unit': step.get('shift_unit')}
             elif t == 'labeler':
@@ -616,7 +522,6 @@ class InferenceSession:
             out[code] = entries
         return out
 
-       # --- сохранение лога -------------------------------------------------
     
     def _build_log_summary(self):
         """Сводка по last_log: сколько точек и нарушений."""
@@ -662,12 +567,6 @@ class InferenceSession:
                 }
             }
         """
-        if not self.last_log:
-            logger.warning(
-                "last_log пуст — сохранять нечего (сначала вызовите predict). "
-                "Файл %s не создан.", path)
-            return None
-
         summary = self._build_log_summary()
         payload = {
             "project_code": list(self._project.get("code") or []),
@@ -688,54 +587,23 @@ class InferenceSession:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
-        logger.info("Лог сохранён: %s (%d точек, %d с нарушениями)",
-                    path, summary["total_points"], summary["warning"])
         return path
     
-
-    def chain_summary(self):
-        """Читаемое описание обеих цепочек и сдвига предсказания."""
-        lines = [
-            "Проект: %s" % ", ".join(self._project.get('code') or []),
-        ]
-        lines.append("Цепочка входной предобработки (chain_input):")
-        for entry in self.describe_chain():
-            lines.append("  [%d] %s: %s" % (
-                entry['step'], entry['type'], entry['label']))
-            for k, v in entry['params'].items():
-                lines.append("      %s = %r" % (k, v))
-
-        lines.append("")
-        lines.append("Выходные преобразования (chain_output) и сдвиг:")
-        desc_out = self.describe_chain_output()
-        for code in (self._project.get('code') or []):
-            lines.append("  %s:" % code)
-            shift = self._prediction_shift.get(code)
-            lines.append("      prediction_shift = %r" % (shift,))
-            for entry in desc_out.get(code, []):
-                lines.append("      - %s: %s" % (entry['type'], entry['label']))
-        return "\n".join(lines)
-
-    # --- 3. Инференс -----------------------------------------------------
 
     def _load_model(self):
         if self._model is None:
             if not self._model_path:
                 raise RuntimeError(
-                    "В эту сессию инференса не передан путь к модели "
-                    "(model_path).")
+                    "Отсуствует путь к модели ")
             self._model = tf.keras.models.load_model(self._model_path)
         return self._model
 
     def expected_input_shape(self):
-        """Ожидаемая форма входа модели (на образец)."""
+        """Ожидаемая форма входа модели."""
         return _expected_feature_shape(self._load_model())
 
     def validate_signals(self, signals):
         """Проверить, что набор `signals` пригоден для цепочки.
-
-        Бросает информативное исключение, если чего-то не хватает,
-        что-то лишнее или не той формы.
         """
         required = list(self._chain_input[0]['inputs'])
         provided = set(signals.keys())
@@ -743,51 +611,17 @@ class InferenceSession:
         extra = sorted(provided - set(required))
         if missing or extra:
             raise ValueError(
-                "Несовпадение набора сигналов: отсутствуют=%r, лишние=%r, "
-                "требуются=%r" % (missing, extra, required))
+                "Несовпадение набора сигналов: отсутствуют=%r, лишние=%r, требуются=%r" % (missing, extra, required))
         for name in required:
             arr = np.asarray(signals[name])
             if arr.ndim != 2 or arr.shape[1] != 2:
-                raise ValueError(
-                    "Сигнал %r должен иметь форму (N, 2); получено %r"
-                    % (name, arr.shape))
+                raise ValueError("Сигнал %r должен иметь форму (N, 2); получено %r"%(name, arr.shape))
             if arr.shape[0] < self._contract['min_history_rows']:
-                raise ValueError(
-                    "Сигнал %r содержит %d строк; требуется минимум %d."
-                    % (name, arr.shape[0], self._contract['min_history_rows']))
+                raise ValueError("Сигнал %r содержит %d строк; требуется минимум %d." % (name, arr.shape[0], self._contract['min_history_rows']))
         return True
 
-    def predict(self, signals, *, log_verbosity="all", log_path=None):
-        """Выполнить полный конвейер.
-
-        Возвращает dict {output_KKS: ndarray (M, 2)}, где столбец 0 —
-        метка времени предсказания (строка в DATETIME_FORMAT), столбец 1 —
-        значение.
-
-        Параметры
-        ---------
-        log_verbosity : "off" | "warnings" | "all"
-            "off"      — лог не пишется, last_log остаётся пустым.
-            "warnings" — только точки с нарушением границ.
-            "all"      — все точки (OK + WARNING). По умолчанию.
-
-        log_path : str | None
-            Если задан — после формирования last_log он будет сохранён
-            в этот JSON-файл. Родительские директории создаются
-            автоматически.
-
-        Атрибуты после вызова
-        ----------------------
-        self.last_log : dict {KKS: [запись, ...]}
-            Каждая запись:
-                {
-                    "output_index": int,
-                    "output_timestamp": "<строка в DATETIME_FORMAT>",
-                    "status": "OK" | "WARNING",
-                    "violations": [
-                        {"column", "value", "min", "max", "timestamp"}, ...
-                    ],
-                }
+    def predict(self, signals, *, log_path=None):
+        """Выполнить полный конвейер инференса.
         """
         if self._metadata_path:
             try:
@@ -831,17 +665,13 @@ class InferenceSession:
             raise RuntimeError(
                 "В конфиге project.code пуст.")
         if len(output_codes) != preds.shape[1]:
-            raise ValueError(
-                "project.code содержит %d KKS-код(ов), а модель выдаёт %d "
-                "значение(й) на образец."
-                % (len(output_codes), preds.shape[1]))
+            raise ValueError("project.code содержит %d KKS-код(ов), а модель выдаёт %d значений." % (len(output_codes), preds.shape[1]))
 
         fmt = self._contract['datetime_format']
         result = {}
         self.last_log = {}
 
         for k, code in enumerate(output_codes):
-            # --- метки времени ---
             shift = self._prediction_shift.get(code)
             ts_out = pd.to_datetime(ts_window_start)
             if shift and shift.get('value'):
@@ -853,7 +683,6 @@ class InferenceSession:
                     delta = pd.Timedelta(**{unit: val})
                 ts_out = ts_out + delta
 
-            # --- обратные преобразования ---
             values = preds[:, k].astype(float)
             for step in self._chain_output.get(code, []):
                 if step['type'] == 'denormalize':
@@ -861,24 +690,19 @@ class InferenceSession:
                     mx = float(step['max'])
                     values = values * (mx - mn) + mn
                 else:
-                    raise ValueError(
-                        "Неизвестный тип шага chain_output: %r"
-                        % step.get('type'))
+                    raise ValueError("Неизвестный тип шага chain_output: %r" % step.get('type'))
 
-            # --- формирование результата ---
             ts_str = ts_out.strftime(fmt).to_numpy()
             arr = np.empty((len(ts_str), 2), dtype=object)
             arr[:, 0] = ts_str
             arr[:, 1] = values
             result[code] = arr
 
-            # --- лог по каждой выходной точке ---
             log_entries = self._build_log_for_output(
                 k, ts_str, violations, window_size)
             self.last_log[code] = log_entries
 
-            if log_verbosity != "off":
-                self._emit_log(code, log_entries, log_verbosity)
+
 
         if log_path:
             self.save_log(log_path)
@@ -908,113 +732,3 @@ class InferenceSession:
                 "violations": window_violations,
             })
         return entries
-
-    def _emit_log(self, code, entries, verbosity):
-        """Вывести лог через logging."""
-        for entry in entries:
-            if entry["status"] == "OK":
-                if verbosity == "all":
-                    logger.info("[%s][%s] OK",
-                                code, entry["output_timestamp"])
-                continue
-            # WARNING
-            msg = self._format_warning(entry)
-            logger.warning("[%s][%s] %s",
-                           code, entry["output_timestamp"], msg)
-
-    @staticmethod
-    def _format_warning(entry):
-        vs = entry["violations"]
-        shown = vs[:5]
-        parts = []
-        for v in shown:
-            if v["min"] is not None and v["value"] < v["min"]:
-                parts.append("%s=%.4g < %g at %s"
-                             % (v["column"], v["value"], v["min"],
-                                v["timestamp"]))
-            elif v["max"] is not None and v["value"] > v["max"]:
-                parts.append("%s=%.4g > %g at %s"
-                             % (v["column"], v["value"], v["max"],
-                                v["timestamp"]))
-        tail = ""
-        if len(vs) > len(shown):
-            tail = "; ... и ещё %d" % (len(vs) - len(shown))
-        return "WARNING: %d out-of-range значение(й): %s%s" \
-               % (len(vs), "; ".join(parts), tail)
-
-    # --- диагностика -----------------------------------------------------
-
-    def __repr__(self):
-        return "<InferenceSession project=%r inputs=%d chain_input=%d>" % (
-            self._project.get('code') or [],
-            len(self._inputs),
-            len(self._chain_input),
-        )
-
-
-# =============================================================================
-# CLI
-# =============================================================================
-
-def _parse_signal_arg(text):
-    """Разобрать 'имя=путь.npy' в (имя, путь)."""
-    if '=' not in text:
-        raise argparse.ArgumentTypeError(
-            "Сигнал должен быть в формате имя=путь.npy; получено %r" % text)
-    name, path = text.split('=', 1)
-    return name.strip(), path.strip()
-
-
-def _cli():
-    ap = argparse.ArgumentParser(
-        description="Единая среда инференса для проектов neural_network.")
-    ap.add_argument("--config", required=True,
-                    help="Путь к конфигу проекта (JSON).")
-    ap.add_argument("--model", default=None,
-                    help="Путь к сохранённой модели .keras.")
-    ap.add_argument("--metadata", default=None,
-                    help="Путь к JSON с метаданными обучения (информационно).")
-    ap.add_argument("--signal", action="append", default=[],
-                    type=_parse_signal_arg, metavar="ИМЯ=ПУТЬ.npy",
-                    help="Входной сигнал в формате имя=путь.npy. "
-                         "Повторяйте для каждого сигнала.")
-    ap.add_argument("--info", action="store_true",
-                    help="Показать метаданные и описание цепочек, затем выйти.")
-    ap.add_argument("--version", action="version",
-                    version="nn_inference_runtime " + __version__)
-    args = ap.parse_args()
-
-    session = InferenceSession.from_config_file(
-        config_path=args.config,
-        model_path=args.model,
-        metadata_path=args.metadata,
-    )
-
-    if args.info:
-        import pprint
-        print("=== Метаданные ===")
-        pprint.pprint(session.metadata())
-        print()
-        print("=== Цепочки ===")
-        print(session.chain_summary())
-        return
-
-    if not args.model:
-        print("--model обязателен для выполнения предсказания",
-              file=sys.stderr)
-        sys.exit(2)
-
-    signals = {}
-    for name, path in args.signal:
-        signals[name] = np.load(path)
-
-    session.validate_signals(signals)
-    result = session.predict(signals)
-
-    for code, arr in result.items():
-        print("=== %s ===" % code)
-        print(arr)
-
-
-if __name__ == '__main__':
-    _cli()

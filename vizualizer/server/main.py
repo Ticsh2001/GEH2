@@ -1206,7 +1206,7 @@ async def get_tags_list():
 
 
 @app.post("/api/check-syntax")
-async def check_syntax(file: UploadFile = File(...)):
+async def check_syntax(file: UploadFile = File(...), config: str = Query(...)):
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Поддерживаются только файлы Excel (.xlsx, .xls)")
 
@@ -1221,7 +1221,6 @@ async def check_syntax(file: UploadFile = File(...)):
         if not rows:
             raise HTTPException(status_code=400, detail="Пустой лист")
 
-        # Первая строка — заголовки
         headers = [str(cell) if cell is not None else "" for cell in rows[0]]
         data = []
         for row in rows[1:]:
@@ -1231,14 +1230,55 @@ async def check_syntax(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Ошибка чтения Excel: {e}")
 
     code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
-
-    code_col = next((c for c in df.columns if c.lower().strip() in ['код', 'code']), None)
     signals_col = next((c for c in df.columns if c.lower().strip() in ['используемые сигналы', 'used signals']), None)
+    kks_col = next((c for c in df.columns if c.lower().strip() in ['kks код', 'kks code', 'kks']), None)
 
     if not code_col:
         raise HTTPException(status_code=400, detail="В файле не найден столбец 'Код'")
     if not signals_col:
         raise HTTPException(status_code=400, detail="В файле не найден столбец 'Используемые сигналы'")
+    if not kks_col:
+        raise HTTPException(status_code=400, detail="В файле не найден столбец 'KKS код'")
+
+    # --- Утилиты нормализации ---
+    def normalize_kks(s: str) -> str:
+        return (
+            s.replace('§', '_')
+             .replace('\u00a0', ' ')
+             .replace('\u200b', '')
+             .replace('\ufeff', '')
+             .strip()
+        )
+
+    def kks_variants(s: str) -> set:
+        """Возвращает все разумные варианты написания сигнала для сравнения."""
+        base = normalize_kks(s)
+        variants = {base}
+        if '§' in s:
+            variants.add(normalize_kks(s.replace('§', '_')))
+        if '__' in base:
+            variants.add(base.replace('__', '§§'))
+        if len(base) > 1 and base[0] == 'P' and base[1].isdigit():
+            variants.add(base[1:])
+        elif base and base[0].isdigit():
+            variants.add('P' + base)
+        return variants
+
+    # --- Собираем KKS-коды из таблицы ---
+    table_codes = set(df[kks_col].dropna().astype(str).str.strip())
+    table_codes_norm = set()
+    for c in table_codes:
+        table_codes_norm |= kks_variants(c)
+
+    # --- Собираем сигналы из базы станции ---
+    station_signals = set(s["Tagname"] for s in get_signals_for_config(config))
+    station_signals_norm = set()
+    for s in station_signals:
+        station_signals_norm |= kks_variants(s)
+
+    # Диагностика (можно убрать позже)
+    print(f"[DEBUG] table_codes_norm (первые 10): {list(table_codes_norm)[:10]}")
+    print(f"[DEBUG] station_signals_norm (первые 10): {list(station_signals_norm)[:10]}")
 
     remarks = []
     for idx, row in df.iterrows():
@@ -1254,10 +1294,23 @@ async def check_syntax(file: UploadFile = File(...)):
             remarks.append({"row": row_num, "remarks": row_remarks})
             continue
 
-        # 0. Проверка имён сигналов на недопустимые символы (арифметические операторы)
+        # 0. Проверка имён сигналов на недопустимые символы
         for sig in input_signals:
             if any(c in sig for c in "+-*/^"):
                 row_remarks.append(f"Сигнал '{sig}' содержит недопустимый символ в имени (возможно, пропущен оператор)")
+
+        # --- НОВОЕ: проверка существования сигналов ---
+        for sig in input_signals:
+            sig_clean = sig.strip()
+            if not sig_clean:
+                continue
+            variants = kks_variants(sig_clean)
+            found = any(v in table_codes_norm or v in station_signals_norm for v in variants)
+            if not found:
+                print(f"[DEBUG] Не найден сигнал: {repr(sig_clean)}, варианты: {variants}")
+                row_remarks.append(
+                    f"Сигнал '{sig_clean}' не найден ни в таблице (KKS коды), ни в базе данных станции"
+                )
 
         # Проверка, является ли код просто числом или прочерком
         is_constant = False
@@ -1273,17 +1326,17 @@ async def check_syntax(file: UploadFile = File(...)):
         if code.count('"') % 2 != 0:
             row_remarks.append("Нечётное количество двойных кавычек")
 
-        # 2. Недопустимые символы (кириллица запрещена)
+        # 2. Недопустимые символы
         allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.,;:!?+-*/%<>=&|^()[]{}§'\"\n\r\t ")
         invalid_chars = set(code) - allowed_chars
         if invalid_chars:
             row_remarks.append(f"Недопустимые символы: {', '.join(repr(c) for c in invalid_chars)}")
 
-                # 2b. Проверка на экспоненциальную запись числа (недопустимо)
+        # 2b. Экспоненциальная запись
         if re.search(r'\b\d+\.?\d*[eE][+-]?\d+\b', code):
             row_remarks.append("Обнаружено число в экспоненциальной записи (например, 1.5E-3). Такая запись недопустима – используйте десятичную дробь.")
 
-        # 3. Унарный минус перед идентификатором (не перед числом и не перед скобкой)
+        # 3. Унарный минус
         if not is_constant and re.search(r'(?<![a-zA-Z0-9_§])\s*-\s*(?=[A-Za-z_§])', code):
             row_remarks.append("Обнаружен унарный минус перед сигналом. При необходимости замените на '-1*'")
 
@@ -1292,17 +1345,18 @@ async def check_syntax(file: UploadFile = File(...)):
             if re.search(rf'\b{op}\b', code):
                 row_remarks.append(f"Логический оператор {op} – рекомендуется заменить на {'&&' if op=='AND' else '||' if op=='OR' else '!'}")
 
-               # 4b. Одиночные & и | (не являются частью && или ||)
+        # 4b. Одиночные & и |
         if re.search(r'(?<![&])&(?![&])', code):
             row_remarks.append("Обнаружен одиночный '&'. Возможно, вы имели в виду '&&' (логическое И).")
         if re.search(r'(?<![|])\|(?![|])', code):
             row_remarks.append("Обнаружен одиночный '|'. Возможно, вы имели в виду '||' (логическое ИЛИ).")
-        # 4c. Проверка одиночного '=' (вместо '==')
+
+        # 4c. Одиночный '='
         code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
         if re.search(r'(?<![<>=!])=(?![=])', code_no_strings):
-                row_remarks.append("Обнаружен одиночный '='. Возможно, вы имели в виду '==' (сравнение).")
+            row_remarks.append("Обнаружен одиночный '='. Возможно, вы имели в виду '==' (сравнение).")
 
-         # 5. Аргументы HISTORY*/PREV – всегда должны быть в кавычках
+        # 5. Аргументы HISTORY*/PREV
         history_funcs = ['HISTORYAVG','HISTORYCOUNT','HISTORYSUM','HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT','PREV']
         for fn in history_funcs:
             pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
@@ -1311,7 +1365,7 @@ async def check_syntax(file: UploadFile = File(...)):
                 if arg and (m.group(1) is None or m.group(1) == ''):
                     row_remarks.append(f"{fn}: аргумент '{arg}' должен быть в кавычках (обязательно для {fn})")
 
-        # 5b. Аргументы INTERPOLATE/GETPOINT – всегда должны быть в кавычках
+        # 5b. Аргументы INTERPOLATE/GETPOINT
         for fn in ['INTERPOLATE', 'GETPOINT']:
             pattern = re.compile(rf'\b{fn}\s*\(\s*([\'"]?)(?P<arg>[^\'",]+)\1\s*[,)]', re.IGNORECASE)
             for m in pattern.finditer(code):
@@ -1324,9 +1378,7 @@ async def check_syntax(file: UploadFile = File(...)):
             known_functions = {'WHEN','ABS','EXP','POW','LOG','LOG10','MIN','MAX','AVG','MED','ROUND',
                             'GETPOINT','INTERPOLATE','PREV','HISTORYAVG','HISTORYCOUNT','HISTORYSUM',
                             'HISTORYMAX','HISTORYMIN','HISTORYDIFF','HISTORYGRADIENT'}
-
             string_literals = re.findall(r'[\'"].*?[\'"]', code)
-
             for token in re.findall(r'[A-Z][A-Z0-9_]*', code):
                 if token in known_functions or token in ('AND','OR','NOT','X','Y'):
                     continue
@@ -1340,13 +1392,13 @@ async def check_syntax(file: UploadFile = File(...)):
                     continue
                 row_remarks.append(f"Возможно, неизвестная функция или опечатка: '{token}'")
 
-        # 7. Разрыв кода (пробел между идентификаторами)
+        # 7. Разрыв кода
         if not is_constant:
-            code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
-            if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings):
+            code_no_strings2 = re.sub(r'[\'"].*?[\'"]', '', code)
+            if re.search(r'[A-Za-z0-9_§]+\s+[A-Za-z0-9_§]+', code_no_strings2):
                 row_remarks.append("Обнаружен разрыв кода: два идентификатора или значение через пробел")
 
-        # 8. Проверка использования сигналов (пропускается для констант)
+        # 8. Проверка использования сигналов
         if not is_constant:
             for sig in input_signals:
                 sig_underscored = sig.replace('§', '_')
@@ -1369,35 +1421,28 @@ async def check_syntax(file: UploadFile = File(...)):
 
         # 10. Проверка "голых" сигналов в логических условиях
         if not is_constant:
-            code_no_strings = re.sub(r'[\'"].*?[\'"]', '', code)
+            code_no_strings3 = re.sub(r'[\'"].*?[\'"]', '', code)
             for sig in input_signals:
                 sig_u = sig.replace('§', '_')
-                # Возможные варианты написания сигнала (с учётом префикса P для цифровых)
                 candidates = {sig, sig_u}
                 if sig[0].isdigit():
                     candidates.add('P' + sig)
                     candidates.add('P' + sig_u)
-
                 for cand in candidates:
-                    # Ищем вхождения вида (сигнал) с возможными пробелами
                     pattern = re.compile(rf'\(\s*({re.escape(cand)})\s*\)')
-                    for m in pattern.finditer(code_no_strings):
+                    for m in pattern.finditer(code_no_strings3):
                         token = m.group(1)
-                        # Проверяем, не является ли это аргументом функции:
-                        # перед скобкой не должно быть имени функции/сигнала
-                        before = code_no_strings[:m.start()]
+                        before = code_no_strings3[:m.start()]
                         if re.search(r'[A-Za-z0-9_§]\s*$', before):
                             continue
                         row_remarks.append(
                             f"Сигнал '{token}' используется как логическое условие без сравнения или оператора. "
                             "Возможно, пропущен оператор (например, = 1)."
                         )
-                        break  # для каждого сигнала достаточно одного замечания
+                        break
 
         if row_remarks:
             remarks.append({"row": row_num, "remarks": row_remarks})
-
-        
 
     return remarks
 

@@ -1530,8 +1530,9 @@ function generatePaths(nodes) {
         });
 
         document.getElementById('syntax-check-btn').addEventListener('click', () => {
-            window.open('/syntax_checker.html', '_blank');
-            });
+            const config = currentConfig || '';
+            window.open(`/syntax_checker.html?config=${encodeURIComponent(config)}`, '_blank');
+        });
 
 
 

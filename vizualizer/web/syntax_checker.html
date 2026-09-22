@@ -29,6 +29,8 @@
     <div id="results"></div>
 
     <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const config = urlParams.get('config') || '';
         let currentRemarks = [];
 
         async function checkSyntax() {
@@ -40,7 +42,7 @@
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
 
-            const resp = await fetch('/api/check-syntax', {
+            const resp = await fetch(`/api/check-syntax?config=${encodeURIComponent(config)}`, {
                 method: 'POST',
                 body: formData
             });
