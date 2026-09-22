@@ -1,13 +1,13 @@
 {
   "config_version": "1.0",
   "runtime_version": "1.0",
-  "generated_at": "2026-09-21T12:21:33+00:00",
+  "generated_at": "2026-09-21T11:01:34+00:00",
   "project": {
     "code": [
-      "10MAD11FT013_014_MAX_2023"
+      "10MAD11FT013_014_MAX"
     ],
     "description": [
-      "pattern_simple (200 epoch) --- best!"
+      "Максимальные значения температуры баббита на термопарах первого опорного подшипника внизу"
     ]
   },
   "input_contract": {
@@ -16,25 +16,8 @@
     "min_history_rows": 48,
     "min_history_time": "24h"
   },
-  "range_checks": [
-    {
-      "column": "10MAD11FT013_014_MAX",
-      "min": 75.0,
-      "max": 140.0
-    },
-    {
-      "column": "10MKA01CE903__XQ01",
-      "min": 40.0,
-      "max": 140.0
-    },
-    {
-      "column": "10MAV42CP016__XQ01",
-      "min": 0.0,
-      "max": 6.0
-    }
-  ],
   "prediction_shift": {
-    "10MAD11FT013_014_MAX_2023": {
+    "10MAD11FT013_014_MAX": {
       "value": 48,
       "unit": "hours"
     }
@@ -91,6 +74,6 @@
     }
   ],
   "chain_output": {
-    "10MAD11FT013_014_MAX_2023": []
+    "10MAD11FT013_014_MAX": []
   }
 }

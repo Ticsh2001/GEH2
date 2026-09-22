@@ -537,7 +537,7 @@ def print_progress(level_idx: int, levels_total: int, item_idx: int, level_size:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--xlsx", type=Path, help="Путь к xlsx-таблице синтетических сигналов", default='Params.xlsx')
+    ap.add_argument("--xlsx", type=Path, help="Путь к xlsx-таблице синтетических сигналов", default='ТЭЦ 5 итог 11.09.26.xlsx')
     ap.add_argument("--syntax-dir", type=Path, help="Папка с syntax_1.md и syntax_2.md", default='syntax')
     ap.add_argument("--syntax1-name", default="syntax_1.md")
     ap.add_argument("--syntax2-name", default="syntax_2.md")
