@@ -1685,28 +1685,50 @@ const NeuralApp = {
     },
 
     deleteSelectedElements() {
-        const ids = AppState.selectedElements.length > 0 ? [...AppState.selectedElements] : (AppState.selectedElement ? [AppState.selectedElement] : []);
+        const ids = AppState.selectedElements.length > 0
+            ? [...AppState.selectedElements]
+            : (AppState.selectedElement ? [AppState.selectedElement] : []);
+        if (ids.length === 0) return;
+
+        const config = AppState.currentConfig || '';
+        const code = AppState.project.code || '';
+
         ids.forEach(id => {
-            AppState.connections = AppState.connections.filter(c => c.fromElement !== id && c.toElement !== id);
+            const elemData = AppState.elements[id];
+            const nnType = elemData?.nnType || elemData?.type;
+
+            // Удаляем связи
+            AppState.connections = AppState.connections.filter(
+                c => c.fromElement !== id && c.toElement !== id
+            );
+
+            // Удаляем DOM-элемент
             const elem = document.getElementById(id);
             if (elem) elem.remove();
-            const elemData = AppState.elements[id];
-            if (elemData && ['dataset', 'filter', 'timefilter','timeshift', 'labeler'].includes(elemData.nnType)) {
-                const cfg = AppState.currentConfig || '';
-                const code = AppState.project.code || '';
-                fetch(`/api/nn/data/${id}?config=${encodeURIComponent(cfg)}&code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+
+            // Полная очистка файлов (кроме input-signal — у них своих файлов нет)
+            if (elemData && nnType !== 'input-signal' && code) {
+                const url = `/api/nn/element/${encodeURIComponent(id)}/cleanup` +
+                            `?config=${encodeURIComponent(config)}&code=${encodeURIComponent(code)}`;
+                fetch(url, { method: 'DELETE' })
                     .then(r => r.json())
                     .then(result => {
-                        if (result.status !== 'deleted') {
-                            console.warn(`Файлы элемента ${id} не найдены на диске (config="${cfg}", code="${code}"). Проверьте, не менялись ли название проекта/конфиг после применения этого элемента.`, result);
-                        } else {
-                            console.log(`Удалены файлы элемента ${id}:`, result.deleted);
+                        if (result.deleted?.length) {
+                            console.log(`[cleanup] ${id}: удалено файлов — ${result.deleted.length}`);
+                        }
+                        if (result.cancelled_jobs?.length) {
+                            console.log(`[cleanup] ${id}: отменено задач — ${result.cancelled_jobs.length}`);
+                        }
+                        if (result.errors?.length) {
+                            console.warn(`[cleanup] ${id}: ошибки —`, result.errors);
                         }
                     })
-                    .catch(e => console.warn('Failed to delete dataset file', e));
+                    .catch(e => console.warn(`[cleanup] ${id}: не удалось выполнить очистку`, e));
             }
+
             delete AppState.elements[id];
         });
+
         AppState.selectedElement = null;
         AppState.selectedElements = [];
         Connections.drawConnections();

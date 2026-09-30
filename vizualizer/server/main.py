@@ -1031,13 +1031,33 @@ async def delete_project(filename: str, request: Request, config: str = Query(..
         path = get_storage_path(filename, storage="projects", config=config)
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Project not found")
+
         with open(path, "r", encoding="utf-8") as f:
             content = json.load(f)
         project_meta = content.get("project", {})
         project_author = project_meta.get("author", "")
+        project_type = project_meta.get("type", "")        # ← НОВОЕ
+        project_code = project_meta.get("code", "")        # ← НОВОЕ
+
         admin_author = STATE["settings"].get("adminAuthor", "")
         if project_author != current_user and current_user != admin_author:
             raise HTTPException(status_code=403, detail="Only the author or admin can delete this project")
+
+        # ← НОВОЕ: если это проект обучения — подчистить все артефакты
+        nn_cleanup = None
+        if project_type == "neural_network" and project_code:
+            try:
+                nn_cleanup = _cleanup_neural_training_artifacts(config, project_code)
+                print(
+                    f"[delete_project] NN cleanup for '{project_code}': "
+                    f"{len(nn_cleanup['deleted'])} files deleted, "
+                    f"{len(nn_cleanup['cancelled_jobs'])} jobs cancelled, "
+                    f"{len(nn_cleanup['removed_job_dirs'])} job dirs removed"
+                )
+            except Exception as e:
+                print(f"[delete_project] NN cleanup failed for '{project_code}': {e}")
+                nn_cleanup = {"error": str(e)}
+
         # Перемещаем в deleted_projects/<config>
         deleted_base = _abs_folder("deletedFolder") or os.path.join(BASE_DIR, "deleted_projects")
         deleted_dir = os.path.join(deleted_base, config)
@@ -1046,7 +1066,12 @@ async def delete_project(filename: str, request: Request, config: str = Query(..
         shutil.copy2(path, deleted_path)
         os.remove(path)
         invalidate_signals_cache(config)
-        return {"status": "ok", "message": f"Project '{filename}' successfully moved to deleted_projects"}
+
+        return {
+            "status": "ok",
+            "message": f"Project '{filename}' successfully moved to deleted_projects",
+            "nn_cleanup": nn_cleanup,   # ← НОВОЕ: фронт может показать сводку
+        }
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -2091,6 +2116,159 @@ async def cancel_train_job(job_id: str):
 async def get_train_queue(config: str = Query(...)):
     jobs = tq.list_jobs(config=config, statuses=["queued", "running"])
     return {"jobs": jobs, "running_job_id": tq.current_running_job_id()}
+
+
+def _cleanup_neural_training_artifacts(config: str, project_code: str) -> dict:
+    """
+    Удаляет все артефакты, созданные элементами проекта обучения:
+      - datasets/<config>/<project_code>_*  (xlsx и meta.json)
+      - models/<config>/<project_code>_*    (keras и meta.json)
+      - задачи обучения: queued -> cancelled, done/error/cancelled -> папка удаляется
+    Возвращает отчёт для ответа API.
+    """
+    from dataprocessing import get_datasets_dir, get_meta_path  # на случай ленивой загрузки
+    deleted, not_found, errors = [], [], []
+    cancelled_jobs, removed_job_dirs = [], []
+
+    # 1. datasets/
+    try:
+        datasets_dir = get_datasets_dir(config)
+        if os.path.isdir(datasets_dir):
+            prefix = f"{project_code}_"
+            for fname in os.listdir(datasets_dir):
+                if not fname.startswith(prefix):
+                    continue
+                path = os.path.join(datasets_dir, fname)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                        deleted.append(path)
+                    except Exception as e:
+                        errors.append({"path": path, "error": str(e)})
+    except Exception as e:
+        errors.append({"stage": "datasets", "error": str(e)})
+
+    # 2. models/
+    try:
+        models_dir = nn_template.get_models_dir(config)
+        if os.path.isdir(models_dir):
+            prefix = f"{project_code}_"
+            for fname in os.listdir(models_dir):
+                if not fname.startswith(prefix):
+                    continue
+                path = os.path.join(models_dir, fname)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                        deleted.append(path)
+                    except Exception as e:
+                        errors.append({"path": path, "error": str(e)})
+    except Exception as e:
+        errors.append({"stage": "models", "error": str(e)})
+
+    # 3. задачи обучения
+    try:
+        all_jobs = tq.list_jobs(config=config, project_code=project_code)
+        for job in all_jobs:
+            jid = job.get("job_id")
+            status = job.get("status")
+            if not jid:
+                continue
+            if status == "queued":
+                if tq.cancel_job(jid):
+                    cancelled_jobs.append(jid)
+                    status = "cancelled"
+            if status in ("done", "error", "cancelled"):
+                try:
+                    job_dir = tq._job_dir(jid)
+                    if os.path.isdir(job_dir):
+                        shutil.rmtree(job_dir)
+                        removed_job_dirs.append(jid)
+                except Exception as e:
+                    errors.append({"job_id": jid, "error": str(e)})
+    except Exception as e:
+        errors.append({"stage": "jobs", "error": str(e)})
+
+    return {
+        "deleted": deleted,
+        "not_found": not_found,
+        "errors": errors,
+        "cancelled_jobs": cancelled_jobs,
+        "removed_job_dirs": removed_job_dirs,
+    }
+
+
+@app.delete("/api/nn/element/{element_id}/cleanup")
+async def cleanup_nn_element(element_id: str, config: str = Query(...), code: str = Query(...)):
+    """
+    Полная очистка файлов, связанных с NN-элементом:
+      - датасеты и их meta.json (dataset/filter/timefilter/timeshift/labeler)
+      - обученная модель .keras и её meta.json (nn-template)
+      - отмена очередей обучения, связанных с этим элементом (queued)
+    Ничего не делает для input-signal, group, nn-settings (у них своих файлов нет).
+    """
+    deleted, not_found, errors = [], [], []
+    cancelled_jobs = []
+
+    def _try_delete(path):
+        if not path:
+            return
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                deleted.append(path)
+            except Exception as e:
+                errors.append({"path": path, "error": str(e)})
+        else:
+            not_found.append(path)
+
+    # 1. Датасеты и их метаданные
+    try:
+        meta_path = get_meta_path(config, code, element_id)
+        if os.path.exists(meta_path):
+            with open(meta_path, 'r') as f:
+                meta = json.load(f)
+            for _port, rel_path in (meta.get('outputs') or {}).items():
+                if rel_path:
+                    _try_delete(os.path.join(get_datasets_dir(config), rel_path))
+        _try_delete(get_dataset_path(config, code, element_id))
+        _try_delete(meta_path)
+        # на случай старых/дополнительных суффиксов
+        for suffix in ('_out0', '_out1', '_X', '_y'):
+            _try_delete(get_dataset_path(config, code, element_id + suffix))
+            _try_delete(get_meta_path(config, code, element_id + suffix))
+    except Exception as e:
+        errors.append({"stage": "datasets", "error": str(e)})
+
+    # 2. Обученная модель и её метаданные
+    try:
+        _try_delete(nn_template.get_model_path(config, code, element_id))
+        _try_delete(nn_template.get_model_meta_path(config, code, element_id))
+    except Exception as e:
+        errors.append({"stage": "model", "error": str(e)})
+
+    # 3. Задачи обучения: queued — отменяем, running — не трогаем
+    #    (running допишет статус сам; пользователь может удалить повторно)
+    try:
+        active_jobs = tq.list_jobs(
+            config=config, project_code=code, element_id=element_id,
+            statuses=['queued', 'running']
+        )
+        for job in active_jobs:
+            if job.get('status') == 'queued':
+                if tq.cancel_job(job['job_id']):
+                    cancelled_jobs.append(job['job_id'])
+            # running оставляем: безопаснее дать ему завершиться
+    except Exception as e:
+        errors.append({"stage": "jobs", "error": str(e)})
+
+    return {
+        "status": "cleaned" if (deleted or cancelled_jobs) else "nothing_found",
+        "deleted": deleted,
+        "not_found": not_found,
+        "errors": errors,
+        "cancelled_jobs": cancelled_jobs,
+    }
 
 
 @app.get("/api/training-params")
