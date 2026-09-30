@@ -243,6 +243,10 @@ async loadConfigurations() {
         const promises = [];
         const replacements = []; // { elemId, kks }
 
+        // Определяем автора и время один раз для всей пачки создаваемых констант
+        const currentUser = AppState.currentUser || 'Аноним';
+        const now = new Date().toISOString();
+
         for (const inp of inputs) {
             const kks = inp.value.trim();
             if (!kks) continue;
@@ -258,6 +262,18 @@ async loadConfigurations() {
                     type: 'parameter',
                     description: elem.props.description || '',
                     dimension: elem.props.dimension || '',
+                    // --- НОВОЕ: поля автора и меток времени ---
+                    author: currentUser,
+                    lastModifiedBy: currentUser,
+                    lastModifiedAt: now,
+                    // Остальные поля, которые ожидает загрузчик проекта:
+                    possibleCause: '',
+                    guidelines: '',
+                    templateArgs: {},
+                    visualizer_state: null,
+                    status: 'draft',
+                    statusComment: '',
+                    statusHistory: [],
                 },
                 elements: {
                     const_1: {

@@ -6,6 +6,49 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
+# =============================================================================
+# Константы обработки временных рядов
+# =============================================================================
+# Максимальный допустимый разрыв между двумя соседними точками.
+# Если разрыв больше, участок считается «дыркой», через которую
+# не делаем ни интерполяцию (timeshift), ни окна (labeler).
+MAX_GAP = pd.Timedelta(hours=4)
+
+# Ожидаемый шаг данных после ресемплинга. Используется:
+#  - чтобы 'rows' в shift_unit/window_unit трактовать как N * DELTA_TIME;
+#  - чтобы посчитать число точек, на которые ресемплим окно в labeler.
+DELTA_TIME = pd.Timedelta(minutes=30)
+
+
+def _parse_shift_delta(shift_value: int, shift_unit: str):
+    """shift_value + shift_unit -> Timedelta или DateOffset."""
+    if shift_unit == 'rows':
+        return DELTA_TIME * int(shift_value)
+    if shift_unit in ('months', 'years'):
+        return pd.DateOffset(**{shift_unit: int(shift_value)})
+    return pd.Timedelta(**{shift_unit: int(shift_value)})
+
+
+def _parse_window_delta(window_size: int, window_unit: str) -> pd.Timedelta:
+    """window_size + window_unit -> длина окна (Timedelta).
+    Для 'rows' шаг принимается равным DELTA_TIME."""
+    if window_unit == 'rows':
+        return DELTA_TIME * max(0, int(window_size) - 1)
+    if window_unit in ('months', 'years'):
+        raise ValueError(
+            f"window_unit '{window_unit}' не поддерживается — "
+            "используйте секунды / минуты / часы / дни"
+        )
+    return pd.Timedelta(**{window_unit: int(window_size)})
+
+
+def _window_num_points(window_size: int, window_unit: str) -> int:
+    """Сколько точек в окне — по шагу DELTA_TIME."""
+    if window_unit == 'rows':
+        return max(1, int(window_size))
+    delta = _parse_window_delta(window_size, window_unit)
+    return max(1, int(round(delta / DELTA_TIME)) + 1)
+
 
 def get_dataset_path(config: str, project_code: str, element_id: str) -> str:
     return os.path.join(get_datasets_dir(config), f"{project_code}_{element_id}.xlsx")
@@ -200,69 +243,196 @@ def load_input_data(element_id: str, project: dict, config: str, project_code: s
     df_combined = build_dataset(signals_data, ref_name, interpolation)
     return df_combined, hashes
 
-def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def apply_time_shift(df: pd.DataFrame, shift_value: int, shift_unit: str,
+                     max_gap: pd.Timedelta = MAX_GAP) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Возвращает (df_original, df_shifted).
-    df_original — строки, для которых есть сдвинутая пара (т.е. без последних shift_value единиц).
-    df_shifted — те же строки, но со сдвигом времени.
+    Сдвиг сигнала во времени.
+
+    Для каждой исходной точки t_i пытаемся найти значение в момент
+    t_target = t_i + shift_delta. Логика:
+
+      1) если в данных есть точка ровно на t_target — берём её значения;
+      2) иначе находим двух соседей t_left < t_target < t_right:
+           - если t_right - t_left <= MAX_GAP, интерполируем линейно;
+           - если разрыв больше MAX_GAP, пару отбрасываем;
+      3) если t_target выходит за границы ряда — пару отбрасываем.
+
+    Результат — две таблицы (out0, out1), у которых совпадает число
+    строк и порядок. У out0 — исходные времена, у out1 — сдвинутые.
+
+    ВАЖНО: количество строк в результате обычно МЕНЬШЕ, чем на входе —
+    это нормальное поведение после timefilter / filter.
     """
+    if df is None or df.empty:
+        empty = df.copy() if df is not None else pd.DataFrame()
+        return empty, empty
+
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)
 
-    # Преобразуем единицу в Timedelta
-    unit_map = {
-        'seconds': 'seconds', 'minutes': 'minutes', 'hours': 'hours',
-        'days': 'days', 'weeks': 'W', 'months': 'M', 'years': 'Y'
-    }
-    if shift_unit in ['months', 'years']:
-        # Для месяцев/лет Timedelta не работает, используем DateOffset
-        if shift_unit == 'months':
-            delta = pd.DateOffset(months=shift_value)
+    delta = _parse_shift_delta(shift_value, shift_unit)
+    times = df['datetime'].values
+    n = len(times)
+    other_cols = [c for c in df.columns if c != 'datetime']
+
+    if n == 0:
+        empty = df.iloc[:0].copy()
+        return empty, empty
+
+    kept_orig_idx: List[int] = []
+    shifted_rows: List[dict] = []
+
+    for i in range(n):
+        t = pd.Timestamp(times[i])
+        try:
+            t_target = t + delta
+        except Exception:
+            continue
+
+        pos = int(np.searchsorted(times, np.datetime64(t_target)))
+
+        # Точное совпадение
+        if pos < n and pd.Timestamp(times[pos]) == t_target:
+            src = df.iloc[pos]
+            shifted = {c: src[c] for c in other_cols}
         else:
-            delta = pd.DateOffset(years=shift_value)
-    else:
-        delta = pd.Timedelta(**{shift_unit: shift_value})
+            # Нет точного попадания — пробуем интерполяцию между соседями
+            if pos == 0 or pos >= n:
+                continue
+            t_left = pd.Timestamp(times[pos - 1])
+            t_right = pd.Timestamp(times[pos])
+            if t_right - t_left > max_gap:
+                continue  # разрыв слишком большой — не выдумываем
 
-   
-    # Сдвинутые данные: берём те же строки, но добавляем delta к datetime
-    shifted = df.copy()
-    start = df['datetime'][0]
-    print(start)
-    shifted = shifted[shifted['datetime'] >= start + delta]
-    # Исходные данные (обрезаем последние shift_value строк, потому что для них нет сдвига)
-    original = df.iloc[:-shift_value] if shift_value < len(df) else df.iloc[:0]
-    #shifted['datetime'] = shifted['datetime'] + delta
+            row_left = df.iloc[pos - 1]
+            row_right = df.iloc[pos]
+            alpha = float((t_target - t_left) / (t_right - t_left))
 
-    return original, shifted
+            shifted = {}
+            for c in other_cols:
+                try:
+                    lv = float(row_left[c])
+                    rv = float(row_right[c])
+                    shifted[c] = lv + alpha * (rv - lv)
+                except (TypeError, ValueError):
+                    # Не число — берём ближайшее
+                    shifted[c] = row_left[c] if alpha < 0.5 else row_right[c]
 
-def apply_labeler(df: pd.DataFrame, x_columns: list, y_column: str,
-                  window_size: int = 1, window_unit: str = 'rows') -> (pd.DataFrame, pd.Series):
+        kept_orig_idx.append(i)
+        shifted_rows.append(shifted)
+
+    if not kept_orig_idx:
+        empty = df.iloc[:0].copy()
+        return empty, empty
+
+    df_orig = df.iloc[kept_orig_idx].reset_index(drop=True).copy()
+    df_shift = pd.DataFrame(shifted_rows)
+
+    # Сдвинутая таблица: времена на delta позже исходных
+    df_shift['datetime'] = df_orig['datetime'] + delta
+    # Сохраняем порядок колонок как в исходном df (datetime первым)
+    cols_order = ['datetime'] + other_cols
+    df_shift = df_shift[cols_order]
+
+    return df_orig, df_shift
+
+def apply_labeler(df: pd.DataFrame, x_columns: List[str], y_column: Optional[str],
+                  window_size: int = 1, window_unit: str = 'rows',
+                  max_gap: pd.Timedelta = MAX_GAP) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Формирует пары (X, y) для обучения.
+
+    Окно для строки i — интервал [t_i - window_delta, t_i], где
+    window_delta зависит от window_size+window_unit:
+      - 'rows'   : window_delta = (window_size - 1) * DELTA_TIME
+      - 'minutes': window_delta = window_size минут
+      - 'hours'  : window_delta = window_size часов
+      - 'days'   : window_delta = window_size дней
+
+    Внутри окна:
+      - если между соседними точками разрыв > MAX_GAP — окно пропускается;
+      - окно ресемплится на num_points точек (для 'rows' — ровно
+        window_size, для временных единиц — delta/DELTA_TIME + 1),
+        значения X-колонок линейно интерполируются на эту сетку.
+
+    Возвращает (X, y), либо (None, None), если валидных окон нет.
+    """
+    if df is None or df.empty:
+        return None, None
+
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)
 
-    # Y
-    y = df[y_column] if y_column else None
-
+    # Особый случай: одноточечное «окно» без истории (обратная совместимость)
     if window_size == 1 and window_unit == 'rows':
-        X = df[x_columns] if x_columns else None
-    else:
-        # Формируем окна
-        X_rows = []
-        y_rows = []
-        for i in range(window_size-1, len(df)):
-            window = df.iloc[i-window_size+1 : i+1]
-            x_vals = {}
-            for col in x_columns:
-                for step in range(window_size):
-                    x_vals[f"{col}_t-{window_size-1-step}"] = window[col].iloc[step]
-            X_rows.append(x_vals)
-            if y is not None:
-                y_rows.append(y.iloc[i])
-        X = pd.DataFrame(X_rows) if X_rows else None
-        y = pd.Series(y_rows) if y_rows else None
+        X = df[x_columns].copy() if x_columns else None
+        y = df[y_column].copy() if y_column else None
+        return X, y
 
+    window_delta = _parse_window_delta(window_size, window_unit)
+    num_points = _window_num_points(window_size, window_unit)
+
+    times = df['datetime'].values
+    n = len(times)
+
+    X_rows: List[dict] = []
+    y_rows: List = []
+
+    for i in range(n):
+        t_i = pd.Timestamp(times[i])
+        t_start = t_i - window_delta
+
+        # Все точки в окне
+        mask = (df['datetime'] >= t_start) & (df['datetime'] <= t_i)
+        window = df[mask]
+        if len(window) < 2:
+            continue
+
+        window_ts = window['datetime'].values.astype('datetime64[ns]').astype('int64')
+
+        # Проверка разрывов внутри окна
+        has_gap = False
+        for j in range(1, len(window_ts)):
+            gap = pd.Timestamp(window_ts[j]) - pd.Timestamp(window_ts[j - 1])
+            if gap > max_gap:
+                has_gap = True
+                break
+        if has_gap:
+            continue
+
+        # Целевая сетка
+        if num_points == 1:
+            grid_ts = np.array([int(t_i.value)])
+        else:
+            grid = pd.date_range(start=t_start, end=t_i, periods=num_points)
+            grid_ts = grid.values.astype('datetime64[ns]').astype('int64')
+
+        # Интерполируем X-колонки
+        x_vals: Dict[str, float] = {}
+        bad = False
+        for col in x_columns:
+            col_vals = pd.to_numeric(window[col], errors='coerce').values
+            valid = ~np.isnan(col_vals)
+            if valid.sum() < 2:
+                bad = True
+                break
+            interp = np.interp(grid_ts, window_ts[valid], col_vals[valid])
+            for step in range(num_points):
+                x_vals[f"{col}_t-{num_points - 1 - step}"] = float(interp[step])
+        if bad:
+            continue
+
+        X_rows.append(x_vals)
+        if y_column:
+            y_rows.append(df[y_column].iloc[i])
+
+    if not X_rows:
+        return None, None
+
+    X = pd.DataFrame(X_rows)
+    y = pd.Series(y_rows) if y_column else None
     return X, y
 
 

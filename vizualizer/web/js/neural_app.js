@@ -1827,12 +1827,21 @@ async saveProject() {
         alert('Пожалуйста, укажите код проекта перед сохранением.');
         return;
     }
-    //AppState.project.type = PROJECT_TYPE.NEURAL_TEMPLATE;
-    // Сохраняем код проекта как введённый пользователем
+
+    // ----- Проставляем автора и метки времени (как в project.js) -----
+    const currentUser = AppState.currentUser || 'Аноним';
+    const now = new Date().toISOString();
+
+    if (!AppState.project.author) {
+        AppState.project.author = currentUser;
+    }
+    AppState.project.lastModifiedBy = currentUser;
+    AppState.project.lastModifiedAt = now;
+    // -----------------------------------------------------------------
+
     const projectCode = AppState.project.code;
-    // Генерируем строку архитектуры
     const architecture = this.generateStructureString();
-    // Для файла используем пользовательский код, архитектуру кладём в code
+
     const project = {
         version: '1.0',
         project: AppState.project,
@@ -1844,9 +1853,9 @@ async saveProject() {
             panX: AppState.viewport.panX,
             panY: AppState.viewport.panY
         },
-        code: architecture   // строка структуры
+        code: architecture
     };
-    const filename = `${projectCode}_neural.json`;   // имя файла
+    const filename = `${projectCode}_neural.json`;
     try {
         await Settings.saveProject(filename, project, 'projects');
         alert(`Проект сохранён как ${filename}`);
