@@ -21,6 +21,7 @@ const NeuralApp = {
         document.getElementById('btn-new').addEventListener('click', () => this.newProject());
         document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
         document.getElementById('btn-load').addEventListener('click', () => Project.openProjectListModal());
+        document.getElementById('btn-export').addEventListener('click', () => this.exportProject());
         document.getElementById('btn-generate-code').addEventListener('click', () => {
             alert('Структура сети:\n' + this.generateStructureString());
         });
@@ -120,6 +121,75 @@ const NeuralApp = {
             });
         } catch (e) {
             console.error(e);
+        }
+    },
+
+    async exportProject() {
+        if (!AppState.project.code) {
+            alert('Сначала сохраните проект — экспорт требует кода проекта и обученной модели.');
+            return;
+        }
+
+        // Находим единственный nn-template в проекте
+        const templateIds = Object.keys(AppState.elements).filter(id =>
+            (AppState.elements[id].nnType || AppState.elements[id].type) === 'nn-template'
+        );
+        if (templateIds.length === 0) {
+            alert('В проекте нет элемента «Шаблон» — экспортировать нечего.');
+            return;
+        }
+        if (templateIds.length > 1) {
+            alert('В проекте несколько элементов «Шаблон». Пока экспорт поддерживает только один.');
+            return;
+        }
+        const templateId = templateIds[0];
+
+        const filename = `${AppState.project.code}_neural_network.json`;
+
+        try {
+            const resp = await fetch('/api/nn/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename,
+                    element_id: templateId,
+                    config: AppState.currentConfig || '',
+                    project_code: AppState.project.code,
+                    project: {
+                        project: AppState.project,
+                        elements: AppState.elements,
+                        connections: AppState.connections
+                    }
+                })
+            });
+
+            if (!resp.ok) {
+                let msg = 'Ошибка экспорта';
+                try {
+                    const err = await resp.json();
+                    msg = err.detail || msg;
+                } catch {}
+                throw new Error(msg);
+            }
+
+            const blob = await resp.blob();
+            const disposition = resp.headers.get('Content-Disposition') || '';
+            let outName = `${AppState.project.code}_export.zip`;
+            const m = disposition.match(/filename\*=UTF-8''([^;]+)/i) ||
+                    disposition.match(/filename="?([^"]+)"?/i);
+            if (m) outName = decodeURIComponent(m[1]);
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = outName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error('[export]', e);
+            alert('Экспорт не удался: ' + e.message);
         }
     },
 

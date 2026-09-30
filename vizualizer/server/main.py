@@ -36,6 +36,9 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from urllib.parse import quote
 from export import export_selected_projects
 from export import get_code_length
+import io as _io  # если ещё не импортирован
+
+import nn_export  # файл лежит рядом с main.py
 
 # =============================================================================
 # КОНФИГУРАЦИЯ
@@ -2269,6 +2272,79 @@ async def cleanup_nn_element(element_id: str, config: str = Query(...), code: st
         "errors": errors,
         "cancelled_jobs": cancelled_jobs,
     }
+
+@app.post("/api/nn/export")
+async def export_nn_project(payload: dict = Body(...)):
+    """
+    payload = {
+        "filename": "<project_code>_neural_network.json",
+        "element_id": "<nn-template_id>",
+        "config": "<config_name>",
+        "project_code": "<code>",
+        "project": {...}   # снапшот AppState: project/elements/connections
+    }
+    Возвращает ZIP с моделью, метаданными и inference-конфигом.
+    """
+    try:
+        filename = payload.get("filename")
+        element_id = payload.get("element_id")
+        config = payload.get("config") or ""
+        project_code = payload.get("project_code") or ""
+        project_payload = payload.get("project") or {}
+
+        if not filename or not element_id or not project_code:
+            raise HTTPException(status_code=400,
+                                detail="filename, element_id и project_code обязательны")
+
+        # 1. Проект: берём снапшот с фронта; если хотите гарантию — можно
+        #    подгружать с диска через get_storage_path(filename, config),
+        #    тогда project_payload не нужен. Пока используем снапшот.
+        project_data = project_payload
+        if not project_data.get("elements"):
+            # fallback: читаем с диска
+            path = get_storage_path(filename, storage="projects", config=config)
+            if not os.path.isfile(path):
+                raise HTTPException(status_code=404, detail="Project not found on disk")
+            with open(path, "r", encoding="utf-8") as f:
+                project_data = json.load(f)
+
+        # 2. Находим путь модели и её meta
+        model_path = nn_template.get_model_path(config, project_code, element_id)
+        model_meta_path = nn_template.get_model_meta_path(config, project_code, element_id)
+
+        if not os.path.isfile(model_path):
+            raise HTTPException(
+                status_code=409,
+                detail="Модель не найдена — сначала обучите её и дождитесь завершения."
+            )
+
+        # 3. Собираем ZIP
+        zip_bytes = nn_export.build_zip(
+            project_payload=project_data,
+            model_path=model_path,
+            model_meta_path=model_meta_path,
+            base_name=project_code,
+        )
+
+        # 4. Стрим
+        zip_name = f"{project_code}_export.zip"
+        return StreamingResponse(
+            _io.BytesIO(zip_bytes),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            }
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"[export_nn_project] error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/training-params")
