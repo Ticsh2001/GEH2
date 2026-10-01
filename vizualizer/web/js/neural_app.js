@@ -147,11 +147,20 @@ const NeuralApp = {
             const apiUrl = `http://${host}:${apiPort}`;
             const checkPort = data.check_port || 8503;
 
+            const yLabeler = AppState.elements[data.y_labeler_id];
+            const yKks = (yLabeler?.props?.y_column || '').trim();
+            console.log('[checkProject] y_labeler_id =', data.y_labeler_id,
+                        '-> y_kks =', yKks);
+
             const params = new URLSearchParams({
                 config: AppState.currentConfig || '',
                 code: AppState.project.code,
                 model_dir: data.model_dir,
+                model_path: data.model_path,
+                meta_path: data.meta_path,
+                config_path: data.config_path,
                 y_labeler_id: data.y_labeler_id,
+                y_kks: yKks,                       // ← НОВОЕ
                 api_url: apiUrl
             });
             const url = `http://${host}:${checkPort}/?${params.toString()}`;

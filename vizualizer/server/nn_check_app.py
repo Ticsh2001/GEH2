@@ -81,6 +81,12 @@ def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     }
 
 
+def restore_section_signs(name: str) -> str:
+    """Обратная нормализация: '§§' -> '__' применялась при экспорте,
+    здесь возвращаем исходный вид для запросов к архиву.
+    ВАЖНО: только двойное '__', одиночные '_' не трогаем."""
+    return name.replace("__", "§§")
+
 def metrics_to_dataframe(metrics: dict) -> pd.DataFrame:
     """Превращает dict метрик в двухколоночную таблицу."""
     fmt = {
@@ -132,12 +138,22 @@ def align_pred_with_actuals(pred_df: pd.DataFrame,
 # ----------------------------------------------------------------------
 # 1. Разбор query params
 # ----------------------------------------------------------------------
+st.set_page_config(
+    page_title="NN Check",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 qp = st.query_params
 config_name = qp.get("config", "")
 project_code = qp.get("code", "")
 model_dir = qp.get("model_dir", "")
 y_labeler_id = qp.get("y_labeler_id", "")
+y_kks = qp.get("y_kks", "").strip()
 api_url = qp.get("api_url", "http://localhost:8000")
+
+st.write(f"**Отладка:** config={config_name}, code={project_code}, "
+         f"model_dir={model_dir}, y_labeler_id={y_labeler_id}, "
+         f"y_kks={y_kks}, api_url={api_url}")
 
 if not (project_code and model_dir and y_labeler_id):
     st.error("Не переданы обязательные параметры (code / model_dir / y_labeler_id).")
@@ -162,14 +178,27 @@ except Exception as e:
     st.error(f"Не удалось импортировать nn_inference_runtime: {e}")
     st.stop()
 
-config_path = os.path.join(model_dir, f"{project_code}.config.json")
-model_path = os.path.join(model_dir, f"{project_code}.keras")
-meta_path = os.path.join(model_dir, f"{project_code}_meta.json")
+config_path = qp.get("config_path", "").strip()
+model_path = qp.get("model_path", "").strip()
+meta_path = qp.get("meta_path", "").strip()
+
+# Fallback: если по какой-то причине не переданы — пробуем собрать из model_dir+code
+if not model_path:
+    model_path = os.path.join(model_dir, f"{project_code}.keras")
+if not meta_path:
+    meta_path = os.path.join(model_dir, f"{project_code}_meta.json")
+if not config_path:
+    config_path = os.path.join(model_dir, f"{project_code}.config.json")
 
 for p in (config_path, model_path, meta_path):
     if not os.path.isfile(p):
         st.error(f"Не найден файл: {p}")
         st.stop()
+
+print(f"[nn_check_app] resolved paths:\n"
+      f"  model_path={model_path}\n"
+      f"  meta_path={meta_path}\n"
+      f"  config_path={config_path}", flush=True)
 
 # ----------------------------------------------------------------------
 # 3. Сессия и метаданные
@@ -199,28 +228,74 @@ dt_fmt = meta["input_contract"]["datetime_format"]
 # 4. Загрузка сырых входных сигналов через API
 # ----------------------------------------------------------------------
 def load_signal_from_api(name: str, config_name: str, api_url: str, dt_fmt: str) -> np.ndarray:
-    """Возвращает ndarray (N, 2): datetime-строка в формате контракта, значение."""
-    url = f"{api_url}/api/signal-data?config={requests.utils.quote(config_name)}"
-    r = requests.post(url, json={"signal_names": [name], "format": "json"}, timeout=120)
-    r.raise_for_status()
-    payload = r.json()
-    records = (payload.get("data") or {}).get(name) or []
-    if not records:
-        raise ValueError(f"Нет данных для сигнала '{name}' в архиве")
-    df = pd.DataFrame(records)
-    if "datetime" not in df.columns or "value" not in df.columns:
-        raise ValueError(f"Некорректный формат ответа для '{name}'")
+    """
+    Возвращает ndarray (N, 2): datetime-строка, значение.
+    Пробует найти сигнал сначала по исходному имени, потом с восстановленными
+    '§§' (архив хранит KKS в оригинальном виде, конфиг — нормализованный).
+    """
+    candidates = [name]
+    restored = restore_section_signs(name)
+    if restored != name:
+        candidates.append(restored)
 
-    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-    df = df.dropna(subset=["datetime"]).sort_values("datetime")
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    last_error = None
+    for candidate in candidates:
+        try:
+            url = f"{api_url}/api/signal-data?config={requests.utils.quote(config_name)}"
+            r = requests.post(url, json={"signal_names": [candidate], "format": "json"}, timeout=120)
+            r.raise_for_status()
+            payload = r.json()
+            records = (payload.get("data") or {}).get(candidate) or []
+            if not records:
+                last_error = f"пусто для '{candidate}'"
+                continue
 
-    dt_str = df["datetime"].dt.strftime(dt_fmt)
-    mask = dt_str.notna() & df["value"].notna()
-    return np.column_stack([
-        dt_str[mask].to_numpy(),
-        df["value"][mask].to_numpy(dtype=float),
-    ])
+            df = pd.DataFrame(records)
+            if "datetime" not in df.columns or "value" not in df.columns:
+                last_error = f"некорректный формат ответа для '{candidate}'"
+                continue
+
+            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+            df = df.dropna(subset=["datetime"]).sort_values("datetime")
+
+            # --- Нормализация value ---
+            # Сервер отдаёт значения архивных сигналов в «европейском» формате:
+            # десятичный разделитель — запятая ('0,00000000'). Тот же приём, что и
+            # в code_signal.sanitize_numeric_column (см. visualizer_app.py).
+            raw_val = df["value"]
+            if raw_val.dtype == object:
+                raw_val = (
+                    raw_val.astype(str)
+                        .str.replace(",", ".", regex=False)
+                        .str.replace("\u00a0", "", regex=False)   # NBSP, если попадётся
+                        .str.strip()
+                )
+            df["value"] = pd.to_numeric(raw_val, errors="coerce")
+            # --- /Нормализация value ---
+
+            df = df.dropna(subset=["value"]).reset_index(drop=True)
+
+            dt_str = df["datetime"].dt.strftime(dt_fmt)
+            mask = dt_str.notna() & df["value"].notna()
+            print(f"[nn_check_app]   '{name}' -> resolved as '{candidate}' "
+                  f"({mask.sum()} rows)", flush=True)
+            # ==== ДИАГНОСТИКА ====
+            if mask.sum() == 0 and len(df) > 0:
+                print(f"[nn_check_app]     DEBUG raw first record: {records[0]!r}", flush=True)
+                print(f"[nn_check_app]     DEBUG dtypes: {df.dtypes.to_dict()}", flush=True)
+                print(f"[nn_check_app]     DEBUG dt_fmt: {dt_fmt!r}", flush=True)
+                print(f"[nn_check_app]     DEBUG dt[0]: {df['datetime'].iloc[0]!r}, "
+                    f"value[0]: {df['value'].iloc[0]!r}", flush=True)
+            return np.column_stack([
+                dt_str[mask].to_numpy(),
+                df["value"][mask].to_numpy(dtype=float),
+            ])
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    raise ValueError(f"Не удалось загрузить сигнал '{name}' "
+                     f"(пробовали {candidates}): {last_error}")
 
 with st.spinner("Загружаю сырые входные сигналы из архива..."):
     input_signals = {}
@@ -243,30 +318,91 @@ if missing:
 
 st.success(f"Загружено входных сигналов: {len(input_signals)}")
 
-# ----------------------------------------------------------------------
-# 5. Фактические значения Y-labeler'а (для сравнения)
-# ----------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def _load_actuals(_y_id, _config, _code, _api_url):
-    url = (f"{_api_url}/api/nn/data/{_y_id}/full"
-           f"?config={requests.utils.quote(_config)}"
-           f"&code={requests.utils.quote(_code)}"
-           f"&port=out-1")
-    r = requests.get(url, timeout=120)
-    r.raise_for_status()
-    return r.json()
-print("[nn_check_app] loading actuals from Y-labeler...", flush=True)
 
-try:
-    actuals_records = _load_actuals(y_labeler_id, config_name, project_code, api_url)
-    actuals_df = pd.DataFrame(actuals_records)
-    actuals_df["datetime"] = pd.to_datetime(actuals_df["datetime"], errors="coerce")
-    actuals_df = actuals_df.dropna(subset=["datetime"]).sort_values("datetime")
-    print(f"[nn_check_app] actuals: {len(actuals_df)} rows, "
-          f"columns={list(actuals_df.columns)}", flush=True)
-except Exception as e:
-    st.warning(f"Не удалось загрузить фактические значения Y-labeler'а: {e}")
+def extract_y_kks(meta: dict, cfg: dict) -> str | None:
+    """
+    Пытается найти KKS целевого сигнала (y_column того labeler'а,
+    который стоит за выходом модели) в meta или config.
+    Возвращает имя сигнала в архиве (сырое, как в CSV) — либо None.
+    """
+    # 1) meta.outputs — самый вероятный источник
+    for out in (meta.get("outputs") or []):
+        if isinstance(out, dict):
+            for k in ("name", "kks", "column", "y_column", "target"):
+                v = out.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+        elif isinstance(out, str) and out.strip():
+            return out.strip()
+
+    # 2) config.outputs — запасной вариант
+    for out in (cfg.get("outputs") or []):
+        if isinstance(out, dict):
+            for k in ("name", "kks", "column", "y_column", "target"):
+                v = out.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+
+    # 3) плоский y_column на верхнем уровне — если build_config так устроен
+    for src in (meta, cfg):
+        for k in ("y_column", "y_kks", "target", "target_kks"):
+            v = src.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+
+    return None
+
+# ----------------------------------------------------------------------
+# 5. Фактические значения Y — сырой сигнал по KKS, как есть
+# ----------------------------------------------------------------------
+if not y_kks:
+    st.warning("⚠️ Не передан KKS Y-сигнала (y_kks) — график будет без факта.")
     actuals_df = pd.DataFrame(columns=["datetime", "value"])
+else:
+    try:
+        with st.spinner(f"Загружаю Y-сигнал «{y_kks}»..."):
+            candidates = [y_kks, restore_section_signs(y_kks)]
+            url = f"{api_url}/api/signal-data?config={requests.utils.quote(config_name)}"
+            r = requests.post(
+                url,
+                json={"signal_names": candidates, "format": "json"},
+                timeout=120,
+            )
+            r.raise_for_status()
+            payload = r.json()
+
+        data_map = payload.get("data") or {}
+        records = []
+        for cand in candidates:
+            if data_map.get(cand):
+                records = data_map[cand]
+                break
+
+        if not records:
+            raise ValueError(f"пусто (пробовали {candidates})")
+
+        # Собираем DataFrame БЕЗ каких-либо фильтраций/дропов
+        actuals_df = pd.DataFrame(records)
+
+        # Чиним запятые в value, но NaN/пустые оставляем как есть
+        actuals_df["value"] = pd.to_numeric(
+            actuals_df["value"].astype(str).str.replace(",", ".", regex=False),
+            errors="coerce",
+        )
+        actuals_df["datetime"] = pd.to_datetime(
+            actuals_df["datetime"], errors="coerce"
+        )
+        actuals_df = actuals_df.sort_values("datetime").reset_index(drop=True)
+
+        st.success(
+            f"Y загружен: **{y_kks}** — {len(actuals_df)} точек "
+            f"(непустых: {int(actuals_df['value'].notna().sum())})"
+        )
+        print(f"[nn_check_app] Y '{y_kks}': {len(actuals_df)} rows", flush=True)
+
+    except Exception as e:
+        st.warning(f"⚠️ Не удалось загрузить Y '{y_kks}': {e}")
+        actuals_df = pd.DataFrame(columns=["datetime", "value"])
 
 # ----------------------------------------------------------------------
 # 6. Запуск инференса
@@ -323,9 +459,12 @@ if result:
 
         if not actuals_df.empty:
             fig.add_trace(go.Scatter(
-                x=actuals_df["datetime"], y=actuals_df["value"],
-                mode="lines", name="Факт (Y)",
-                line=dict(color="#4a90d9", width=2)
+                x=actuals_df["datetime"],
+                y=actuals_df["value"],
+                mode="lines",
+                name="Факт (Y)",
+                line=dict(color="#4a90d9", width=2),
+                connectgaps=False,
             ))
 
         ok_mask = pred_df["status"] == "OK"
