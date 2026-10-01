@@ -2273,6 +2273,89 @@ async def cleanup_nn_element(element_id: str, config: str = Query(...), code: st
         "cancelled_jobs": cancelled_jobs,
     }
 
+import nn_export  # рядом с main.py
+
+@app.post("/api/nn/check/prepare")
+async def nn_check_prepare(payload: dict = Body(...)):
+    """
+    Готовит всё для проверки модели на полном диапазоне данных:
+      - генерирует inference-конфиг
+      - кладёт его рядом с моделью
+      - возвращает пути и id Y-labeler'а, чтобы Streamlit мог
+        подтянуть фактические значения и визуализировать.
+
+    payload = {
+      "filename", "element_id", "config", "project_code",
+      "project": {project, elements, connections}
+    }
+    """
+    print(f"[nn_check_prepare] payload: filename={payload.get('filename')!r}, "
+          f"element_id={payload.get('element_id')!r}, config={payload.get('config')!r}, "
+          f"code={payload.get('project_code')!r}", flush=True)
+    try:
+        filename = payload.get("filename")
+        element_id = payload.get("element_id")
+        config = payload.get("config") or ""
+        project_code = payload.get("project_code") or ""
+        project_data = payload.get("project") or {}
+
+        if not (filename and element_id and project_code):
+            raise HTTPException(status_code=400,
+                                detail="filename, element_id и project_code обязательны")
+
+        # 1. Проект (снапшот с фронта, иначе — с диска)
+        if not project_data.get("elements"):
+            path = get_storage_path(filename, storage="projects", config=config)
+            if not os.path.isfile(path):
+                raise HTTPException(status_code=404, detail="Project not found")
+            with open(path, "r", encoding="utf-8") as f:
+                project_data = json.load(f)
+
+        # 2. Пути модели
+        model_dir = nn_template.get_models_dir(config)
+        model_path = nn_template.get_model_path(config, project_code, element_id)
+        meta_path = nn_template.get_model_meta_path(config, project_code, element_id)
+
+        if not os.path.isfile(model_path):
+            raise HTTPException(status_code=409,
+                                detail="Модель ещё не обучена — сначала обучите её.")
+
+        # 3. Y-labeler (для графика фактов)
+        y_labelers = nn_export.find_y_labelers(project_data)
+        if not y_labelers:
+            raise HTTPException(status_code=400,
+                                detail="В проекте не найден Y-производитель (labeler с y_column)")
+        y_labeler_id = y_labelers[0][0]
+
+        # 4. Собираем конфиг и кладём рядом с моделью
+        cfg = nn_export.build_config(project_data)
+        config_path = os.path.join(model_dir, f"{project_code}.config.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+        check_port = (STATE["settings"] or {}).get("nnCheckPort", 8503)
+        print(f"[nn_check_prepare] OK, model_dir={model_dir}, "
+              f"y_labeler_id={y_labeler_id}, check_port={check_port}", flush=True)
+
+        return {
+            "status": "ok",
+            "model_dir": model_dir,
+            "config_path": config_path,
+            "model_path": model_path,
+            "meta_path": meta_path,
+            "y_labeler_id": y_labeler_id,
+            "check_port": check_port,
+        }
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        print("[nn_check_prepare] ERROR:\n" + traceback.format_exc(), flush=True)
+        print(f"[nn_check_prepare] error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/nn/export")
 async def export_nn_project(payload: dict = Body(...)):
     """

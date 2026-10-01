@@ -6,6 +6,7 @@
   "trainedModelsFolder": "models",
   "tablesFolder": "tables",
   "visualizerPort": 8501,
+  "nnCheckPort": 8503,
   "adminAuthor": "Виктор Тищенко",
   "llm": {
     "contextFolder": "llm_context",

@@ -22,6 +22,7 @@ const NeuralApp = {
         document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
         document.getElementById('btn-load').addEventListener('click', () => Project.openProjectListModal());
         document.getElementById('btn-export').addEventListener('click', () => this.exportProject());
+        document.getElementById('btn-check').addEventListener('click', () => this.checkProject());
         document.getElementById('btn-generate-code').addEventListener('click', () => {
             alert('Структура сети:\n' + this.generateStructureString());
         });
@@ -91,6 +92,75 @@ const NeuralApp = {
         }
         AppState.currentUser = username;
         document.getElementById('user-badge-name').textContent = username;
+    },
+
+    async checkProject() {
+        if (!AppState.project.code) {
+            alert('Сначала сохраните проект — проверка требует обученной модели.');
+            return;
+        }
+
+        const templateIds = Object.keys(AppState.elements).filter(id =>
+            (AppState.elements[id].nnType || AppState.elements[id].type) === 'nn-template'
+        );
+        if (templateIds.length !== 1) {
+            alert('В проекте должен быть ровно один элемент «Шаблон».');
+            return;
+        }
+        const templateId = templateIds[0];
+        const filename = `${AppState.project.code}_neural_network.json`;
+        console.log('[checkProject] preparing payload for', filename);
+
+
+        try {
+            console.log('[checkProject] POST /api/nn/check/prepare ...');
+            const resp = await fetch('/api/nn/check/prepare', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename,
+                    element_id: templateId,
+                    config: AppState.currentConfig || '',
+                    project_code: AppState.project.code,
+                    project: {
+                        project: AppState.project,
+                        elements: AppState.elements,
+                        connections: AppState.connections
+                    }
+                })
+            });
+            console.log('[checkProject] status', resp.status);
+
+
+            if (!resp.ok) {
+                let msg = 'Ошибка подготовки проверки';
+                try { const e = await resp.json(); msg = e.detail || msg; } catch {}
+                throw new Error(msg);
+            }
+            const data = await resp.json();
+            console.log('[checkProject] response', data);
+
+
+            // Собираем URL Streamlit
+            const host = window.location.hostname;
+            const apiPort = window.location.port || 8000;
+            const apiUrl = `http://${host}:${apiPort}`;
+            const checkPort = data.check_port || 8503;
+
+            const params = new URLSearchParams({
+                config: AppState.currentConfig || '',
+                code: AppState.project.code,
+                model_dir: data.model_dir,
+                y_labeler_id: data.y_labeler_id,
+                api_url: apiUrl
+            });
+            const url = `http://${host}:${checkPort}/?${params.toString()}`;
+            console.log('[checkProject] opening', url);
+            window.open(url, '_blank');
+        } catch (e) {
+            console.error(e);
+            alert('Проверка не удалась: ' + e.message);
+        }
     },
 
     async loadConfigurations() {
