@@ -151,10 +151,6 @@ y_labeler_id = qp.get("y_labeler_id", "")
 y_kks = qp.get("y_kks", "").strip()
 api_url = qp.get("api_url", "http://localhost:8000")
 
-st.write(f"**Отладка:** config={config_name}, code={project_code}, "
-         f"model_dir={model_dir}, y_labeler_id={y_labeler_id}, "
-         f"y_kks={y_kks}, api_url={api_url}")
-
 if not (project_code and model_dir and y_labeler_id):
     st.error("Не переданы обязательные параметры (code / model_dir / y_labeler_id).")
     st.stop()
@@ -162,8 +158,7 @@ if not (project_code and model_dir and y_labeler_id):
 print(f"[nn_check_app] params: config={config_name!r} code={project_code!r} "
       f"model_dir={model_dir!r} y_labeler_id={y_labeler_id!r} api_url={api_url!r}",
       flush=True)
-st.write(f"**Отладка:** config={config_name}, code={project_code}, "
-         f"model_dir={model_dir}, y_labeler_id={y_labeler_id}, api_url={api_url}")
+
 
 # ----------------------------------------------------------------------
 # 2. Подтягиваем рантайм
@@ -455,42 +450,86 @@ if result:
         )
 
         # ---------- график ----------
+        # ---------- график ----------
         fig = go.Figure()
 
+        # Факт (Y) — как есть
         if not actuals_df.empty:
             fig.add_trace(go.Scatter(
                 x=actuals_df["datetime"],
                 y=actuals_df["value"],
                 mode="lines",
                 name="Факт (Y)",
-                line=dict(color="#4a90d9", width=2),
+                line=dict(color="#4a90d9", width=1.5),
                 connectgaps=False,
+                hovertemplate="Факт: %{y:.4g}<extra></extra>",
             ))
 
         ok_mask = pred_df["status"] == "OK"
         warn_mask = ~ok_mask
 
+        # Предсказание — линия + маркеры, чтобы работал hovermode="x unified"
         if warn_mask.any():
             fig.add_trace(go.Scatter(
                 x=pred_df.loc[warn_mask, "datetime"],
                 y=pred_df.loc[warn_mask, "value"],
-                mode="markers", name="Предсказание (WARNING)",
-                marker=dict(color="#ef4444", size=6)
+                mode="markers",
+                name="Прогноз (WARNING)",
+                marker=dict(color="#ef4444", size=6),
+                hovertemplate="Прогноз: %{y:.4g}<extra>WARNING</extra>",
             ))
         if ok_mask.any():
             fig.add_trace(go.Scatter(
                 x=pred_df.loc[ok_mask, "datetime"],
                 y=pred_df.loc[ok_mask, "value"],
-                mode="markers", name="Предсказание (OK)",
-                marker=dict(color="#10b981", size=5)
+                mode="markers",
+                name="Прогноз (OK)",
+                marker=dict(color="#10b981", size=5),
+                hovertemplate="Прогноз: %{y:.4g}<extra>OK</extra>",
             ))
+
+        # --- Y-диапазон по факту ---
+        y_range = None
+        if not actuals_df.empty:
+            y_valid = actuals_df["value"].dropna()
+            if not y_valid.empty:
+                y_min = float(y_valid.min())
+                y_max = float(y_valid.max())
+                span = y_max - y_min
+                if span <= 0:
+                    span = max(abs(y_max), 1.0) * 0.1
+                pad = span * 0.05
+                y_range = [y_min - pad, y_max + pad]
 
         fig.update_layout(
             title=f"Выход {kks}",
-            xaxis_title="Время", yaxis_title="Значение",
-            height=500, uirevision="nn-check"
+            xaxis_title="Время",
+            yaxis_title="Значение",
+            height=850,
+            hovermode="x unified",
+            template="plotly_white",
+            uirevision="nn-check",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=40, r=20, t=60, b=40),
         )
+
+        if y_range is not None:
+            fig.update_yaxes(range=y_range)
+
         st.plotly_chart(fig, use_container_width=True)
+
+        # Заодно покажем, насколько прогноз вылезает за пределы Y-факта —
+        # полезно понять, где модель «фантазирует» вне зоны обучения
+        if y_range is not None:
+            out_of_range = pred_df[
+                (pred_df["value"] < y_range[0]) | (pred_df["value"] > y_range[1])
+            ]
+            if len(out_of_range) > 0:
+                st.caption(
+                    f"⚠️ {len(out_of_range)} точек прогноза ({len(out_of_range)/len(pred_df)*100:.1f}%) "
+                    f"выходят за диапазон факта [{y_range[0]:.4g}, {y_range[1]:.4g}] "
+                    f"и обрезаны на графике."
+                )
 
         # ---------- метрики ----------
         st.markdown("##### 📊 Метрики")
