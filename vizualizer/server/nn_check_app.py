@@ -135,6 +135,20 @@ def align_pred_with_actuals(pred_df: pd.DataFrame,
     merged = merged.dropna(subset=["actual"])
     return merged[["datetime", "actual", "pred", "status"]]
 
+def _model_signature(*paths: str) -> tuple:
+    """
+    Возвращает кортеж (path, mtime_ns, size) для каждого файла.
+    Изменится любой файл — изменится подпись — Streamlit пересоздаст сессию.
+    """
+    sig = []
+    for p in paths:
+        if os.path.isfile(p):
+            st_ = os.stat(p)
+            sig.append((p, st_.st_mtime_ns, st_.st_size))
+        else:
+            sig.append((p, None, None))
+    return tuple(sig)
+
 # ----------------------------------------------------------------------
 # 1. Разбор query params
 # ----------------------------------------------------------------------
@@ -198,11 +212,27 @@ print(f"[nn_check_app] resolved paths:\n"
 # ----------------------------------------------------------------------
 # 3. Сессия и метаданные
 # ----------------------------------------------------------------------
-@st.cache_resource
-def _make_session(cfg, mdl, mt):
+
+sig = _model_signature(config_path, model_path, meta_path)
+
+@st.cache_resource(show_spinner=False)
+def _make_session(cfg, mdl, mt, _sig):
+    # _sig не используется внутри — только для инвалидации кэша
     return InferenceSession.from_config_file(
         config_path=cfg, model_path=mdl, metadata_path=mt
     )
+
+session = _make_session(config_path, model_path, meta_path, sig)
+
+if "model_signature" not in st.session_state:
+    st.session_state.model_signature = None
+
+if st.session_state.model_signature != sig:
+    print(f"[nn_check_app] model signature changed -> clearing cached results",
+          flush=True)
+    st.session_state.model_signature = sig
+    st.session_state.pop("inference_result", None)
+    st.session_state.pop("inference_log", None)
 
 t0 = time.time()
 print("[nn_check_app] creating InferenceSession...", flush=True)
@@ -416,6 +446,13 @@ if st.button("▶ Запустить инференс на всём диапаз
         st.session_state["inference_log"] = log_path
 
 result = st.session_state.get("inference_result")
+
+if st.button("🔄 Перезагрузить модель", key="reload_model"):
+    _make_session.clear()
+    st.session_state.pop("inference_result", None)
+    st.session_state.pop("inference_log", None)
+    st.session_state.model_signature = None
+    st.rerun()
 
 if result:
     output_kks = list(result.keys())
