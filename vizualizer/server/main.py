@@ -2358,16 +2358,6 @@ async def nn_check_prepare(payload: dict = Body(...)):
 
 @app.post("/api/nn/export")
 async def export_nn_project(payload: dict = Body(...)):
-    """
-    payload = {
-        "filename": "<project_code>_neural_network.json",
-        "element_id": "<nn-template_id>",
-        "config": "<config_name>",
-        "project_code": "<code>",
-        "project": {...}   # снапшот AppState: project/elements/connections
-    }
-    Возвращает ZIP с моделью, метаданными и inference-конфигом.
-    """
     try:
         filename = payload.get("filename")
         element_id = payload.get("element_id")
@@ -2376,22 +2366,16 @@ async def export_nn_project(payload: dict = Body(...)):
         project_payload = payload.get("project") or {}
 
         if not filename or not element_id or not project_code:
-            raise HTTPException(status_code=400,
-                                detail="filename, element_id и project_code обязательны")
+            raise HTTPException(status_code=400, detail="filename, element_id и project_code обязательны")
 
-        # 1. Проект: берём снапшот с фронта; если хотите гарантию — можно
-        #    подгружать с диска через get_storage_path(filename, config),
-        #    тогда project_payload не нужен. Пока используем снапшот.
         project_data = project_payload
         if not project_data.get("elements"):
-            # fallback: читаем с диска
             path = get_storage_path(filename, storage="projects", config=config)
             if not os.path.isfile(path):
                 raise HTTPException(status_code=404, detail="Project not found on disk")
             with open(path, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
 
-        # 2. Находим путь модели и её meta
         model_path = nn_template.get_model_path(config, project_code, element_id)
         model_meta_path = nn_template.get_model_meta_path(config, project_code, element_id)
 
@@ -2401,15 +2385,55 @@ async def export_nn_project(payload: dict = Body(...)):
                 detail="Модель не найдена — сначала обучите её и дождитесь завершения."
             )
 
-        # 3. Собираем ZIP
+        # --- НОВОЕ: Сбор данных о зависимостях (условие запуска и правило) ---
+        proj_meta = project_data.get("project", {})
+        startup_kks = (proj_meta.get("startup_condition") or {}).get("kks")
+        rule_kks = (proj_meta.get("diagnostic_rule") or {}).get("kks")
+
+        def get_extended_project_data(kks, config):
+            if not kks: return None
+            proj_payload = load_project_by_code(kks, config)
+            if not proj_payload: return None
+            
+            meta = proj_payload.get("project", {})
+            code = proj_payload.get("formula", "")
+            elements = proj_payload.get("elements", {})
+            
+            # Собираем входные сигналы с их описаниями
+            inputs = []
+            for el in elements.values():
+                if el.get("type") == "input-signal":
+                    props = el.get("props") or {}
+                    name = props.get("name")
+                    if name:
+                        inputs.append({
+                            "name": name,
+                            "description": props.get("description", "")
+                        })
+            
+            return {
+                "kks": kks,
+                "description": meta.get("description", ""),
+                "possibleCause": meta.get("possibleCause", ""),
+                "guidelines": meta.get("guidelines", ""),
+                "code": code,
+                "inputs": inputs
+            }
+
+        startup_data = get_extended_project_data(startup_kks, config)
+        rule_data = get_extended_project_data(rule_kks, config)
+        # ---------------------------------------------------------------------
+
+        # 3. Собираем ZIP с добавлением Word-файла
         zip_bytes = nn_export.build_zip(
             project_payload=project_data,
             model_path=model_path,
             model_meta_path=model_meta_path,
             base_name=project_code,
+            startup_data=startup_data,  # <-- передаем
+            rule_data=rule_data         # <-- передаем
         )
 
-        # 4. Стрим
         zip_name = f"{project_code}_export.zip"
         return StreamingResponse(
             _io.BytesIO(zip_bytes),

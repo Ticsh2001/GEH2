@@ -10,8 +10,18 @@ import re
 import sys
 import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
+
 
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Для работы без графического интерфейса на сервере
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+from docx import Document
+from docx.shared import Pt, Cm, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 CONFIG_VERSION = "1.0"
@@ -370,6 +380,247 @@ def build_config(project,
     }
     return _normalize_section_signs(cfg)
 
+# =============================================================================
+# Генерация схемы и Word-документа
+# =============================================================================
+
+def _generate_model_diagram(inputs, output_name):
+    """Генерирует PNG-схему модели через matplotlib с подстройкой под длину текста."""
+    n = len(inputs)
+    if n == 0:
+        n = 1
+        
+    # Ищем самую длинную строку, чтобы рассчитать ширину картинки
+    max_len = max([len(str(i)) for i in inputs] + [len(str(output_name))]) if inputs else len(str(output_name))
+    
+    # Масштабируем ширину фигуры, чтобы текст точно влез
+    fig_width = max(10, max_len * 0.25)
+    fig_height = max(3, n * 1.0)
+    
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    
+    # Фиксируем оси X и Y (от 0 до 10 по X)
+    ax.set_xlim(0, 10)
+    
+    gap_y = 0.8
+    y_positions = [-(i * gap_y) for i in range(n)]
+    model_y = -(n - 1) * gap_y / 2 if n > 1 else 0
+
+    box_h = 0.45
+    
+    # Задаем координаты блоков по X
+    in_x_start = 0.5
+    in_w = 3.5
+    
+    model_x_start = 4.5
+    model_w = 1.0
+    
+    out_x_start = 6.0
+    out_w = 3.5
+
+    # Рисуем входные блоки и стрелки к модели
+    for i, y in enumerate(y_positions):
+        inp_name = str(inputs[i]) if inputs else "Вход"
+        
+        rect = patches.Rectangle((in_x_start, y - box_h/2), in_w, box_h, 
+                                 linewidth=1.5, edgecolor='#4a90d9', facecolor='#e6f0fa')
+        ax.add_patch(rect)
+        # Центрируем текст в блоке
+        ax.text(in_x_start + in_w/2, y, inp_name, ha='center', va='center', fontsize=10, fontweight='bold')
+        
+        # Стрелка от входа к модели
+        ax.annotate('', xy=(model_x_start, model_y), xytext=(in_x_start + in_w, y),
+                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, 
+                                    connectionstyle="arc3,rad=0.1" if y != model_y else "arc3,rad=0"))
+
+    # Блок МОДЕЛЬ
+    rect_model = patches.Rectangle((model_x_start, model_y - 0.6), model_w, 1.2, 
+                                   linewidth=2, edgecolor='#f97316', facecolor='#ffedd5')
+    ax.add_patch(rect_model)
+    ax.text(model_x_start + model_w/2, model_y, "МОДЕЛЬ", ha='center', va='center', fontsize=12, fontweight='bold', color='#c2410c')
+
+    # Выходной блок
+    rect_out = patches.Rectangle((out_x_start, model_y - box_h/2), out_w, box_h, 
+                                 linewidth=1.5, edgecolor='#10b981', facecolor='#d1fae5')
+    ax.add_patch(rect_out)
+    ax.text(out_x_start + out_w/2, model_y, str(output_name), ha='center', va='center', fontsize=10, fontweight='bold')
+
+    # Стрелка от модели к выходу
+    ax.annotate('', xy=(out_x_start, model_y), xytext=(model_x_start + model_w, model_y),
+                arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
+
+    # Вычисляем границы Y
+    min_y = min(y_positions) - box_h - 0.3
+    max_y = max(y_positions) + box_h + 0.3
+    if n == 1: 
+        min_y -= 0.5
+        max_y += 0.5
+        
+    ax.set_ylim(min_y, max_y)
+    ax.axis('off')
+
+    buf = BytesIO()
+    # bbox_inches='tight' уберет лишние белые поля вокруг
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True, pad_inches=0.1)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rule_data=None):
+    """Генерирует DOCX с описанием модели."""
+    doc = Document()
+    
+    section = doc.sections[0]
+    section.top_margin = Cm(2)
+    section.bottom_margin = Cm(2)
+    section.left_margin = Cm(3)
+    section.right_margin = Cm(1.5)
+
+    def add_text(text="", bold=False):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        pf = p.paragraph_format
+        pf.first_line_indent = Cm(1.25)
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(0)
+        pf.line_spacing = 1.5
+        run = p.add_run(text)
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(12)
+        run.bold = bold
+        return p
+
+    def add_multiline(text="", bold=False):
+        lines = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if not lines:
+            add_text("", bold=bold)
+            return
+        for line in lines:
+            add_text(line, bold=bold)
+
+    def add_heading(text):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        pf = p.paragraph_format
+        pf.space_before = Pt(12)
+        pf.space_after = Pt(6)
+        pf.line_spacing = 1.5
+        run = p.add_run(text)
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(14)
+        run.bold = True
+        return p
+
+    proj_meta = project_payload.get("project", {})
+    code = proj_meta.get("code", "")
+    desc = proj_meta.get("description", "")
+    metrics = proj_meta.get("metrics", {}) or {}
+
+    # ==================== РАЗДЕЛ 1: МОДЕЛЬ ====================
+    add_heading("1. Модель")
+
+    add_text("KKS модели:", bold=True)
+    add_multiline(code)
+
+    add_text("Описание:", bold=True)
+    add_multiline(desc)
+
+    add_text("Основные метрики:", bold=True)
+    mae = metrics.get("mae")
+    rmse = metrics.get("rmse")
+    mse = metrics.get("mse")
+    metrics_text = f"MAE: {mae if mae is not None else '—'};  RMSE: {rmse if rmse is not None else '—'};  MSE: {mse if mse is not None else '—'}"
+    add_multiline(metrics_text)
+
+    add_text("Схема модели:", bold=True)
+    inputs = [inp["name"] for inp in config_data.get("inputs", [])]
+    if inputs:
+        img_buf = _generate_model_diagram(inputs, code)
+        # Центрируем картинку без красной строки
+        p_img = doc.add_paragraph()
+        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_img.paragraph_format.first_line_indent = Cm(0)
+        # Делаем картинку шириной во всю доступную область (16 см максимум, но 15 см безопаснее)
+        p_img.add_run().add_picture(img_buf, width=Inches(6.0))
+    else:
+        add_text("(нет входных сигналов)")
+
+    add_text("Используемые параметры:", bold=True)
+    if config_data.get("inputs"):
+        for inp in config_data["inputs"]:
+            name = inp.get("name", "")
+            d = inp.get("description", "")
+            line = f"- {name}"
+            if d:
+                line += f" — {d}"
+            add_multiline(line)
+    else:
+        add_text("- (нет)")
+
+    # ==================== РАЗДЕЛ 2: УСЛОВИЯ ЗАПУСКА ====================
+    if startup_data:
+        add_heading("2. Условия запуска")
+        
+        add_text("KKS условия:", bold=True)
+        add_multiline(startup_data['kks'])
+        
+        if startup_data.get("description"):
+            add_text("Описание условия:", bold=True)
+            add_multiline(startup_data['description'])
+            
+        add_text("Используемые параметры условия:", bold=True)
+        if startup_data.get("inputs"):
+            for inp in startup_data["inputs"]:
+                name = inp.get("name", "")
+                d = inp.get("description", "")
+                line = f"- {name}"
+                if d:
+                    line += f" — {d}"
+                add_multiline(line)
+        else:
+            add_text("- (нет)")
+
+    # ==================== РАЗДЕЛ 3: ДИАГНОСТИЧЕСКОЕ ПРАВИЛО ====================
+    if rule_data:
+        add_heading("3. Диагностическое правило")
+        
+        # Точно копируем логику из export.py _build_rules_docx_bytes
+        add_text(f"Правило ({rule_data['kks']}):", bold=True)
+
+        add_text("Краткое описание:", bold=True)
+        add_multiline(rule_data.get("description", ""))
+
+        add_text("Причина:", bold=True)
+        add_multiline(rule_data.get("possibleCause", ""))
+
+        add_text("Логика определения:", bold=True)
+        add_text("") # Пустая строка для отступа
+
+        add_text("Формула:", bold=True)
+        add_multiline(rule_data.get("code", ""))
+
+        add_text("Используемые параметры:", bold=True)
+        if rule_data.get("inputs"):
+            for inp in rule_data["inputs"]:
+                name = inp.get("name", "")
+                d = inp.get("description", "").replace("\n", "; ")
+                line = f"- {name}"
+                if d:
+                    line += f" — {d}"
+                add_multiline(line)
+        else:
+            add_text("- (нет)")
+
+        add_text("Время срабатывания:", bold=True)
+        add_text("") # Пустая строка
+
+        add_text("Методические указания:", bold=True)
+        add_multiline(rule_data.get("guidelines", ""))
+
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
 
 # =============================================================================
 # Упаковка в ZIP
@@ -378,12 +629,11 @@ def build_config(project,
 def build_zip(project_payload: dict,
               model_path: str,
               model_meta_path: str,
-              base_name: str) -> bytes:
+              base_name: str,
+              startup_data: dict = None,
+              rule_data: dict = None) -> bytes:
     """
-    Возвращает байты ZIP-архива с тремя файлами:
-      <base_name>.keras          — обученная модель
-      <base_name>_meta.json      — метаданные модели
-      <base_name>.config.json    — inference-конфиг
+    Возвращает байты ZIP-архива.
     """
     if not os.path.isfile(model_path):
         raise FileNotFoundError(f"Модель не найдена: {model_path}")
@@ -391,6 +641,9 @@ def build_zip(project_payload: dict,
         raise FileNotFoundError(f"Метаданные модели не найдены: {model_meta_path}")
 
     cfg = build_config(project_payload)
+    
+    # Генерируем Word
+    docx_bytes = _build_model_docx_bytes(project_payload, cfg, startup_data, rule_data)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -400,5 +653,8 @@ def build_zip(project_payload: dict,
             f"{base_name}.config.json",
             json.dumps(cfg, ensure_ascii=False, indent=2)
         )
+        # Добавляем Word
+        zf.writestr(f"{base_name}_описание.docx", docx_bytes)
+        
     buf.seek(0)
     return buf.getvalue()
