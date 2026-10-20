@@ -365,6 +365,8 @@ def build_config(project,
         "inputs": input_meta,
         "chain_input": chain_input,
         "chain_output": chain_output,
+        "startup_condition": proj_meta.get("startup_condition"),
+        "diagnostic_rule": proj_meta.get("diagnostic_rule"),
     }
     return _normalize_section_signs(cfg)
 

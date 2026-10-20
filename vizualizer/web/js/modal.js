@@ -1225,10 +1225,12 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 </div>
             `;
         }
-        if (project.type === PROJECT_TYPE.NEURAL_TEMPLATE || project.type === PROJECT_TYPE.NEURAL_NETWORK) {
+                if (project.type === PROJECT_TYPE.NEURAL_TEMPLATE || project.type === PROJECT_TYPE.NEURAL_NETWORK) {
             const modeText = project.type === PROJECT_TYPE.NEURAL_TEMPLATE ? 'Дизайн' : 'Обучение';
             const isTraining = project.type === PROJECT_TYPE.NEURAL_NETWORK;
             const metrics = project.metrics || {};
+            const startup = project.startup_condition || {};
+            const diagRule = project.diagnostic_rule || {};
 
             // Блок полей, который рендерится ТОЛЬКО для режима "Обучение"
             let trainingFieldsHTML = '';
@@ -1238,20 +1240,34 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                     <h4 style="margin-bottom:10px; font-size:14px; color:#9ca3af;">Параметры запуска и качества</h4>
                     
                     <div class="modal-row" style="position:relative;">
-                        <label>Условие запуска (Проект 1/0):</label>
-                        <input type="text" id="project-run-condition" value="${project.run_condition || ''}" 
+                        <label>Условие запуска (KKS):</label>
+                        <input type="text" id="project-startup-kks" value="${startup.kks || ''}" 
                                placeholder="Начните вводить KKS или используйте *" autocomplete="off">
-                        <div id="run-condition-dropdown" style="
+                        <div id="startup-dropdown" style="
                             display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
                             background:#1f2937; border:1px solid #374151; border-radius:6px;
                             max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
                         "></div>
-                        <small style="color:#999; margin-top:4px; display:block;">
-                            Сигнал, который возвращает 1 (модель работает) или 0 (модель заблокирована).
-                        </small>
+                        <input type="text" id="project-startup-desc" value="${startup.description || ''}" 
+                               readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
+                               placeholder="Описание подтянется автоматически">
                     </div>
 
-                    <div style="display:flex; gap:10px; margin-top:10px;">
+                    <div class="modal-row" style="position:relative; margin-top:15px;">
+                        <label>Диагностическое правило (KKS):</label>
+                        <input type="text" id="project-diag-kks" value="${diagRule.kks || ''}" 
+                               placeholder="Начните вводить KKS правила или используйте *" autocomplete="off">
+                        <div id="diag-dropdown" style="
+                            display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
+                            background:#1f2937; border:1px solid #374151; border-radius:6px;
+                            max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+                        "></div>
+                        <input type="text" id="project-diag-desc" value="${diagRule.description || ''}" 
+                               readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
+                               placeholder="Описание подтянется автоматически">
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:15px;">
                         <div class="modal-row" style="flex:1;">
                             <label>MAE:</label>
                             <input type="number" id="project-metric-mae" value="${metrics.mae ?? ''}" step="any" placeholder="0.00">
@@ -1285,13 +1301,16 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 ${trainingFieldsHTML}
             `;
 
-            // Логика автокомплита для поля "Условие запуска"
+            // Логика автокомплита
             if (isTraining) {
-                const runCondInput = document.getElementById('project-run-condition');
-                const dropdown = document.getElementById('run-condition-dropdown');
-                let debounceTimer = null;
+                const setupAutocomplete = (inputId, dropdownId, descId, filterFn) => {
+                    const input = document.getElementById(inputId);
+                    const dropdown = document.getElementById(dropdownId);
+                    const desc = document.getElementById(descId);
+                    if (!input || !dropdown || !desc) return;
 
-                if (runCondInput && dropdown) {
+                    let debounceTimer = null;
+
                     const renderDropdown = (items) => {
                         if (!items || items.length === 0) {
                             dropdown.style.display = 'none';
@@ -1299,7 +1318,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                             return;
                         }
                         dropdown.innerHTML = items.map(item => `
-                            <div class="signal-suggestion" data-code="${item.Tagname}" style="
+                            <div class="signal-suggestion" data-code="${item.Tagname}" data-desc="${item.Description || ''}" style="
                                 padding:6px 10px; cursor:pointer; font-size:13px; color:#e5e7eb;
                                 border-bottom: 1px solid #374151;
                             ">
@@ -1314,39 +1333,50 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                             row.addEventListener('mouseleave', () => row.style.background = 'transparent');
                             row.addEventListener('mousedown', (e) => {
                                 e.preventDefault(); // Чтобы не сработал blur
-                                runCondInput.value = row.dataset.code;
+                                input.value = row.dataset.code;
+                                desc.value = row.dataset.desc;
                                 dropdown.style.display = 'none';
                             });
                         });
                     };
 
                     const fetchSignals = async () => {
-                        const q = runCondInput.value || '';
+                        const q = input.value || '';
                         try {
                             const data = await Settings.fetchSignals(q, 50);
-                            // Фильтруем: показываем только проекты, которые могут возвращать 1/0
-                            const projectItems = (data.items || []).filter(item => 
-                                item.Type === 'parameter' || item.Type === 'rule' || item.Type === 'neural_network'
-                            );
-                            renderDropdown(projectItems);
+                            const filtered = (data.items || []).filter(filterFn);
+                            renderDropdown(filtered);
                         } catch (e) {
                             console.warn('Не удалось загрузить список сигналов', e);
                         }
                     };
 
-                    runCondInput.addEventListener('input', () => {
+                    input.addEventListener('input', () => {
+                        // Если пользователь стер KKS, сбрасываем и описание
+                        if (input.value.trim() === '') desc.value = '';
+                        
                         clearTimeout(debounceTimer);
                         debounceTimer = setTimeout(fetchSignals, 200);
                     });
-                    runCondInput.addEventListener('focus', fetchSignals);
+                    input.addEventListener('focus', fetchSignals);
                     
                     // Закрытие по клику вне дропдауна
                     document.addEventListener('click', function closeDropdown(e) {
-                        if (e.target !== runCondInput && !dropdown.contains(e.target)) {
+                        if (e.target !== input && !dropdown.contains(e.target)) {
                             dropdown.style.display = 'none';
                         }
                     });
-                }
+                };
+
+                // Условие запуска: ищем среди parameter, neural_network
+                setupAutocomplete('project-startup-kks', 'startup-dropdown', 'project-startup-desc', 
+                    item => item.Type === 'parameter' || item.Type === 'neural_network'
+                );
+
+                // Диагностическое правило: ищем строго среди rule
+                setupAutocomplete('project-diag-kks', 'diag-dropdown', 'project-diag-desc', 
+                    item => item.Type === 'rule'
+                );
             }
 
             this.showModal('project-modal-overlay');
@@ -1558,7 +1588,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
             argDescriptions[argName] = textarea?.value?.trim() || '';
             });
             AppState.project.templateArgs = argDescriptions;
-                  } else if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
+        } else if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
             const descEl = document.getElementById('project-description');
             AppState.project.description = descEl ? descEl.value : '';
             AppState.project.dimension = '';
@@ -1568,8 +1598,15 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
 
             // Сохраняем новые поля ТОЛЬКО если это проект обучения
             if (type === PROJECT_TYPE.NEURAL_NETWORK) {
-                const runCondEl = document.getElementById('project-run-condition');
-                if (runCondEl) AppState.project.run_condition = runCondEl.value.trim();
+                const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
+
+                const startupKks = getVal('project-startup-kks');
+                const startupDesc = getVal('project-startup-desc');
+                AppState.project.startup_condition = startupKks ? { kks: startupKks, description: startupDesc } : null;
+
+                const diagKks = getVal('project-diag-kks');
+                const diagDesc = getVal('project-diag-desc');
+                AppState.project.diagnostic_rule = diagKks ? { kks: diagKks, description: diagDesc } : null;
 
                 const parseMetric = (id) => {
                     const el = document.getElementById(id);
