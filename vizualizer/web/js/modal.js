@@ -1227,6 +1227,47 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
         }
         if (project.type === PROJECT_TYPE.NEURAL_TEMPLATE || project.type === PROJECT_TYPE.NEURAL_NETWORK) {
             const modeText = project.type === PROJECT_TYPE.NEURAL_TEMPLATE ? 'Дизайн' : 'Обучение';
+            const isTraining = project.type === PROJECT_TYPE.NEURAL_NETWORK;
+            const metrics = project.metrics || {};
+
+            // Блок полей, который рендерится ТОЛЬКО для режима "Обучение"
+            let trainingFieldsHTML = '';
+            if (isTraining) {
+                trainingFieldsHTML = `
+                    <hr style="border-color:#374151; margin:15px 0;">
+                    <h4 style="margin-bottom:10px; font-size:14px; color:#9ca3af;">Параметры запуска и качества</h4>
+                    
+                    <div class="modal-row" style="position:relative;">
+                        <label>Условие запуска (Проект 1/0):</label>
+                        <input type="text" id="project-run-condition" value="${project.run_condition || ''}" 
+                               placeholder="Начните вводить KKS или используйте *" autocomplete="off">
+                        <div id="run-condition-dropdown" style="
+                            display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
+                            background:#1f2937; border:1px solid #374151; border-radius:6px;
+                            max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+                        "></div>
+                        <small style="color:#999; margin-top:4px; display:block;">
+                            Сигнал, который возвращает 1 (модель работает) или 0 (модель заблокирована).
+                        </small>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:10px;">
+                        <div class="modal-row" style="flex:1;">
+                            <label>MAE:</label>
+                            <input type="number" id="project-metric-mae" value="${metrics.mae ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                        <div class="modal-row" style="flex:1;">
+                            <label>RMSE:</label>
+                            <input type="number" id="project-metric-rmse" value="${metrics.rmse ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                        <div class="modal-row" style="flex:1;">
+                            <label>MSE:</label>
+                            <input type="number" id="project-metric-mse" value="${metrics.mse ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                    </div>
+                `;
+            }
+
             content.innerHTML = `
                 <div class="modal-row">
                     <label>Режим:</label>
@@ -1240,7 +1281,74 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                     <label>Описание:</label>
                     <textarea id="project-description" placeholder="Описание нейросетевой модели">${project.description || ''}</textarea>
                 </div>
+                
+                ${trainingFieldsHTML}
             `;
+
+            // Логика автокомплита для поля "Условие запуска"
+            if (isTraining) {
+                const runCondInput = document.getElementById('project-run-condition');
+                const dropdown = document.getElementById('run-condition-dropdown');
+                let debounceTimer = null;
+
+                if (runCondInput && dropdown) {
+                    const renderDropdown = (items) => {
+                        if (!items || items.length === 0) {
+                            dropdown.style.display = 'none';
+                            dropdown.innerHTML = '';
+                            return;
+                        }
+                        dropdown.innerHTML = items.map(item => `
+                            <div class="signal-suggestion" data-code="${item.Tagname}" style="
+                                padding:6px 10px; cursor:pointer; font-size:13px; color:#e5e7eb;
+                                border-bottom: 1px solid #374151;
+                            ">
+                                <b>${item.Tagname}</b> 
+                                ${item.Description ? `<span style="color:#9ca3af; font-size:11px;">— ${item.Description}</span>` : ''}
+                            </div>
+                        `).join('');
+                        dropdown.style.display = 'block';
+                        
+                        dropdown.querySelectorAll('.signal-suggestion').forEach(row => {
+                            row.addEventListener('mouseenter', () => row.style.background = '#374151');
+                            row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+                            row.addEventListener('mousedown', (e) => {
+                                e.preventDefault(); // Чтобы не сработал blur
+                                runCondInput.value = row.dataset.code;
+                                dropdown.style.display = 'none';
+                            });
+                        });
+                    };
+
+                    const fetchSignals = async () => {
+                        const q = runCondInput.value || '';
+                        try {
+                            const data = await Settings.fetchSignals(q, 50);
+                            // Фильтруем: показываем только проекты, которые могут возвращать 1/0
+                            const projectItems = (data.items || []).filter(item => 
+                                item.Type === 'parameter' || item.Type === 'rule' || item.Type === 'neural_network'
+                            );
+                            renderDropdown(projectItems);
+                        } catch (e) {
+                            console.warn('Не удалось загрузить список сигналов', e);
+                        }
+                    };
+
+                    runCondInput.addEventListener('input', () => {
+                        clearTimeout(debounceTimer);
+                        debounceTimer = setTimeout(fetchSignals, 200);
+                    });
+                    runCondInput.addEventListener('focus', fetchSignals);
+                    
+                    // Закрытие по клику вне дропдауна
+                    document.addEventListener('click', function closeDropdown(e) {
+                        if (e.target !== runCondInput && !dropdown.contains(e.target)) {
+                            dropdown.style.display = 'none';
+                        }
+                    });
+                }
+            }
+
             this.showModal('project-modal-overlay');
             return;
         }
@@ -1450,13 +1558,32 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
             argDescriptions[argName] = textarea?.value?.trim() || '';
             });
             AppState.project.templateArgs = argDescriptions;
-         } else if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
+                  } else if (type === PROJECT_TYPE.NEURAL_TEMPLATE || type === PROJECT_TYPE.NEURAL_NETWORK) {
             const descEl = document.getElementById('project-description');
             AppState.project.description = descEl ? descEl.value : '';
             AppState.project.dimension = '';
             AppState.project.possibleCause = '';
             AppState.project.guidelines = '';
             AppState.project.templateArgs = {};
+
+            // Сохраняем новые поля ТОЛЬКО если это проект обучения
+            if (type === PROJECT_TYPE.NEURAL_NETWORK) {
+                const runCondEl = document.getElementById('project-run-condition');
+                if (runCondEl) AppState.project.run_condition = runCondEl.value.trim();
+
+                const parseMetric = (id) => {
+                    const el = document.getElementById(id);
+                    if (!el || el.value.trim() === '') return null;
+                    const val = parseFloat(el.value);
+                    return isNaN(val) ? null : val;
+                };
+                
+                AppState.project.metrics = {
+                    mae: parseMetric('project-metric-mae'),
+                    rmse: parseMetric('project-metric-rmse'),
+                    mse: parseMetric('project-metric-mse')
+                };
+            }
         }
 
         this.hideModal('project-modal-overlay');
