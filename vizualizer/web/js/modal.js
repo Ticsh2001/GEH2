@@ -1258,6 +1258,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                                placeholder="Описание подтянется автоматически">
                     </div>
 
+                                       
                     <div class="modal-row" style="position:relative; margin-top:15px;">
                         <label>Диагностическое правило (KKS):</label>
                         <div style="display: flex; gap: 8px;">
@@ -1270,7 +1271,8 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                                     max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
                                 "></div>
                             </div>
-                            <button class="modal-btn" id="btn-open-diag" style="white-space: nowrap; padding: 0 12px;" ${!diagRule.kks ? 'disabled' : ''}>🔗 Открыть</button>
+                            <button class="modal-btn" id="btn-open-diag" style="white-space: nowrap; padding: 0 12px;" ${!diagRule.kks ? 'disabled' : ''}>🔗</button>
+                            <button class="modal-btn apply-btn" id="btn-create-diag-rule" style="white-space: nowrap; padding: 0 12px;">✨ Создать</button>
                         </div>
                         <input type="text" id="project-diag-desc" value="${diagRule.description || ''}" 
                                readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
@@ -1461,6 +1463,47 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                         }
                     };
                 };
+
+                                // --- Логика кнопки "Создать правило" ---
+                const btnCreateRule = document.getElementById('btn-create-diag-rule');
+                if (btnCreateRule) {
+                    btnCreateRule.onclick = (e) => {
+                        e.preventDefault();
+                        
+                        const nnKks = AppState.project.code;
+                        if (!nnKks) {
+                            alert("Сначала укажите и сохраните код проекта нейросети!");
+                            return;
+                        }
+
+                        // Ищем Y_KKS в графе (подключен к in-2 или in-4 шаблона)
+                        let yKks = '';
+                        const template = Object.values(AppState.elements).find(el => el.nnType === 'nn-template');
+                        if (template) {
+                            const conn = AppState.connections.find(c => 
+                                c.toElement === template.id && (c.toPort === 'in-2' || c.toPort === 'in-4')
+                            );
+                            if (conn) {
+                                const labeler = AppState.elements[conn.fromElement];
+                                if (labeler && labeler.props && labeler.props.y_column) {
+                                    yKks = labeler.props.y_column;
+                                }
+                            }
+                        }
+
+                        if (!yKks) {
+                            alert("Не удалось найти Y-сигнал в проекте. Убедитесь, что к шаблону подключен labeler с выбранным y_column.");
+                            return;
+                        }
+
+                        const p95 = metrics.p95 || 0;
+                        const config = AppState.currentConfig || '';
+                        
+                        // Формируем URL и открываем новую вкладку
+                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&config=${encodeURIComponent(config)}`;
+                        window.open(url, '_blank');
+                    };
+                }
 
                 setupOpenButton('btn-open-startup', 'project-startup-kks', 'parameter');
                 setupOpenButton('btn-open-diag', 'project-diag-kks', 'rule');

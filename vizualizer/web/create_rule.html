@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Создание диагностического правила</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; padding: 40px; display: flex; justify-content: center; }
+        .container { background: #16213e; padding: 30px; border-radius: 12px; border: 1px solid #0f3460; width: 100%; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        h1 { color: #e94560; font-size: 22px; margin-bottom: 20px; }
+        .info-block { background: #0a0a1a; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4a90d9; font-size: 14px; }
+        .info-block div { margin-bottom: 6px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 14px; color: #aaa; }
+        input[type="text"], input[type="number"], select { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #233860; background: #0f3460; color: #fff; font-size: 14px; box-sizing: border-box; }
+        .btn { padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 15px; width: 100%; margin-top: 10px; }
+        .btn-primary { background: #4ade80; color: #0a0a0a; }
+        .btn-primary:hover { background: #22c55e; }
+        .hidden { display: none !important; }
+        #status { margin-top: 15px; padding: 10px; border-radius: 6px; display: none; font-size: 14px; white-space: pre-wrap; }
+        .status-success { background: rgba(74, 222, 128, 0.2); color: #4ade80; border: 1px solid #4ade80; }
+        .status-error { background: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✨ Мастер создания правила</h1>
+        
+        <div class="info-block">
+            <div><strong>Модель (KKS):</strong> <span id="val-nn-kks">-</span></div>
+            <div><strong>Целевой параметр (Y):</strong> <span id="val-y-kks">-</span></div>
+        </div>
+
+        <div class="form-group">
+            <label>Тип модели:</label>
+            <select id="model-type">
+                <option value="prediction">Предсказательная (24 часа вперед)</option>
+                <option value="normal">Нормальное состояние (контроль качества)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>95-й перцентиль модели (Погрешность):</label>
+            <input type="number" id="val-p95" step="any">
+        </div>
+
+        <div id="prediction-fields">
+            <div class="form-group">
+                <label>Предельно допустимое значение измеряемого по <span class="y-kks-text"></span> параметра:</label>
+                <input type="number" id="val-max-param" step="any" placeholder="Введите значение...">
+            </div>
+        </div>
+
+        <button id="btn-save" class="btn btn-primary">Создать проекты</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const nnKks = urlParams.get('nn_kks') || '';
+        const yKks = urlParams.get('y_kks') || '';
+        const p95 = parseFloat(urlParams.get('p95')) || 0;
+        const config = urlParams.get('config') || '';
+
+        document.getElementById('val-nn-kks').textContent = nnKks;
+        document.getElementById('val-y-kks').textContent = yKks;
+        document.querySelectorAll('.y-kks-text').forEach(el => el.textContent = yKks);
+        
+        // Автозаполнение
+        document.getElementById('val-p95').value = p95;
+
+        const statusDiv = document.getElementById('status');
+        const showStatus = (msg, isError = false) => {
+            statusDiv.textContent = msg;
+            statusDiv.className = isError ? 'status-error' : 'status-success';
+            statusDiv.style.display = 'block';
+        };
+
+        const addConfig = (url) => url + (url.includes('?') ? '&' : '?') + `config=${encodeURIComponent(config)}`;
+
+        // Переключение полей в зависимости от типа модели
+        document.getElementById('model-type').addEventListener('change', (e) => {
+            const type = e.target.value;
+            if (type === 'prediction') {
+                document.getElementById('prediction-fields').classList.remove('hidden');
+            } else {
+                document.getElementById('prediction-fields').classList.add('hidden');
+            }
+        });
+
+        document.getElementById('btn-save').onclick = async () => {
+            const modelType = document.getElementById('model-type').value;
+            const p95Val = parseFloat(document.getElementById('val-p95').value);
+
+            if (isNaN(p95Val)) {
+                showStatus('Заполните поле 95-го перцентиля!', true);
+                return;
+            }
+
+            let maxVal = null;
+            if (modelType === 'prediction') {
+                maxVal = parseFloat(document.getElementById('val-max-param').value);
+                if (isNaN(maxVal)) {
+                    showStatus('Введите предельно допустимое значение!', true);
+                    return;
+                }
+            }
+
+            const btn = document.getElementById('btn-save');
+            btn.disabled = true;
+            btn.textContent = '⏳ Создание...';
+
+            try {
+                // 1. Получаем размерность Y-сигнала
+                const infoResp = await fetch(addConfig(`/api/signal-info/${encodeURIComponent(yKks)}`));
+                const infoData = await infoResp.json();
+                const dimension = infoData.dimension || '';
+
+                // Имена проектов
+                const maxConstKks = `${nnKks}_MAX_PARAM_CONST`;
+                const p95ConstKks = `${nnKks}_PERCENTIL_CONST`;
+                const ruleKks = `${nnKks}_PROBLEM`;
+
+                // Хелпер для создания проекта-константы
+                const createConstProject = async (code, value, description) => {
+                    const payload = {
+                        version: '1.0',
+                        project: {
+                            code: code,
+                            type: 'parameter',
+                            description: description,
+                            dimension: dimension,
+                            author: 'Система',
+                            status: 'draft',
+                            statusHistory: []
+                        },
+                        elements: {
+                            const_1: { id: 'const_1', type: 'const', x: 100, y: 100, width: 120, height: 60, props: { value: value, description: description } },
+                            out_1: { id: 'out_1', type: 'output', x: 300, y: 100, width: 150, height: 60, props: { label: code } }
+                        },
+                        connections: [
+                            { fromElement: 'const_1', fromPort: 'out-0', toElement: 'out_1', toPort: 'in-0' }
+                        ],
+                        counter: 2,
+                        code: String(value)
+                    };
+                    const resp = await fetch(addConfig('/api/project/save'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: `${code}_parameter.json`, target: 'projects', content: payload })
+                    });
+                    if (!resp.ok) throw new Error(`Ошибка сохранения ${code}`);
+                };
+
+                // 2. Всегда создаем константу перцентиля
+                await createConstProject(p95ConstKks, p95Val, `95-й перцентиль модели. Погрешность работы модели, при которой 95% всех ее предсказаний ниже этой величины`);
+
+                // 3. Формируем структуру правила
+                let ruleElements = {};
+                let ruleConnections = [];
+                let formulaText = '';
+
+                if (modelType === 'prediction') {
+                    // Создаем константу максимума
+                    await createConstProject(maxConstKks, maxVal, `Предельно допустимое значение измеряемого по ${yKks} параметра`);
+
+                    formulaText = `prediction_nn(${nnKks}, ${maxConstKks}, ${p95ConstKks})`;
+                    
+                    ruleElements = {
+                        in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
+                        in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: maxConstKks } },
+                        in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } },
+                        formula_4: { 
+                            id: 'formula_4', type: 'formula', x: 350, y: 150, width: 180, height: 100, 
+                            props: { expression: formulaText, inputCount: 3 } 
+                        },
+                        out_5: { id: 'out_5', type: 'output', x: 600, y: 150, width: 150, height: 60, props: { label: ruleKks } }
+                    };
+                    ruleConnections = [
+                        { fromElement: 'in_1', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-0' },
+                        { fromElement: 'in_2', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-1' },
+                        { fromElement: 'in_3', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-2' },
+                        { fromElement: 'formula_4', fromPort: 'out-0', toElement: 'out_5', toPort: 'in-0' }
+                    ];
+
+                } else if (modelType === 'normal') {
+                    formulaText = `normal_operation_nn(${nnKks}, ${yKks}, ${p95ConstKks})`;
+                    
+                    ruleElements = {
+                        in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
+                        in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: yKks } },
+                        in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } },
+                        formula_4: { 
+                            id: 'formula_4', type: 'formula', x: 350, y: 150, width: 180, height: 100, 
+                            props: { expression: formulaText, inputCount: 3 } 
+                        },
+                        out_5: { id: 'out_5', type: 'output', x: 600, y: 150, width: 150, height: 60, props: { label: ruleKks } }
+                    };
+                    ruleConnections = [
+                        { fromElement: 'in_1', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-0' },
+                        { fromElement: 'in_2', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-1' },
+                        { fromElement: 'in_3', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-2' },
+                        { fromElement: 'formula_4', fromPort: 'out-0', toElement: 'out_5', toPort: 'in-0' }
+                    ];
+                }
+
+                // 4. Сохраняем проект правила
+                const rulePayload = {
+                    version: '1.0',
+                    project: {
+                        code: ruleKks,
+                        type: 'rule',
+                        description: '',
+                        possibleCause: '',
+                        guidelines: '',
+                        author: 'Система',
+                        status: 'draft',
+                        statusHistory: []
+                    },
+                    elements: ruleElements,
+                    connections: ruleConnections,
+                    counter: 5,
+                    code: formulaText
+                };
+
+                const ruleResp = await fetch(addConfig('/api/project/save'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: `${ruleKks}_rule.json`, target: 'projects', content: rulePayload })
+                });
+                
+                if (!ruleResp.ok) throw new Error(`Ошибка создания правила ${ruleKks}`);
+
+                // Успех
+                let successMsg = `✅ Успешно созданы проекты:\n1. ${p95ConstKks}`;
+                if (modelType === 'prediction') successMsg += `\n2. ${maxConstKks}`;
+                successMsg += `\n3. ${ruleKks}\n\nВы можете закрыть эту вкладку и выбрать правило в свойствах проекта.`;
+                
+                showStatus(successMsg);
+                btn.textContent = 'Готово';
+                
+                if (window.opener) {
+                    window.opener.postMessage({ type: 'RULE_CREATED', kks: ruleKks }, '*');
+                }
+
+            } catch (e) {
+                console.error(e);
+                showStatus(`❌ Ошибка: ${e.message}`, true);
+                btn.disabled = false;
+                btn.textContent = 'Создать проекты';
+            }
+        };
+    </script>
+</body>
+</html>

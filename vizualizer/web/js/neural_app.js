@@ -17,6 +17,17 @@ const NeuralApp = {
         this.setupMultiSelection();
         Viewport.init();
         Modal.init();
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'RULE_CREATED') {
+                const kks = event.data.kks;
+                const input = document.getElementById('project-diag-kks');
+                if (input) {
+                    input.value = kks;
+                    // Триггерим событие, чтобы описание загрузилось (если есть обработчик)
+                    input.dispatchEvent(new Event('input'));
+                }
+            }
+        });
 
         document.getElementById('btn-new').addEventListener('click', () => this.newProject());
         document.getElementById('btn-save').addEventListener('click', () => this.saveProject());
