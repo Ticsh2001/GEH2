@@ -1281,6 +1281,32 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                             <input type="number" id="project-metric-mse" value="${metrics.mse ?? ''}" step="any" placeholder="0.00">
                         </div>
                     </div>
+
+                    <div style="display:flex; gap:10px; margin-top:10px;">
+                        <div class="modal-row" style="flex:1;">
+                            <label>R²:</label>
+                            <input type="number" id="project-metric-r2" value="${metrics.r2 ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                        <div class="modal-row" style="flex:1;">
+                            <label>Bias (Среднее):</label>
+                            <input type="number" id="project-metric-bias" value="${metrics.bias ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                        <div class="modal-row" style="flex:1;">
+                            <label>Стд. отклонение:</label>
+                            <input type="number" id="project-metric-std" value="${metrics.std ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:10px;">
+                        <div class="modal-row" style="flex:1;">
+                            <label>95-й перцентиль:</label>
+                            <input type="number" id="project-metric-p95" value="${metrics.p95 ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                        <div class="modal-row" style="flex:1;">
+                            <label>99-й перцентиль:</label>
+                            <input type="number" id="project-metric-p99" value="${metrics.p99 ?? ''}" step="any" placeholder="0.00">
+                        </div>
+                    </div>
                 `;
             }
 
@@ -1618,7 +1644,12 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 AppState.project.metrics = {
                     mae: parseMetric('project-metric-mae'),
                     rmse: parseMetric('project-metric-rmse'),
-                    mse: parseMetric('project-metric-mse')
+                    mse: parseMetric('project-metric-mse'),
+                    r2: parseMetric('project-metric-r2'),
+                    bias: parseMetric('project-metric-bias'),
+                    std: parseMetric('project-metric-std'),
+                    p95: parseMetric('project-metric-p95'),
+                    p99: parseMetric('project-metric-p99')
                 };
             }
         }

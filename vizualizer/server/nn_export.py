@@ -529,8 +529,29 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
     mae = metrics.get("mae")
     rmse = metrics.get("rmse")
     mse = metrics.get("mse")
-    metrics_text = f"MAE: {mae if mae is not None else '—'};  RMSE: {rmse if rmse is not None else '—'};  MSE: {mse if mse is not None else '—'}"
-    add_multiline(metrics_text)
+    r2 = metrics.get("r2")
+    bias = metrics.get("bias")
+    std = metrics.get("std")
+    p95 = metrics.get("p95")
+    p99 = metrics.get("p99")
+    
+    # Форматируем аккуратно
+    f_mae = f"{mae:.4g}" if mae is not None else "—"
+    f_rmse = f"{rmse:.4g}" if rmse is not None else "—"
+    f_mse = f"{mse:.4g}" if mse is not None else "—"
+    f_r2 = f"{r2:.4f}" if r2 is not None else "—"
+    f_bias = f"{bias:.4g}" if bias is not None else "—"
+    f_std = f"{std:.4g}" if std is not None else "—"
+    f_p95 = f"{p95:.4g}" if p95 is not None else "—"
+    f_p99 = f"{p99:.4g}" if p99 is not None else "—"
+
+    metrics_text_1 = f"MAE: {f_mae};  RMSE: {f_rmse};  MSE: {f_mse};  R²: {f_r2}"
+    metrics_text_2 = f"Bias (Среднее): {f_bias};  Стд. отклонение: {f_std}"
+    metrics_text_3 = f"95-й перцентиль (по модулю): {f_p95};  99-й перцентиль (по модулю): {f_p99}"
+    
+    add_multiline(metrics_text_1)
+    add_multiline(metrics_text_2)
+    add_multiline(metrics_text_3)
 
     add_text("Схема модели:", bold=True)
     inputs = [inp["name"] for inp in config_data.get("inputs", [])]

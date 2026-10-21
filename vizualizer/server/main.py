@@ -341,12 +341,19 @@ def load_signal_data_optimized(signal_names: List[str], config: str) -> Dict[str
         raise RuntimeError("signalArchiveFolder not configured")
     signal_index = load_signal_index(config)
     signal_names_set = set(signal_names)
+    
+    # Собираем ВСЕ файлы, где встречаются нужные сигналы
     files_to_load = set()
     for signal_name in signal_names_set:
         if signal_name in signal_index:
             files_to_load.update(signal_index[signal_name])
+            
+    # ВАЖНО: Сортируем файлы по времени модификации (сначала старые, потом новые)
+    # Это гарантирует, что самые свежие данные перезапишут старые
+    sorted_files = sorted(files_to_load, key=lambda f: os.path.getmtime(f))
+            
     found_signals = {}
-    for filepath in files_to_load:
+    for filepath in sorted_files:
         try:
             df = pd.read_csv(filepath, encoding="ISO-8859-2", sep=";")
             df["TIME"] = df["TIME"].str.replace(",", ".", regex=False)
@@ -356,11 +363,17 @@ def load_signal_data_optimized(signal_names: List[str], config: str) -> Dict[str
             df = df.dropna(subset=["datetime"])
             df = df.drop(['DATE', 'TIME'], axis=1)
             df = df.sort_values("datetime")
+            
             available_columns = set(df.columns) & signal_names_set
             for signal_name in available_columns:
-                if signal_name not in found_signals:
-                    found_signals[signal_name] = df[["datetime", signal_name]].copy()
-                    found_signals[signal_name].columns = ["datetime", "value"]
+                # Поскольку мы идем от старых к новым, просто перезаписываем данные
+                if signal_name in found_signals:
+                    print(f"[INFO] Обновляем сигнал '{signal_name}' из более свежего файла: {os.path.basename(filepath)}")
+                    
+                found_signals[signal_name] = df[["datetime", signal_name]].copy()
+                found_signals[signal_name].columns = ["datetime", "value"]
+                found_signals[signal_name].attrs['source_file'] = os.path.basename(filepath)
+                
         except Exception as e:
             print(f"[WARN] Failed to read {filepath}: {e}")
             continue
@@ -1137,11 +1150,13 @@ async def _export_parquet(signals_data: Dict[str, pd.DataFrame], meta: Dict):
 async def _export_json(signals_data: Dict[str, pd.DataFrame], meta: Dict):
     try:
         data_dict = {}
+        sources_dict = {}
         for signal_name, df in signals_data.items():
             df_copy = df.copy()
             df_copy["datetime"] = df_copy["datetime"].astype(str)
             data_dict[signal_name] = df_copy.to_dict(orient="records")
-        response_data = {**meta, "data": data_dict}
+            sources_dict[signal_name] = df.attrs.get('source_file', 'unknown') 
+        response_data = {**meta, "data": data_dict, "sources": sources_dict}
         return JSONResponse(response_data)
     except Exception as e:
         print(f"[ERROR] JSON export failed: {e}")
@@ -2462,6 +2477,39 @@ async def get_training_params():
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
+
+class MetricsUpdatePayload(BaseModel):
+    filename: str
+    config: str
+    metrics: dict
+
+
+@app.post("/api/nn/project/update-metrics")
+async def update_project_metrics(payload: MetricsUpdatePayload):
+    try:
+        path = get_storage_path(payload.filename, storage="projects", config=payload.config)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail=f"Файл проекта не найден на диске: {path}")
+            
+        with open(path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+            
+        if "project" not in content:
+            content["project"] = {}
+            
+        content["project"]["metrics"] = payload.metrics
+        
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+            
+        return {"status": "ok", "message": "Метрики успешно сохранены в проект"}
+    except HTTPException:
+        raise  # <--- ВАЖНО: Пропускаем 404/400 ошибки как есть, FastAPI их правильно обработает
+    except Exception as e:
+        import traceback
+        print(f"[update_metrics] Ошибка: {e}")
+        print(traceback.format_exc()) # <--- Печатаем ошибку в консоль uvicorn!
+        raise HTTPException(status_code=500, detail=str(e))
 
     
 
