@@ -1241,13 +1241,18 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                     
                     <div class="modal-row" style="position:relative;">
                         <label>Условие запуска (KKS):</label>
-                        <input type="text" id="project-startup-kks" value="${startup.kks || ''}" 
-                               placeholder="Начните вводить KKS или используйте *" autocomplete="off">
-                        <div id="startup-dropdown" style="
-                            display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
-                            background:#1f2937; border:1px solid #374151; border-radius:6px;
-                            max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
-                        "></div>
+                        <div style="display: flex; gap: 8px;">
+                            <div style="flex: 1; position: relative;">
+                                <input type="text" id="project-startup-kks" value="${startup.kks || ''}" 
+                                       placeholder="Начните вводить KKS или используйте *" autocomplete="off" style="width: 100%;">
+                                <div id="startup-dropdown" style="
+                                    display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
+                                    background:#1f2937; border:1px solid #374151; border-radius:6px;
+                                    max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+                                "></div>
+                            </div>
+                            <button class="modal-btn" id="btn-open-startup" style="white-space: nowrap; padding: 0 12px;" ${!startup.kks ? 'disabled' : ''}>🔗 Открыть</button>
+                        </div>
                         <input type="text" id="project-startup-desc" value="${startup.description || ''}" 
                                readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
                                placeholder="Описание подтянется автоматически">
@@ -1255,13 +1260,18 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
 
                     <div class="modal-row" style="position:relative; margin-top:15px;">
                         <label>Диагностическое правило (KKS):</label>
-                        <input type="text" id="project-diag-kks" value="${diagRule.kks || ''}" 
-                               placeholder="Начните вводить KKS правила или используйте *" autocomplete="off">
-                        <div id="diag-dropdown" style="
-                            display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
-                            background:#1f2937; border:1px solid #374151; border-radius:6px;
-                            max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
-                        "></div>
+                        <div style="display: flex; gap: 8px;">
+                            <div style="flex: 1; position: relative;">
+                                <input type="text" id="project-diag-kks" value="${diagRule.kks || ''}" 
+                                       placeholder="Начните вводить KKS правила или используйте *" autocomplete="off" style="width: 100%;">
+                                <div id="diag-dropdown" style="
+                                    display:none; position:absolute; left:0; right:0; top:100%; z-index:1000;
+                                    background:#1f2937; border:1px solid #374151; border-radius:6px;
+                                    max-height:200px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+                                "></div>
+                            </div>
+                            <button class="modal-btn" id="btn-open-diag" style="white-space: nowrap; padding: 0 12px;" ${!diagRule.kks ? 'disabled' : ''}>🔗 Открыть</button>
+                        </div>
                         <input type="text" id="project-diag-desc" value="${diagRule.description || ''}" 
                                readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
                                placeholder="Описание подтянется автоматически">
@@ -1394,6 +1404,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                     });
                 };
 
+
                 // Условие запуска: ищем среди parameter, neural_network
                 setupAutocomplete('project-startup-kks', 'startup-dropdown', 'project-startup-desc', 
                     item => item.Type === 'parameter' || item.Type === 'neural_network'
@@ -1403,6 +1414,57 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 setupAutocomplete('project-diag-kks', 'diag-dropdown', 'project-diag-desc', 
                     item => item.Type === 'rule'
                 );
+                // --- Логика кнопок "Открыть" ---
+                const setupOpenButton = (btnId, inputId, typeHint) => {
+                    const btn = document.getElementById(btnId);
+                    const input = document.getElementById(inputId);
+                    if (!btn || !input) return;
+                    
+                    // Включаем/выключаем кнопку при вводе
+                    input.addEventListener('input', () => {
+                        btn.disabled = !input.value.trim();
+                    });
+                    
+                    btn.onclick = async (e) => {
+                        e.preventDefault();
+                        const kks = input.value.trim();
+                        if (!kks) return;
+                        
+                        try {
+                            btn.disabled = true;
+                            const originalText = btn.textContent;
+                            btn.textContent = '⏳...';
+                            
+                            // Получаем список проектов, чтобы найти точное имя файла
+                            const data = await Settings.listProjects();
+                            const proj = (data.projects || []).find(p => p.code === kks);
+                            
+                            let filename = '';
+                            if (proj) {
+                                filename = proj.filename;
+                            } else {
+                                // Если не нашли по коду, пробуем угадать по типу
+                                filename = `${kks}_${typeHint}.json`;
+                            }
+                            
+                            const config = AppState.currentConfig || '';
+                            const url = `/?load=${encodeURIComponent(filename)}&source=projects&config=${encodeURIComponent(config)}`;
+                            window.open(url, '_blank');
+                            
+                            btn.textContent = originalText;
+                            btn.disabled = false;
+                        } catch (err) {
+                            console.error('Ошибка открытия проекта:', err);
+                            alert('Не удалось открыть проект: ' + err.message);
+                            btn.disabled = false;
+                            btn.textContent = '🔗 Открыть';
+                        }
+                    };
+                };
+
+                setupOpenButton('btn-open-startup', 'project-startup-kks', 'parameter');
+                setupOpenButton('btn-open-diag', 'project-diag-kks', 'rule');
+
             }
 
             this.showModal('project-modal-overlay');

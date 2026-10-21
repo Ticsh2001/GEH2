@@ -2512,6 +2512,23 @@ async def update_project_metrics(payload: MetricsUpdatePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
     
+@app.get("/api/signal-info/{kks}")
+def get_signal_info(kks: str, config: str = Query(...)):
+    """Возвращает размерность сигнала (из проекта или из базы)."""
+    # 1. Ищем среди синтетических проектов
+    proj = load_project_by_code(kks, config)
+    if proj:
+        return {"dimension": proj.get("project", {}).get("dimension", "")}
+    
+    # 2. Ищем среди базовых сигналов
+    signals = get_signals_for_config(config)
+    for s in signals:
+        if s["Tagname"] == kks:
+            return {"dimension": s.get("EngineeringUnit", "")}
+            
+    return {"dimension": ""}
+
+    
 
 
 
