@@ -20,6 +20,7 @@
         #status { margin-top: 15px; padding: 10px; border-radius: 6px; display: none; font-size: 14px; white-space: pre-wrap; }
         .status-success { background: rgba(74, 222, 128, 0.2); color: #4ade80; border: 1px solid #4ade80; }
         .status-error { background: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid #f87171; }
+        .warn-text { color: #fbbf24; font-size: 12px; margin-top: 5px; display: block; }
     </style>
 </head>
 <body>
@@ -29,6 +30,7 @@
         <div class="info-block">
             <div><strong>Модель (KKS):</strong> <span id="val-nn-kks">-</span></div>
             <div><strong>Целевой параметр (Y):</strong> <span id="val-y-kks">-</span></div>
+            <div><strong>Условие запуска (KKS):</strong> <span id="val-startup-kks" style="color: #4ade80;">-</span></div>
         </div>
 
         <div class="form-group">
@@ -61,11 +63,20 @@
         const nnKks = urlParams.get('nn_kks') || '';
         const yKks = urlParams.get('y_kks') || '';
         const p95 = parseFloat(urlParams.get('p95')) || 0;
+        const startupKks = urlParams.get('startup_kks') || '';
         const config = urlParams.get('config') || '';
 
         document.getElementById('val-nn-kks').textContent = nnKks;
         document.getElementById('val-y-kks').textContent = yKks;
         document.querySelectorAll('.y-kks-text').forEach(el => el.textContent = yKks);
+        
+        const startupEl = document.getElementById('val-startup-kks');
+        if (startupKks) {
+            startupEl.textContent = startupKks;
+        } else {
+            startupEl.textContent = 'Не задано (будет пропущено)';
+            startupEl.style.color = '#fbbf24';
+        }
         
         // Автозаполнение
         document.getElementById('val-p95').value = p95;
@@ -79,7 +90,6 @@
 
         const addConfig = (url) => url + (url.includes('?') ? '&' : '?') + `config=${encodeURIComponent(config)}`;
 
-        // Переключение полей в зависимости от типа модели
         document.getElementById('model-type').addEventListener('change', (e) => {
             const type = e.target.value;
             if (type === 'prediction') {
@@ -156,54 +166,52 @@
                 // 2. Всегда создаем константу перцентиля
                 await createConstProject(p95ConstKks, p95Val, `95-й перцентиль модели. Погрешность работы модели, при которой 95% всех ее предсказаний ниже этой величины`);
 
-                // 3. Формируем структуру правила
-                let ruleElements = {};
-                let ruleConnections = [];
+                // 3. Подготовка элементов графа
+                // У нас будет 4 входа (если есть startupKks), иначе 3
+                const inputCount = startupKks ? 4 : 3;
+                const formulaId = 'formula_5';
+                const outId = 'out_6';
                 let formulaText = '';
+                
+                let ruleElements = {
+                    in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
+                    in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: modelType === 'prediction' ? maxConstKks : yKks } },
+                    in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } }
+                };
+                
+                let ruleConnections = [
+                    { fromElement: 'in_1', fromPort: 'out-0', toElement: formulaId, toPort: 'in-0' },
+                    { fromElement: 'in_2', fromPort: 'out-0', toElement: formulaId, toPort: 'in-1' },
+                    { fromElement: 'in_3', fromPort: 'out-0', toElement: formulaId, toPort: 'in-2' }
+                ];
 
-                if (modelType === 'prediction') {
-                    // Создаем константу максимума
-                    await createConstProject(maxConstKks, maxVal, `Предельно допустимое значение измеряемого по ${yKks} параметра`);
-
-                    formulaText = `prediction_nn(${nnKks}, ${maxConstKks}, ${p95ConstKks})`;
-                    
-                    ruleElements = {
-                        in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
-                        in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: maxConstKks } },
-                        in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } },
-                        formula_4: { 
-                            id: 'formula_4', type: 'formula', x: 350, y: 150, width: 180, height: 100, 
-                            props: { expression: formulaText, inputCount: 3 } 
-                        },
-                        out_5: { id: 'out_5', type: 'output', x: 600, y: 150, width: 150, height: 60, props: { label: ruleKks } }
-                    };
-                    ruleConnections = [
-                        { fromElement: 'in_1', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-0' },
-                        { fromElement: 'in_2', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-1' },
-                        { fromElement: 'in_3', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-2' },
-                        { fromElement: 'formula_4', fromPort: 'out-0', toElement: 'out_5', toPort: 'in-0' }
-                    ];
-
-                } else if (modelType === 'normal') {
-                    formulaText = `normal_operation_nn(${nnKks}, ${yKks}, ${p95ConstKks})`;
-                    
-                    ruleElements = {
-                        in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
-                        in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: yKks } },
-                        in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } },
-                        formula_4: { 
-                            id: 'formula_4', type: 'formula', x: 350, y: 150, width: 180, height: 100, 
-                            props: { expression: formulaText, inputCount: 3 } 
-                        },
-                        out_5: { id: 'out_5', type: 'output', x: 600, y: 150, width: 150, height: 60, props: { label: ruleKks } }
-                    };
-                    ruleConnections = [
-                        { fromElement: 'in_1', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-0' },
-                        { fromElement: 'in_2', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-1' },
-                        { fromElement: 'in_3', fromPort: 'out-0', toElement: 'formula_4', toPort: 'in-2' },
-                        { fromElement: 'formula_4', fromPort: 'out-0', toElement: 'out_5', toPort: 'in-0' }
-                    ];
+                if (startupKks) {
+                    ruleElements['in_4'] = { id: 'in_4', type: 'input-signal', x: 100, y: 350, width: 150, height: 60, props: { name: startupKks } };
+                    ruleConnections.push({ fromElement: 'in_4', fromPort: 'out-0', toElement: formulaId, toPort: 'in-3' });
                 }
+
+                // Формируем формулу
+                let formulaArgs = [nnKks];
+                if (modelType === 'prediction') {
+                    await createConstProject(maxConstKks, maxVal, `Предельно допустимое значение измеряемого по ${yKks} параметра`);
+                    formulaArgs.push(maxConstKks);
+                } else {
+                    formulaArgs.push(yKks);
+                }
+                formulaArgs.push(p95ConstKks);
+                
+                if (startupKks) formulaArgs.push(startupKks);
+                
+                formulaText = `${modelType === 'prediction' ? 'prediction_nn' : 'normal_operation_nn'}(${formulaArgs.join(', ')})`;
+
+                // Добавляем формулу и выход
+                ruleElements[formulaId] = { 
+                    id: formulaId, type: 'formula', x: 350, y: 150 + (startupKks ? 50 : 0), width: 200, height: 120, 
+                    props: { expression: formulaText, inputCount: inputCount } 
+                };
+                ruleElements[outId] = { id: outId, type: 'output', x: 650, y: 150 + (startupKks ? 50 : 0), width: 150, height: 60, props: { label: ruleKks } };
+                
+                ruleConnections.push({ fromElement: formulaId, fromPort: 'out-0', toElement: outId, toPort: 'in-0' });
 
                 // 4. Сохраняем проект правила
                 const rulePayload = {
@@ -220,7 +228,7 @@
                     },
                     elements: ruleElements,
                     connections: ruleConnections,
-                    counter: 5,
+                    counter: 6,
                     code: formulaText
                 };
 

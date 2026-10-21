@@ -1465,6 +1465,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 };
 
                                 // --- Логика кнопки "Создать правило" ---
+                                // --- Логика кнопки "Создать правило" ---
                 const btnCreateRule = document.getElementById('btn-create-diag-rule');
                 if (btnCreateRule) {
                     btnCreateRule.onclick = (e) => {
@@ -1474,6 +1475,12 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                         if (!nnKks) {
                             alert("Сначала укажите и сохраните код проекта нейросети!");
                             return;
+                        }
+
+                        // Вытаскиваем KKS условия запуска
+                        const startupKks = (AppState.project.startup_condition || {}).kks || '';
+                        if (!startupKks) {
+                            alert("Внимание! В проекте не задано условие запуска (KKS). Правило будет создано без него. Рекомендуется сначала указать его в свойствах.");
                         }
 
                         // Ищем Y_KKS в графе (подключен к in-2 или in-4 шаблона)
@@ -1500,7 +1507,8 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                         const config = AppState.currentConfig || '';
                         
                         // Формируем URL и открываем новую вкладку
-                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&config=${encodeURIComponent(config)}`;
+                        // ДОБАВЛЕН startup_kks
+                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&startup_kks=${encodeURIComponent(startupKks)}&config=${encodeURIComponent(config)}`;
                         window.open(url, '_blank');
                     };
                 }
