@@ -9,6 +9,8 @@ import requests
 import streamlit as st
 import plotly.graph_objects as go
 import logging
+import io
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -576,6 +578,40 @@ if result:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
             st.plotly_chart(fig_cond, use_container_width=True, key=f"chart_cond_{kks}")
+        # =====================================================================
+                # =====================================================================
+        # --- СОХРАНЕНИЕ СИГНАЛА В АРХИВ ---
+        # =====================================================================
+        if st.button(f"📥 Сохранить сигнал {kks} в архив", key=f"btn_save_archive_{kks}"):
+            try:
+                with st.spinner("Сохранение..."):
+                    # Формируем DataFrame в формате, который ждет visualizer (DATE;TIME;KKS)
+                    df_to_save = pd.DataFrame({
+                        "DATE": pred_df["datetime"].dt.strftime("%d.%m.%Y"),
+                        "TIME": pred_df["datetime"].dt.strftime("%H:%M:%S"),
+                        kks: pred_df["value"]
+                    })
+                    
+                    # Сохраняем в буфер
+                    csv_buffer = io.BytesIO()
+                    df_to_save.to_csv(csv_buffer, sep=";", index=False, encoding="utf-8")
+                    csv_buffer.seek(0)
+                    
+                    filename = f"{kks}.csv"
+                    upload_url = f"{api_url}/api/upload-signal-csv?config={requests.utils.quote(config_name)}"
+                    
+                    # Отправляем на бэкенд
+                    r = requests.post(
+                        upload_url,
+                        files={"file": (filename, csv_buffer, "text/csv")},
+                        timeout=120
+                    )
+                    r.raise_for_status()
+                    
+                st.success(f"✅ Сигнал **{kks}** успешно сохранён в архив!")
+                st.info("Теперь вы можете использовать этот KKS в визуализаторе или как входной сигнал для новых правил.")
+            except Exception as e:
+                st.error(f"❌ Ошибка сохранения сигнала: {e}")
         # =====================================================================
 
         # ---------- метрики ----------
