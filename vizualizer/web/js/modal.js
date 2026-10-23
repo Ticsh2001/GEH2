@@ -1504,11 +1504,12 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                         }
 
                         const p95 = metrics.p95 || 0;
+                        const p99 = metrics.p99 || 0;
                         const config = AppState.currentConfig || '';
                         
                         // Формируем URL и открываем новую вкладку
                         // ДОБАВЛЕН startup_kks
-                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&startup_kks=${encodeURIComponent(startupKks)}&config=${encodeURIComponent(config)}`;
+                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&p99=${p99}&startup_kks=${encodeURIComponent(startupKks)}&config=${encodeURIComponent(config)}`;
                         window.open(url, '_blank');
                     };
                 }

@@ -11,6 +11,8 @@ import sys
 import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
+from export import prepare_code_for_system
+
 
 
 import pandas as pd
@@ -384,83 +386,91 @@ def build_config(project,
 # Генерация схемы и Word-документа
 # =============================================================================
 
-def _generate_model_diagram(inputs, output_name):
-    """Генерирует PNG-схему модели через matplotlib с подстройкой под длину текста."""
+def _generate_model_diagram(inputs, nn_kks, rule_kks=None, startup_kks=None):
     n = len(inputs)
-    if n == 0:
-        n = 1
-        
-    # Ищем самую длинную строку, чтобы рассчитать ширину картинки
-    max_len = max([len(str(i)) for i in inputs] + [len(str(output_name))]) if inputs else len(str(output_name))
-    
-    # Масштабируем ширину фигуры, чтобы текст точно влез
-    fig_width = max(10, max_len * 0.25)
-    fig_height = max(3, n * 1.0)
-    
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    
-    # Фиксируем оси X и Y (от 0 до 10 по X)
-    ax.set_xlim(0, 10)
-    
-    gap_y = 0.8
-    y_positions = [-(i * gap_y) for i in range(n)]
+    gap_y = 1.2 # Чуть больше расстояния между входами
+    y_inputs = [-(i * gap_y) for i in range(n)]
     model_y = -(n - 1) * gap_y / 2 if n > 1 else 0
+    startup_y = max(y_inputs) + 1.8 if y_inputs else 1.8
 
-    box_h = 0.45
+    # Координаты по X
+    x_in = 0.5
+    w_in = 4.5 # Увеличили ширину входа для KKS
     
-    # Задаем координаты блоков по X
-    in_x_start = 0.5
-    in_w = 3.5
+    x_model = 6.0
+    w_model = 1.5
+    h_model = max(1.5, n * gap_y)
     
-    model_x_start = 4.5
-    model_w = 1.0
+    x_out = 8.5
+    w_out = 4.0 # Выход тоже сделаем достаточно широким, но это прямоугольник
+    h_out = 0.6
     
-    out_x_start = 6.0
-    out_w = 3.5
+    x_rule = 13.5
+    w_rule = 3.0
+    h_rule = 1.5
 
-    # Рисуем входные блоки и стрелки к модели
-    for i, y in enumerate(y_positions):
-        inp_name = str(inputs[i]) if inputs else "Вход"
-        
-        rect = patches.Rectangle((in_x_start, y - box_h/2), in_w, box_h, 
-                                 linewidth=1.5, edgecolor='#4a90d9', facecolor='#e6f0fa')
-        ax.add_patch(rect)
-        # Центрируем текст в блоке
-        ax.text(in_x_start + in_w/2, y, inp_name, ha='center', va='center', fontsize=10, fontweight='bold')
-        
-        # Стрелка от входа к модели
-        ax.annotate('', xy=(model_x_start, model_y), xytext=(in_x_start + in_w, y),
-                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, 
-                                    connectionstyle="arc3,rad=0.1" if y != model_y else "arc3,rad=0"))
-
-    # Блок МОДЕЛЬ
-    rect_model = patches.Rectangle((model_x_start, model_y - 0.6), model_w, 1.2, 
-                                   linewidth=2, edgecolor='#f97316', facecolor='#ffedd5')
-    ax.add_patch(rect_model)
-    ax.text(model_x_start + model_w/2, model_y, "МОДЕЛЬ", ha='center', va='center', fontsize=12, fontweight='bold', color='#c2410c')
-
-    # Выходной блок
-    rect_out = patches.Rectangle((out_x_start, model_y - box_h/2), out_w, box_h, 
-                                 linewidth=1.5, edgecolor='#10b981', facecolor='#d1fae5')
-    ax.add_patch(rect_out)
-    ax.text(out_x_start + out_w/2, model_y, str(output_name), ha='center', va='center', fontsize=10, fontweight='bold')
-
-    # Стрелка от модели к выходу
-    ax.annotate('', xy=(out_x_start, model_y), xytext=(model_x_start + model_w, model_y),
-                arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
-
-    # Вычисляем границы Y
-    min_y = min(y_positions) - box_h - 0.3
-    max_y = max(y_positions) + box_h + 0.3
-    if n == 1: 
-        min_y -= 0.5
-        max_y += 0.5
-        
+    fig_width = 18 # Холст шире
+    fig_height = max(5, n * 1.4)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.set_xlim(0, 18)
+    
+    min_y = min(y_inputs) - 1.0 if y_inputs else -2.0
+    max_y = startup_y + 1.0
     ax.set_ylim(min_y, max_y)
     ax.axis('off')
 
+    def draw_pin(x, y, w, h, text):
+        # Рисуем "кол" одним полигоном, чтобы не было внутренней линии
+        tip_w = h * 0.8
+        rect_w = w - tip_w
+        
+        points = [
+            [x, y - h/2],             # нижний левый
+            [x, y + h/2],             # верхний левый
+            [x + rect_w, y + h/2],    # верхний правый (основание треугольника)
+            [x + w, y],               # острие
+            [x + rect_w, y - h/2],    # нижний правый (основание треугольника)
+            [x, y - h/2]              # замыкаем
+        ]
+        ax.add_patch(patches.Polygon(points, closed=True, edgecolor='#4a90d9', facecolor='#e6f0fa', linewidth=1.5))
+        ax.text(x + rect_w/2, y, text, ha='center', va='center', fontsize=9, fontweight='bold')
+
+    def draw_rect(x, y, w, h, text, color='#10b981'):
+        ax.add_patch(patches.Rectangle((x, y - h/2), w, h, linewidth=1.5, edgecolor=color, facecolor='#d1fae5'))
+        ax.text(x + w/2, y, text, ha='center', va='center', fontsize=10, fontweight='bold')
+
+    # 1. Входные сигналы
+    for i, y in enumerate(y_inputs):
+        draw_pin(x_in, y, w_in, 0.5, inputs[i])
+        ax.annotate('', xy=(x_model, model_y), xytext=(x_in + w_in, y),
+                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, connectionstyle="arc3,rad=0.1" if y != model_y else "arc3,rad=0"))
+
+    # 2. Модель
+    ax.add_patch(patches.Rectangle((x_model, model_y - h_model/2), w_model, h_model, linewidth=2, edgecolor='#f97316', facecolor='#ffedd5'))
+    ax.text(x_model + w_model/2, model_y, "МОДЕЛЬ", ha='center', va='center', fontsize=12, fontweight='bold', color='#c2410c')
+
+    # 3. Выход модели (Прямоугольник)
+    draw_rect(x_out, model_y, w_out, h_out, nn_kks)
+    ax.annotate('', xy=(x_out, model_y), xytext=(x_model + w_model, model_y),
+                arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
+
+    # 4. Правило и условие
+    if rule_kks:
+        ax.add_patch(patches.Rectangle((x_rule, model_y - h_rule/2), w_rule, h_rule, linewidth=2, edgecolor='#8b5cf6', facecolor='#ede9fe'))
+        ax.text(x_rule + w_rule/2, model_y, f"ПРАВИЛО\n{rule_kks}", ha='center', va='center', fontsize=10, fontweight='bold', color='#6d28d9')
+        
+        ax.annotate('', xy=(x_rule, model_y), xytext=(x_out + w_out, model_y),
+                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
+                    
+        if startup_kks:
+            draw_pin(x_in, startup_y, w_in, 0.5, startup_kks)
+            ax.text(x_in + w_in/2, startup_y + 0.4, "Условие активации", ha='center', va='bottom', fontsize=10, color='#4a90d9')
+            
+            # Стрелка от условия к правилу (вход сверху)
+            ax.annotate('', xy=(x_rule + w_rule/2, model_y + h_rule/2), xytext=(x_in + w_in, startup_y),
+                        arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, connectionstyle="arc3,rad=-0.2"))
+
     buf = BytesIO()
-    # bbox_inches='tight' уберет лишние белые поля вокруг
     fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True, pad_inches=0.1)
     plt.close(fig)
     buf.seek(0)
@@ -556,7 +566,10 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
     add_text("Схема модели:", bold=True)
     inputs = [inp["name"] for inp in config_data.get("inputs", [])]
     if inputs:
-        img_buf = _generate_model_diagram(inputs, code)
+        nn_kks = proj_meta.get("code", "")
+        rule_kks = rule_data.get("kks") if rule_data else None
+        startup_kks = startup_data.get("kks") if startup_data else None
+        img_buf = _generate_model_diagram(inputs, nn_kks, rule_kks, startup_kks)
         # Центрируем картинку без красной строки
         p_img = doc.add_paragraph()
         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -588,6 +601,15 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
         if startup_data.get("description"):
             add_text("Описание условия:", bold=True)
             add_multiline(startup_data['description'])
+
+        # --- НОВОЕ: Адаптация кода ---
+        if startup_data.get("code"):
+            add_text("Формула:", bold=True)
+            # Собираем имена входных сигналов для правильной обработки
+            input_names = [inp["name"] for inp in startup_data.get("inputs", [])]
+            prepared_code = prepare_code_for_system(startup_data["code"], input_names)
+            add_multiline(prepared_code)
+            # ------------------------------
             
         add_text("Используемые параметры условия:", bold=True)
         if startup_data.get("inputs"):
@@ -618,7 +640,14 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
         add_text("") # Пустая строка для отступа
 
         add_text("Формула:", bold=True)
-        add_multiline(rule_data.get("code", ""))
+        if rule_data.get("code"):
+            # --- НОВОЕ: Адаптация кода ---
+            input_names = [inp["name"] for inp in rule_data.get("inputs", [])]
+            prepared_code = prepare_code_for_system(rule_data["code"], input_names)
+            add_multiline(prepared_code)
+            # ------------------------------
+        else:
+            add_text("- (пусто)")
 
         add_text("Используемые параметры:", bold=True)
         if rule_data.get("inputs"):

@@ -2087,20 +2087,128 @@ async saveProject() {
             const menu = document.getElementById('context-menu');
             if (!menu.contains(e.target)) menu.style.display = 'none';
         });
+
+        document.addEventListener('contextmenu', (e) => {
+            const elem = e.target.closest('.element');
+            if (!elem) return;
+            e.preventDefault();
+
+            const elemId = elem.id;
+            const elemData = AppState.elements[elemId];
+            const menu = document.getElementById('context-menu');
+            
+            menu.style.display = 'block';
+            menu.dataset.elementId = elemId;
+            menu.style.left = `${e.clientX}px`;
+            menu.style.top = `${e.clientY}px`;
+
+            // Показываем/скрываем специфичные для input-signal пункты
+            const isInputSignal = elemData.type === 'input-signal';
+            document.getElementById('ctx-open-project').style.display = isInputSignal ? 'flex' : 'none';
+            document.getElementById('ctx-export-signal').style.display = isInputSignal ? 'flex' : 'none';
+            
+            // Для визуальных контейнеров (групп) можно скрыть свойства, если нужно
+            document.getElementById('ctx-properties').style.display = elemData.nnType === 'group' ? 'none' : 'flex';
+        });
+
         document.getElementById('ctx-properties').addEventListener('click', () => {
             const elemId = document.getElementById('context-menu').dataset.elementId;
             document.getElementById('context-menu').style.display = 'none';
             if (elemId && AppState.elements[elemId]) {
-                NeuralApp.showLayerPropertiesModal(elemId);
+                if (AppState.elements[elemId].type === 'input-signal') {
+                    Modal.showPropertiesModal(elemId);
+                } else {
+                    NeuralApp.showLayerPropertiesModal(elemId);
+                }
             }
         });
+
         document.getElementById('ctx-delete').addEventListener('click', () => {
             document.getElementById('context-menu').style.display = 'none';
             this.deleteSelectedElements();
         });
+
         document.getElementById('ctx-copy').addEventListener('click', () => {
             document.getElementById('context-menu').style.display = 'none';
             this.copySelectedElements();
+        });
+
+        // 1. Открыть проект сигнала
+        document.getElementById('ctx-open-project').addEventListener('click', async () => {
+            const elemId = document.getElementById('context-menu').dataset.elementId;
+            document.getElementById('context-menu').style.display = 'none';
+            const elem = AppState.elements[elemId];
+            const kks = elem?.props?.name;
+            if (!kks) return;
+
+            try {
+                const data = await Settings.listProjects();
+                const proj = (data.projects || []).find(p => p.code === kks);
+                if (proj) {
+                    const url = `/?load=${encodeURIComponent(proj.filename)}&source=projects&config=${encodeURIComponent(AppState.currentConfig || '')}`;
+                    window.open(url, '_blank');
+                } else {
+                    alert('Проект для данного KKS не найден. Возможно, это базовый сигнал со станции.');
+                }
+            } catch (err) {
+                alert('Ошибка при поиске проекта: ' + err.message);
+            }
+        });
+
+        // 2. Экспорт в CSV
+        document.getElementById('ctx-export-signal').addEventListener('click', async () => {
+            const elemId = document.getElementById('context-menu').dataset.elementId;
+            document.getElementById('context-menu').style.display = 'none';
+            const elem = AppState.elements[elemId];
+            const kks = elem?.props?.name;
+            if (!kks) return;
+
+            try {
+                const url = `/api/signal-data?config=${encodeURIComponent(AppState.currentConfig || '')}`;
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ signal_names: [kks], format: 'json' })
+                });
+                if (!resp.ok) throw new Error('Ошибка загрузки данных с сервера');
+                
+                const payload = await resp.json();
+                const records = payload.data?.[kks] || [];
+                
+                if (!records.length) {
+                    alert('Нет данных для экспорта. Возможно, сигнал пуст.');
+                    return;
+                }
+
+                // Формируем CSV в формате DATE;TIME;KKS
+                let csv = `DATE;TIME;${kks}\n`;
+                const pad = (n) => n.toString().padStart(2, '0');
+                
+                for (const r of records) {
+                    const dt = new Date(r.datetime);
+                    if (isNaN(dt)) continue;
+                    const dateStr = `${pad(dt.getDate())}.${pad(dt.getMonth()+1)}.${dt.getFullYear()}`;
+                    const timeStr = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+                    // Десятичный разделитель - запятая
+                    const val = r.value !== null ? r.value.toString().replace('.', ',') : '';
+                    csv += `${dateStr};${timeStr};${val}\n`;
+                }
+
+                // Скачиваем файл
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const urlObj = URL.createObjectURL(blob);
+                link.setAttribute("href", urlObj);
+                link.setAttribute("download", `${kks}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(urlObj);
+
+            } catch (err) {
+                console.error(err);
+                alert('Ошибка экспорта: ' + err.message);
+            }
         });
     },
 

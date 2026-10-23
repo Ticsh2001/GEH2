@@ -42,13 +42,22 @@
         </div>
 
         <div class="form-group">
-            <label>95-й перцентиль модели (Погрешность):</label>
+            <label id="p-label">95-й перцентиль модели (Погрешность):</label>
             <input type="number" id="val-p95" step="any">
         </div>
 
         <div id="prediction-fields">
             <div class="form-group">
-                <label>Предельно допустимое значение измеряемого по <span class="y-kks-text"></span> параметра:</label>
+                <label>Тип уставки для <span class="y-kks-text"></span>:</label>
+                <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="radio" name="limit_type" value="working" checked> Рабочий диапазон
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="radio" name="limit_type" value="warning"> Предупредительная сигнализация
+                    </label>
+                </div>
+                <label>Предельно допустимое значение:</label>
                 <input type="number" id="val-max-param" step="any" placeholder="Введите значение...">
             </div>
         </div>
@@ -63,6 +72,7 @@
         const nnKks = urlParams.get('nn_kks') || '';
         const yKks = urlParams.get('y_kks') || '';
         const p95 = parseFloat(urlParams.get('p95')) || 0;
+        const p99 = parseFloat(urlParams.get('p99')) || 0;
         const startupKks = urlParams.get('startup_kks') || '';
         const config = urlParams.get('config') || '';
 
@@ -78,8 +88,9 @@
             startupEl.style.color = '#fbbf24';
         }
         
-        // Автозаполнение
-        document.getElementById('val-p95').value = p95;
+        // Автозаполнение в зависимости от типа
+        const setPValue = (val) => { document.getElementById('val-p95').value = val; };
+        setPValue(p95);
 
         const statusDiv = document.getElementById('status');
         const showStatus = (msg, isError = false) => {
@@ -92,24 +103,30 @@
 
         document.getElementById('model-type').addEventListener('change', (e) => {
             const type = e.target.value;
+            const pLabel = document.getElementById('p-label');
             if (type === 'prediction') {
                 document.getElementById('prediction-fields').classList.remove('hidden');
+                setPValue(p95);
+                pLabel.textContent = '95-й перцентиль модели (Погрешность):';
             } else {
                 document.getElementById('prediction-fields').classList.add('hidden');
+                setPValue(p99); // Используем 99-й перцентиль
+                pLabel.textContent = '99-й перцентиль модели (Погрешность):';
             }
         });
 
         document.getElementById('btn-save').onclick = async () => {
             const modelType = document.getElementById('model-type').value;
-            const p95Val = parseFloat(document.getElementById('val-p95').value);
+            const isPrediction = modelType === 'prediction';
+            const pVal = parseFloat(document.getElementById('val-p95').value);
 
-            if (isNaN(p95Val)) {
-                showStatus('Заполните поле 95-го перцентиля!', true);
+            if (isNaN(pVal)) {
+                showStatus('Заполните поле перцентиля!', true);
                 return;
             }
 
             let maxVal = null;
-            if (modelType === 'prediction') {
+            if (isPrediction) {
                 maxVal = parseFloat(document.getElementById('val-max-param').value);
                 if (isNaN(maxVal)) {
                     showStatus('Введите предельно допустимое значение!', true);
@@ -129,7 +146,7 @@
 
                 // Имена проектов
                 const maxConstKks = `${nnKks}_MAX_PARAM_CONST`;
-                const p95ConstKks = `${nnKks}_PERCENTIL_CONST`;
+                const pConstKks = `${nnKks}_PERCENTIL_CONST`;
                 const ruleKks = `${nnKks}_PROBLEM`;
 
                 // Хелпер для создания проекта-константы
@@ -163,11 +180,15 @@
                     if (!resp.ok) throw new Error(`Ошибка сохранения ${code}`);
                 };
 
-                // 2. Всегда создаем константу перцентиля
-                await createConstProject(p95ConstKks, p95Val, `95-й перцентиль модели. Погрешность работы модели, при которой 95% всех ее предсказаний ниже этой величины`);
+                // Описание для перцентиля
+                const pDesc = isPrediction 
+                    ? `95-й перцентиль модели. Погрешность работы модели, при которой 95% всех ее предсказаний ниже этой величины`
+                    : `99-й перцентиль модели. Погрешность работы модели, при которой 99% всех ее предсказаний ниже этой величины`;
+                
+                // 2. Создаем константу перцентиля
+                await createConstProject(pConstKks, pVal, pDesc);
 
                 // 3. Подготовка элементов графа
-                // У нас будет 4 входа (если есть startupKks), иначе 3
                 const inputCount = startupKks ? 4 : 3;
                 const formulaId = 'formula_5';
                 const outId = 'out_6';
@@ -175,8 +196,8 @@
                 
                 let ruleElements = {
                     in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
-                    in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: modelType === 'prediction' ? maxConstKks : yKks } },
-                    in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: p95ConstKks } }
+                    in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: isPrediction ? maxConstKks : yKks } },
+                    in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: pConstKks } }
                 };
                 
                 let ruleConnections = [
@@ -190,19 +211,25 @@
                     ruleConnections.push({ fromElement: 'in_4', fromPort: 'out-0', toElement: formulaId, toPort: 'in-3' });
                 }
 
-                // Формируем формулу
+                // Формируем формулу и создаем константу уставки (если нужно)
                 let formulaArgs = [nnKks];
-                if (modelType === 'prediction') {
-                    await createConstProject(maxConstKks, maxVal, `Предельно допустимое значение измеряемого по ${yKks} параметра`);
+                if (isPrediction) {
+                    // Получаем выбранный тип уставки
+                    const limitType = document.querySelector('input[name="limit_type"]:checked').value;
+                    const maxDesc = limitType === 'working' 
+                        ? `Уставка на допустимое значение измеряемого параметра ${yKks}. Соответствует максимальному значению рабочего диапазона.`
+                        : `Уставка на допустимое значение измеряемого параметра ${yKks}. Соответствует значению срабатывания предупредительной сигнализации.`;
+                    
+                    await createConstProject(maxConstKks, maxVal, maxDesc);
                     formulaArgs.push(maxConstKks);
                 } else {
                     formulaArgs.push(yKks);
                 }
-                formulaArgs.push(p95ConstKks);
+                formulaArgs.push(pConstKks);
                 
                 if (startupKks) formulaArgs.push(startupKks);
                 
-                formulaText = `${modelType === 'prediction' ? 'prediction_nn' : 'normal_operation_nn'}(${formulaArgs.join(', ')})`;
+                formulaText = `${isPrediction ? 'prediction_nn' : 'normal_operation_nn'}(${formulaArgs.join(', ')})`;
 
                 // Добавляем формулу и выход
                 ruleElements[formulaId] = { 
@@ -241,8 +268,8 @@
                 if (!ruleResp.ok) throw new Error(`Ошибка создания правила ${ruleKks}`);
 
                 // Успех
-                let successMsg = `✅ Успешно созданы проекты:\n1. ${p95ConstKks}`;
-                if (modelType === 'prediction') successMsg += `\n2. ${maxConstKks}`;
+                let successMsg = `✅ Успешно созданы проекты:\n1. ${pConstKks}`;
+                if (isPrediction) successMsg += `\n2. ${maxConstKks}`;
                 successMsg += `\n3. ${ruleKks}\n\nВы можете закрыть эту вкладку и выбрать правило в свойствах проекта.`;
                 
                 showStatus(successMsg);
