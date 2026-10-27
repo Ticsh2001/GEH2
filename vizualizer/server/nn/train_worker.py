@@ -19,8 +19,26 @@ GPU-контекст один раз на процесс, и мы не хоти�
 через nn_template.set_config_path(...) — см. NOTE ниже. main.py делает
 то же самое своей "боевой" config_path() в @app.on_event("startup").
 """
-import sys
 import os
+
+# === ЖЁСТКО ФИКСИРУЕМ GPU ДЛЯ ЭТОГО ПРОЦЕССА ===
+# TensorFlow читает эти переменные только при первом импорте.
+# Если задать их здесь — до `import tensorflow as tf` — все вычисления
+# пойдут на GPU №0. Второй GPU (если есть) останется невидимым для TF.
+# Можно переопределить через переменную окружения при запуске uvicorn:
+#     NN_TRAIN_GPU=1 uvicorn main:app ...
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", os.environ.get("NN_TRAIN_GPU", "0"))
+
+# Не даём TF забирать всю память GPU сразу — критично, если на той же
+# видеокарте работают другие приложения (или будущие параллельные задачи).
+os.environ.setdefault("TF_FORCE_GPU_ALLOW_GROWTH", "true")
+
+# Убираем информационный спам (INFO/WARNING) от TensorFlow — оставляем только ERROR.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
+import sys
+
+
 import json
 import datetime
 import traceback
