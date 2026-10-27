@@ -1583,6 +1583,14 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 <div class="modal-row">
                     <label>Методические указания:</label>
                     <textarea id="project-guidelines" placeholder="Инструкции и рекомендации при срабатывании правила">${project.guidelines || ''}</textarea>
+                    <div style="margin-top:8px;">
+                        <button type="button" class="modal-btn" id="btn-fill-guidelines" style="background:#4a90d9; color:#fff;">
+                            🔍 Сформировать "Проверить показания"
+                        </button>
+                        <small style="color:#999; display:block; margin-top:4px;">
+                            Соберёт все базовые сигналы (из входов правила и их зависимостей) и допишет их KKS в конец текста.
+                        </small>
+                    </div>
                 </div>
             </div>
 
@@ -1680,6 +1688,76 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 document.getElementById('template-fields').classList.toggle('visible', type === PROJECT_TYPE.TEMPLATE);
             });
         });
+
+                // --- Кнопка "Сформировать Проверить показания" (для правил) ---
+        const btnFill = document.getElementById('btn-fill-guidelines');
+        if (btnFill) {
+            btnFill.addEventListener('click', async () => {
+                btnFill.disabled = true;
+                const origText = btnFill.textContent;
+                btnFill.textContent = '⏳ Сбор данных...';
+
+                try {
+                    // 1. Собираем входные сигналы из проекта
+                    const inputSignals = [];
+                    Object.values(AppState.elements).forEach(el => {
+                        if (el?.type === 'input-signal' && el.props?.name) {
+                            inputSignals.push(el.props.name.trim());
+                        }
+                    });
+                    const uniqueSignals = [...new Set(inputSignals)];
+
+                    if (uniqueSignals.length === 0) {
+                        alert('В проекте нет входных сигналов.');
+                        return;
+                    }
+
+                    // 2. Рекурсивный resolve на бэкенде
+                    const config = AppState.currentConfig || '';
+                    const url = `/api/resolve-signals?config=${encodeURIComponent(config)}`;
+                    const resp = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ signals: uniqueSignals })
+                    });
+                    if (!resp.ok) throw new Error(`Ошибка API: ${resp.status}`);
+                    const data = await resp.json();
+
+                    const baseSignals = (data.base_signals || []).slice().sort();
+                    
+                    if (baseSignals.length === 0) {
+                        alert('Не удалось определить базовые сигналы. Проверьте, что входные сигналы зарегистрированы в архиве.');
+                        return;
+                    }
+
+                    // 3. Формируем строку и дописываем в конец
+                    const addition = `Проверить показания: ${baseSignals.join(', ')}`;
+                    const textarea = document.getElementById('project-guidelines');
+                    if (!textarea) return;
+
+                    const oldVal = textarea.value.trim();
+                    
+                    if (oldVal.includes('Проверить показания:')) {
+                        if (!confirm('В тексте уже есть блок "Проверить показания:". Добавить новый список в конец?')) {
+                            return;
+                        }
+                    }
+
+                    textarea.value = oldVal
+                        ? `${oldVal}\n\n${addition}`
+                        : addition;
+                        
+                    textarea.scrollTop = textarea.scrollHeight;
+
+                } catch (e) {
+                    console.error('Ошибка формирования показаний:', e);
+                    alert('Ошибка: ' + e.message);
+                } finally {
+                    btnFill.disabled = false;
+                    btnFill.textContent = origText;
+                }
+            });
+        }
         
         this.showModal('project-modal-overlay');
     },

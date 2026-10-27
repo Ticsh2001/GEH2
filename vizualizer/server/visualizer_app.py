@@ -830,7 +830,7 @@ def resolve_and_load_all_signals(input_signals: List[str]) -> tuple[pd.DataFrame
         with st.spinner("🔍 Разворачиваем зависимости сигналов..."):
             resolve_resp = requests.post(
                 make_url(f"{api_url}/api/resolve-signals"),
-                json={"signals": input_signals}
+                json={"signals": input_signals, "skip_neural": True}
             )
             resolve_resp.raise_for_status()
             resolve_data = resolve_resp.json()

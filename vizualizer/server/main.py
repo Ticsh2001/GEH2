@@ -459,7 +459,8 @@ def resolve_signal_dependencies(
     signal_names: List[str],
     config: str,
     visited: set = None,
-    resolved: Dict[str, Dict] = None
+    resolved: Dict[str, Dict] = None,
+    skip_neural: bool = False,
 ) -> tuple[set, Dict[str, Dict]]:
     if visited is None:
         visited = set()
@@ -470,20 +471,27 @@ def resolve_signal_dependencies(
         if not signal_name or signal_name in visited:
             continue
         visited.add(signal_name)
-        if is_base_signal(signal_name, config):
-            base_signals.add(signal_name)
-            continue
+        
         project = load_project_by_code(signal_name, config)
         if project is None:
             base_signals.add(signal_name)
             continue
+        
+        # Если это визуализатор/карта — не разворачиваем нейронки, чтобы не сломать вычисление
+        proj_type = project.get("project", {}).get("type", "")
+        if skip_neural and proj_type in ("neural_network", "neural_template"):
+            base_signals.add(signal_name)
+            continue
+        
         formula = project.get("formula", "")
         dependencies = extract_input_signals_from_project(project)
         resolved[signal_name] = {
             "formula": formula,
             "dependencies": dependencies
         }
-        sub_base, _ = resolve_signal_dependencies(dependencies, config, visited, resolved)
+        sub_base, _ = resolve_signal_dependencies(
+            dependencies, config, visited, resolved, skip_neural=skip_neural
+        )
         base_signals.update(sub_base)
     return base_signals, resolved
 
@@ -1167,7 +1175,10 @@ async def api_resolve_signals(request: Request, config: str = Query(...)):
     try:
         data = await request.json()
         signal_names = data.get("signals", [])
-        base_signals, synthetic_signals = resolve_signal_dependencies(signal_names, config)
+        skip_neural = bool(data.get("skip_neural", False))
+        base_signals, synthetic_signals = resolve_signal_dependencies(
+            signal_names, config, skip_neural=skip_neural
+        )
         computation_order = topological_sort_signals(synthetic_signals)
         return {
             "base_signals": list(base_signals),
