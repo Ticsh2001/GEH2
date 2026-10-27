@@ -1610,16 +1610,18 @@ const NeuralApp = {
 
         const traceTrain = {
             x: epochs, y: loss,
-            mode: 'lines+markers', name: 'Train Loss',
+            mode: 'lines+markers', name: 'train',
             line: { color: '#4a90d9', width: 2 },
-            marker: { size: 4 }
+            marker: { size: 4 },
+            hovertemplate: '%{y:.6g}<extra>Train</extra>'
         };
 
         const traceVal = {
             x: epochs, y: valLoss,
-            mode: 'lines+markers', name: 'Val Loss',
+            mode: 'lines+markers', name: 'val',
             line: { color: '#f97316', width: 2 },
-            marker: { size: 4 }
+            marker: { size: 4 },
+            hovertemplate: '%{y:.6g}<extra>Val</extra>' 
         };
 
         const layout = {
@@ -1627,14 +1629,31 @@ const NeuralApp = {
             paper_bgcolor: 'rgba(0,0,0,0)', // Прозрачный фон
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { color: '#9ca3af', family: 'Segoe UI, sans-serif' },
+            hovermode: 'x unified',
+             hoverlabel: {
+                bgcolor: '#ffffff',          // Белый фон подсказки
+                bordercolor: '#9ca3af',      // Серая рамка
+                font: {
+                    color: '#000000',        // Чёрный текст
+                    size: 12,
+                    family: 'Segoe UI, sans-serif'
+                }
+            },
             xaxis: { 
                 title: 'Эпоха', 
                 gridcolor: '#374151',
-                zerolinecolor: '#374151'
+                zerolinecolor: '#374151',
+                showspikes: true,
+                spikemode: 'across',
+                spikesnap: 'cursor',
+                spikecolor: '#6b7280',
+                spikethickness: 1,
+                spikedash: 'dot',
             },
             yaxis: { 
                 title: 'Loss', 
                 gridcolor: '#374151',
+                type: 'log',
                 zerolinecolor: '#374151'
             },
             legend: { orientation: 'h', y: 1.1, font: { color: '#eee' } }
