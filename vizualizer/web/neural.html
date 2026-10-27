@@ -113,6 +113,20 @@
         </div>
     </div>
 
+        <!-- Модальное окно для подтверждения принудительного применения -->
+    <div id="force-apply-modal-overlay" class="modal-overlay-class" style="display: none;">
+        <div class="modal-class" style="max-width: 500px;">
+            <h3 style="color: #e94560; margin-bottom: 15px;">Подтверждение действия</h3>
+            <p style="margin-bottom: 20px; line-height: 1.5;">
+                Данные этого элемента уже актуальны. Хотите принудительно запустить обработку заново?
+            </p>
+            <div class="modal-buttons" style="justify-content: flex-end;">
+                <button class="modal-btn cancel" id="force-apply-cancel">Отмена</button>
+                <button class="modal-btn save" id="force-apply-confirm">Применить</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/config.js"></script>
     <script src="js/state.js"></script>
     <script src="js/utils.js"></script>
@@ -123,5 +137,6 @@
     <script src="js/project.js"></script>
     <script src="js/settings.js"></script>
     <script src="js/neural_app.js"></script>
+    <script src="/lib/plotly-2.27.0.min.js"></script>
 </body>
 </html>

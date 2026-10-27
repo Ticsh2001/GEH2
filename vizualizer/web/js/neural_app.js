@@ -1283,6 +1283,8 @@ const NeuralApp = {
 
         
         if (nnType === 'nn-template') {
+            const modalEl = document.getElementById('modal');
+            if (modalEl) modalEl.style.maxWidth = '850px'; // Расширяем модалку
             const status = await this.fetchTemplateStatus(elemId);
         
             let statusIcon = '⚪', statusText = 'Не обучена';
@@ -1302,6 +1304,7 @@ const NeuralApp = {
             // содержал правильную опцию), просто UI молчит.
             modalContent.innerHTML = `
                 <div id="template-status" style="margin-bottom:10px; font-size:14px; font-weight:500;">${statusIcon} ${statusText}</div>
+                
                 <div class="modal-row" style="position:relative;">
                     <label>Код проекта дизайна нейросети (ККС):</label>
                     <input type="text" id="prop-design-code"
@@ -1313,8 +1316,23 @@ const NeuralApp = {
                         max-height:180px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.3);
                     "></div>
                 </div>
-                <div id="template-train-progress" style="margin-top:8px; font-size:12px; color:#9ca3af;"></div>
-                <div style="margin-top:12px; text-align:left;">
+                
+                <div class="modal-row" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.2); border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:0;">
+                        <input type="checkbox" id="prop-sync-data" ${elemData.props.sync_data ? 'checked' : ''} style="width:18px; height:18px; margin:0;">
+                        <span style="font-weight:500;">Синхронизировать датасеты X и Y по времени</span>
+                    </label>
+                    <small style="color:#999; display:block; margin-top:4px; margin-left:26px;">
+                        Устраняет временной сдвиг. При включении система пересоберет данные перед обучением (если нужно).
+                    </small>
+                </div>
+
+                <!-- НОВОЕ: Контейнер для графика -->
+                <div id="template-loss-chart" style="width:100%; height:300px; margin-top:15px; display:none; background:#111827; border-radius:8px; border:1px solid #374151;"></div>
+
+                <div id="template-train-progress" style="margin-top:12px; font-size:13px; color:#9ca3af; min-height:20px;"></div>
+                
+                <div style="margin-top:15px; text-align:left;">
                     <button class="modal-btn apply-btn" id="modal-train" ${status.job ? 'disabled' : ''}>🚀 Обучить</button>
                 </div>
             `;
@@ -1383,9 +1401,14 @@ const NeuralApp = {
                 Modal.hideModal('modal-overlay');
             };
             document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
+
+            
         
             document.getElementById('modal-train').onclick = async () => {
                 elemData.props.design_code = designInput.value.trim();
+                // Считываем чекбокс синхронизации
+                elemData.props.sync_data = document.getElementById('prop-sync-data').checked;
+
                 if (!elemData.props.design_code) {
                     alert('Укажите код проекта дизайна нейросети');
                     return;
@@ -1394,32 +1417,49 @@ const NeuralApp = {
                     alert('Сначала сохраните проект — иначе обучение будет некому отдать после закрытия вкладки.');
                     return;
                 }
-                // Требуем сохранить именно текущую (актуальную) версию проекта перед постановкой в очередь
+                
                 if (!confirm('Перед обучением проект будет сохранён. Продолжить?')) return;
                 await this.saveProject();
-        
+                
                 const project = { project: AppState.project, elements: AppState.elements, connections: AppState.connections };
+                const progressEl = document.getElementById('template-train-progress');
+                const trainBtn = document.getElementById('modal-train');
+                
                 try {
+                    progressEl.textContent = elemData.props.sync_data ? '⏳ Подготовка синхронизированного датасета...' : '⏳ Постановка в очередь...';
+                    trainBtn.disabled = true;
+
                     const resp = await fetch('/api/nn/train', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            element_id: elemId, project, config: AppState.currentConfig || '',
-                            user: AppState.currentUser
+                            element_id: elemId, 
+                            project, 
+                            config: AppState.currentConfig || '',
+                            user: AppState.currentUser,
+                            sync_data: elemData.props.sync_data // <-- Передаем флаг
                         })
                     });
                     const data = await resp.json();
-                    if (!resp.ok) { alert('Ошибка постановки в очередь: ' + (data.detail || resp.statusText)); return; }
+                    
+                    if (!resp.ok) { 
+                        alert('Ошибка постановки в очередь: ' + (data.detail || resp.statusText)); 
+                        trainBtn.disabled = false;
+                        progressEl.textContent = 'Ошибка.';
+                        return; 
+                    }
         
                     if (data.status === 'already_trained') {
                         alert('Модель уже обучена на этих данных и дизайне — переобучение не требуется.');
                         this.showLayerPropertiesModal(elemId);
                         return;
                     }
-                    document.getElementById('modal-train').disabled = true;
+                    
+                    progressEl.textContent = '⏳ В очереди на обучение...';
                     this.pollTrainingProgress(elemId, data.job_id);
                 } catch (e) {
                     alert('Не удалось запустить обучение: ' + e.message);
+                    trainBtn.disabled = false;
                 }
             };
         
@@ -1557,6 +1597,53 @@ const NeuralApp = {
         }
     },
 
+    renderTrainingChart(metrics) {
+        const chartDiv = document.getElementById('template-loss-chart');
+        if (!chartDiv || !metrics || metrics.length === 0) return;
+
+        chartDiv.style.display = 'block';
+
+        const epochs = metrics.map(m => m.epoch);
+        const loss = metrics.map(m => m.loss);
+        // Безопасно извлекаем val_loss (если валидации не было, будет null)
+        const valLoss = metrics.map(m => (m.val_loss !== undefined ? m.val_loss : null));
+
+        const traceTrain = {
+            x: epochs, y: loss,
+            mode: 'lines+markers', name: 'Train Loss',
+            line: { color: '#4a90d9', width: 2 },
+            marker: { size: 4 }
+        };
+
+        const traceVal = {
+            x: epochs, y: valLoss,
+            mode: 'lines+markers', name: 'Val Loss',
+            line: { color: '#f97316', width: 2 },
+            marker: { size: 4 }
+        };
+
+        const layout = {
+            margin: { l: 45, r: 20, t: 20, b: 35 },
+            paper_bgcolor: 'rgba(0,0,0,0)', // Прозрачный фон
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { color: '#9ca3af', family: 'Segoe UI, sans-serif' },
+            xaxis: { 
+                title: 'Эпоха', 
+                gridcolor: '#374151',
+                zerolinecolor: '#374151'
+            },
+            yaxis: { 
+                title: 'Loss', 
+                gridcolor: '#374151',
+                zerolinecolor: '#374151'
+            },
+            legend: { orientation: 'h', y: 1.1, font: { color: '#eee' } }
+        };
+
+        // Plotly.react плавно обновляет график без перерисовки всей области
+        Plotly.react(chartDiv, [traceTrain, traceVal], layout, {responsive: true, displayModeBar: false});
+    },
+
  
     // Поллинг прогресса обучения. Пока просто текстом эпоха/loss — полноценный
     // график будет отдельной задачей (метрики уже пишутся бэком в metrics.jsonl,
@@ -1574,6 +1661,10 @@ const NeuralApp = {
                 const resp = await fetch(`/api/nn/train/status/${jobId}`);
                 if (!resp.ok) return;
                 const job = await resp.json();
+
+                if (job.metrics && job.metrics.length > 0) {
+                    this.renderTrainingChart(job.metrics);
+                }
     
                 if (progressEl) {
                     if (job.status === 'queued') {
@@ -1628,6 +1719,42 @@ const NeuralApp = {
         const elemData = AppState.elements[elemId];
         if (!elemData) return;
 
+        // 1. Спрашиваем статус
+        let force = false;
+        const status = await this.fetchElementStatus(elemId);
+        
+        if (status.up_to_date) {
+            // Показываем наше модальное окно и ждем ответа
+            const userConfirmed = await new Promise((resolve) => {
+                const overlay = document.getElementById('force-apply-modal-overlay');
+                const btnConfirm = document.getElementById('force-apply-confirm');
+                const btnCancel = document.getElementById('force-apply-cancel');
+
+                const handleConfirm = () => {
+                    cleanup();
+                    resolve(true);
+                };
+                const handleCancel = () => {
+                    cleanup();
+                    resolve(false);
+                };
+                const cleanup = () => {
+                    overlay.style.display = 'none';
+                    btnConfirm.removeEventListener('click', handleConfirm);
+                    btnCancel.removeEventListener('click', handleCancel);
+                };
+
+                btnConfirm.addEventListener('click', handleConfirm);
+                btnCancel.addEventListener('click', handleCancel);
+                overlay.style.display = 'flex';
+            });
+
+            if (!userConfirmed) {
+                return; // Пользователь отказался, выходим
+            }
+            force = true;
+        }
+
         // Собираем проект
         const project = {
             project: AppState.project,
@@ -1642,7 +1769,8 @@ const NeuralApp = {
                 body: JSON.stringify({
                     element_id: elemId,
                     project: project,
-                    config: AppState.currentConfig || ''
+                    config: AppState.currentConfig || '',
+                    force: force
                 })
             });
             if (!resp.ok) {

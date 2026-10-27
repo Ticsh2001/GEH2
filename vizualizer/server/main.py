@@ -1725,8 +1725,9 @@ async def apply_nn_processing(payload: dict = Body(...)):
         element_id = payload["element_id"]
         project = payload["project"]
         config = payload.get("config") or ""
+        force = payload.get("force", False)
         project_code = project.get("project", {}).get("code", "unnamed_project")
-        result = process_element(element_id, project, config, project_code)
+        result = process_element(element_id, project, config, project_code,  force=force)
         return {"status": "success", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2006,9 +2007,9 @@ async def start_training(payload: dict = Body(...)):
     """
     payload = {
         "element_id": ...,
-        "project": {...},          # как и в остальных nn-эндпоинтах
+        "project": {...},
         "config": ...,
-        "user": "имя пользователя" # из AppState.currentUser на фронте
+        "user": "..."
     }
     """
     try:
@@ -2016,10 +2017,9 @@ async def start_training(payload: dict = Body(...)):
         project = payload["project"]
         config = payload.get("config") or ""
         user = payload.get("user") or "Аноним"
+        sync_data = payload.get("sync_data", False)
         project_code = project.get("project", {}).get("code", "")
  
-        # 1. Проект должен быть сохранён — иначе после закрытия вкладки
-        #    некуда будет вернуться проверять статус обучения.
         if not project_code:
             raise HTTPException(status_code=400, detail="Сначала сохраните проект (укажите код)")
  
@@ -2032,23 +2032,43 @@ async def start_training(payload: dict = Body(...)):
         if not design_code:
             raise HTTPException(status_code=400, detail="Не указан код проекта дизайна нейросети")
  
-        # 2. Уже есть активная задача на этот элемент — не дублируем
         existing = tq.find_active_job_for_element(element_id, project_code)
         if existing:
             return {"status": existing["status"], "job_id": existing["job_id"], "already_queued": True}
  
-        # 3. Собираем входные файлы по портам (settings/X_train/Y_train/X_val/Y_val)
         connections = project.get("connections", [])
         conn_by_port = {c["toPort"]: c for c in connections if c["toElement"] == element_id}
  
         input_paths = {}
         input_hashes = {}
         settings_props = {}
+        
+        # Проверяем, сгенерировал ли nn-template синхронизированные датасеты
+        template_meta_path = get_meta_path(config, project_code, element_id)
+        sync_outputs = {}
+        if sync_data:
+            # Пользователь просит синхронизацию.
+            # 1. Проверяем актуальность самого шаблона (и его sync-файлов)
+            tmpl_status = get_element_status(element_id, project, config, project_code)
+            
+            if not tmpl_status["up_to_date"]:
+                # Если не актуально — принудительно запускаем сборку (синхронизацию)
+                print(f"[TRAIN] Синхронизация датасетов для {element_id}...")
+                process_element(element_id, project, config, project_code, force=True)
+            
+            # 2. Перечитываем метаданные после (возможной) синхронизации
+            if os.path.exists(template_meta_path):
+                with open(template_meta_path, "r", encoding="utf-8") as f:
+                    t_meta = json.load(f)
+                sync_outputs = t_meta.get("outputs", {})
+        else:
+            # Пользователь отказался от синхронизации — принудительно используем лейблеры
+            sync_outputs = {}
  
         for port, role in TEMPLATE_PORT_MAP.items():
             conn = conn_by_port.get(port)
             if not conn:
-                if role != 'settings':  # settings опционален, остальные обязательны
+                if role != 'settings':
                     raise HTTPException(status_code=400,
                                          detail=f"Не подключён вход '{role}' элемента Шаблон")
                 continue
@@ -2057,22 +2077,71 @@ async def start_training(payload: dict = Body(...)):
             from_port = conn.get("fromPort", "out-0")
  
             if role == 'settings':
-                # элемент "Настройка" отдаёт свои props напрямую, без файла на диске
                 settings_props = dict(src_elem.get("props", {}))
                 continue
+            
+            sync_key = None
+            if role == 'X_train': sync_key = 'out-X'
+            elif role == 'Y_train': sync_key = 'out-Y'
+            
+            # 1. Выбираем путь (sync или labeler)
+            if sync_key and sync_key in sync_outputs and sync_outputs[sync_key]:
+                # ПРОВЕРКА: не устарел ли сам шаблон (и его sync-файлы)
+                tmpl_status = get_element_status(element_id, project, config, project_code)
+                if not tmpl_status["up_to_date"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Синхронизированные данные устарели (изменились лейблеры или их входы). Нажмите 'Применить' на элементе Шаблон."
+                    )
+                
+                path = os.path.join(get_datasets_dir(config), sync_outputs[sync_key])
+                input_paths[role] = path
+                input_hashes[f"{role}_source"] = "sync"
+                elem_hash = tmpl_status["hash"]
+            else:
+                src_status = get_element_status(src_id, project, config, project_code)
+                if not src_status["up_to_date"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Данные для входа '{role}' не актуальны — примените элемент '{src_id}'"
+                    )
+                path = get_output_file(src_elem, from_port, config, project_code)
+                input_paths[role] = path
+                input_hashes[f"{role}_source"] = "labelers"
+                elem_hash = src_status["hash"]
  
-            src_status = get_element_status(src_id, project, config, project_code)
-            if not src_status["up_to_date"]:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Данные для входа '{role}' не актуальны — примените элемент '{src_id}'"
-                )
-            path = get_output_file(src_elem, from_port, config, project_code)
-            input_paths[role] = path
-            input_hashes[src_id] = src_status["hash"]
+            # 2. Добавляем хэш элемента (без повторного вызова)
+            input_hashes[f"{role}_element_hash"] = elem_hash
+            
+            # 3. ГЛАВНОЕ: Добавляем хэш самого файла (имя + mtime + размер)
+            # Это гарантирует, что при смене файла (с лейблера на sync) хэш изменится!
+            if os.path.exists(path):
+                st = os.stat(path)
+                input_hashes[f"{role}_file"] = f"{os.path.basename(path)}_{st.st_mtime_ns}_{st.st_size}"
+            else:
+                input_hashes[f"{role}_file"] = "missing"
  
-        # 4. Проверяем актуальность обучения — если уже обучено на этих же
-        #    данных/дизайне/настройках, не гоняем GPU впустую
+        # =====================================================================
+        # ЛОГИРОВАНИЕ ПОДХВАЧЕННЫХ ФАЙЛОВ
+        # =====================================================================
+        print("\n" + "="*80)
+        print(f"[TRAIN] Запуск обучения для {project_code} / {element_id}")
+        for role, path in input_paths.items():
+            if os.path.exists(path):
+                size_kb = os.path.getsize(path) / 1024
+                try:
+                    df = pd.read_excel(path)
+                    has_dt = "datetime" in df.columns
+                    print(f"[TRAIN] {role:<10} -> {os.path.basename(path)}")
+                    print(f"        строк: {len(df)}, колонок: {len(df.columns)}, размер: {size_kb:.1f} KB")
+                    print(f"        есть 'datetime': {has_dt}")
+                except Exception as e:
+                    print(f"[TRAIN] {role:<10} -> {os.path.basename(path)} (ошибка чтения: {e})")
+            else:
+                print(f"[TRAIN] {role:<10} -> ФАЙЛ НЕ НАЙДЕН: {path}")
+        print("="*80 + "\n")
+        # =====================================================================
+ 
         design_project = nn_template.load_design_project(config, design_code)
         d_hash = nn_template.design_hash(design_project)
         train_hash = nn_template.compute_train_hash(design_code, d_hash, settings_props, input_hashes)
@@ -2085,7 +2154,6 @@ async def start_training(payload: dict = Body(...)):
                os.path.exists(nn_template.get_model_path(config, project_code, element_id)):
                 return {"status": "already_trained", "job_id": None}
  
-        # 5. Ставим в очередь
         job_id = tq.enqueue_job(
             config=config,
             project_code=project_code,
@@ -2096,7 +2164,6 @@ async def start_training(payload: dict = Body(...)):
             inputs=input_paths,
             train_hash=train_hash,
         )
-        # input_hashes понадобятся воркеру для записи в meta.json — допишем в job
         job = tq.get_job(job_id)
         job["input_hashes"] = input_hashes
         tq._write_job(job_id, job)
@@ -2134,6 +2201,17 @@ async def cancel_train_job(job_id: str):
 async def get_train_queue(config: str = Query(...)):
     jobs = tq.list_jobs(config=config, statuses=["queued", "running"])
     return {"jobs": jobs, "running_job_id": tq.current_running_job_id()}
+
+
+@app.delete("/api/nn/sync/{element_id}")
+async def delete_sync_data(element_id: str, config: str = "", code: str = ""):
+    """Удаляет синхронизированные данные, чтобы можно было обучаться на сырых лейблерах."""
+    try:
+        from dataprocessing import clear_sync_data
+        deleted = clear_sync_data(element_id, config, code)
+        return {"status": "success", "deleted": deleted}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _cleanup_neural_training_artifacts(config: str, project_code: str) -> dict:

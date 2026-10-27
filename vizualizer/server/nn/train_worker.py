@@ -36,6 +36,8 @@ import training_queue as tq
 import nn_template
 import nn_settings
 from Block_Struct import BlockStruct, create_neural_model
+from typing import Dict, List, Optional, Tuple
+
 
 # ---------------------------------------------------------------------------
 # NOTE: минимальный самостоятельный config_path — дублирует небольшой кусок
@@ -74,6 +76,18 @@ nn_template.set_template_dir(lambda: _standalone_abs_folder("templateDataFolder"
 
 def _now_iso() -> str:
     return datetime.datetime.now().isoformat(timespec='seconds')
+
+def _load_and_merge_data(x_path: str, y_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    def _load_basic(path):
+        df = pd.read_excel(path)
+        if 'datetime' in df.columns:
+            df = df.drop(columns=['datetime']) # На всякий случай страхуемся
+        return df.to_numpy(dtype='float32')
+        
+    X = _load_basic(x_path)
+    Y = _load_basic(y_path)
+    min_len = min(len(X), len(Y))
+    return X[:min_len], Y[:min_len]
 
 
 def _load_xlsx_as_array(path: str) -> np.ndarray:
@@ -128,18 +142,10 @@ def run(job_id: str):
 
         design_project = nn_template.load_design_project(config, design_code)
 
-        X_train = _load_xlsx_as_array(inputs['X_train'])
-        Y_train = _load_xlsx_as_array(inputs['Y_train'])
-        # Выровнять количество образцов (временное решение, пока не исправлена логика labeler)
-        min_len = min(len(X_train), len(Y_train))
-        X_train = X_train[:min_len]
-        Y_train = Y_train[:min_len]
-        X_val = _load_xlsx_as_array(inputs['X_val']) if inputs.get('X_val') else None
-        Y_val = _load_xlsx_as_array(inputs['Y_val']) if inputs.get('Y_val') else None
-        if X_val is not None and Y_val is not None:
-            min_val_len = min(len(X_val), len(Y_val))
-            X_val = X_val[:min_val_len]
-            Y_val = Y_val[:min_val_len]
+        X_train, Y_train = _load_and_merge_data(inputs['X_train'], inputs['Y_train'])
+        X_val, Y_val = None, None
+        if inputs.get('X_val') and inputs.get('Y_val'):
+            X_val, Y_val = _load_and_merge_data(inputs['X_val'], inputs['Y_val'])
 
         model = build_model(design_project, input_shape=(X_train.shape[1],))
 
