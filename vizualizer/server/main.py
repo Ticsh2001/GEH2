@@ -2526,6 +2526,20 @@ async def export_nn_project(payload: dict = Body(...)):
 
         startup_data = get_extended_project_data(startup_kks, config)
         rule_data = get_extended_project_data(rule_kks, config)
+        metrics = []
+        if os.path.isfile(model_meta_path):
+            with open(model_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            job_id = meta.get("job_id")
+            if job_id:
+                metrics_path = tq._metrics_path(job_id)
+                if os.path.exists(metrics_path):
+                    with open(metrics_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if line.strip():
+                                try:
+                                    metrics.append(json.loads(line))
+                                except: pass
         # ---------------------------------------------------------------------
 
         # 3. Собираем ZIP с добавлением Word-файла
@@ -2535,7 +2549,8 @@ async def export_nn_project(payload: dict = Body(...)):
             model_meta_path=model_meta_path,
             base_name=project_code,
             startup_data=startup_data,  # <-- передаем
-            rule_data=rule_data         # <-- передаем
+            rule_data=rule_data,         # <-- передаем
+            metrics=metrics
         )
 
         zip_name = f"{project_code}_export.zip"

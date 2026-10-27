@@ -476,7 +476,56 @@ def _generate_model_diagram(inputs, nn_kks, rule_kks=None, startup_kks=None):
     buf.seek(0)
     return buf
 
-def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rule_data=None):
+def _generate_training_history_chart(metrics):
+    """Генерирует график истории обучения (Loss) с логарифмической шкалой."""
+    if not metrics:
+        return None
+
+    epochs = []
+    loss = []
+    val_loss = []
+    
+    for m in metrics:
+        ep = m.get("epoch")
+        if ep is None: continue
+        epochs.append(ep)
+        loss.append(m.get("loss"))
+        if m.get("val_loss") is not None:
+            val_loss.append((ep, m.get("val_loss")))
+
+    # Фильтруем некорректные значения для логарифмической шкалы (loss <= 0 не отобразится)
+    valid_loss = [(e, l) for e, l in zip(epochs, loss) if l is not None and l > 0]
+    valid_val = [(e, v) for e, v in val_loss if v is not None and v > 0]
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    
+    if valid_loss:
+        x, y = zip(*valid_loss)
+        ax.plot(x, y, label='Train', color='#4a90d9', linewidth=2, marker='o', markersize=3)
+        
+    if valid_val:
+        x, y = zip(*valid_val)
+        ax.plot(x, y, label='Val', color='#f97316', linewidth=2, marker='o', markersize=3)
+
+    ax.set_yscale('log')
+    ax.set_xlabel('Эпоха')
+    ax.set_ylabel('Loss (log)')
+    ax.grid(True, which="both", ls="--", alpha=0.4)
+    
+    # Шаг по эпохам = 20 (как просил пользователь)
+    max_epoch = max(epochs) if epochs else 0
+    step = 20 if max_epoch > 20 else 5 # если эпох мало, шаг 5, иначе 20
+    ax.set_xticks(range(0, max_epoch + 1, step))
+    
+    ax.legend(loc='upper right')
+
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rule_data=None, metrics=None):
     """Генерирует DOCX с описанием модели."""
     doc = Document()
     
@@ -524,7 +573,7 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
     proj_meta = project_payload.get("project", {})
     code = proj_meta.get("code", "")
     desc = proj_meta.get("description", "")
-    metrics = proj_meta.get("metrics", {}) or {}
+    quality_metrics = proj_meta.get("metrics", {}) or {}   # <-- переименовали
 
     # ==================== РАЗДЕЛ 1: МОДЕЛЬ ====================
     add_heading("1. Модель")
@@ -536,14 +585,14 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
     add_multiline(desc)
 
     add_text("Основные метрики:", bold=True)
-    mae = metrics.get("mae")
-    rmse = metrics.get("rmse")
-    mse = metrics.get("mse")
-    r2 = metrics.get("r2")
-    bias = metrics.get("bias")
-    std = metrics.get("std")
-    p95 = metrics.get("p95")
-    p99 = metrics.get("p99")
+    mae = quality_metrics.get("mae")
+    rmse = quality_metrics.get("rmse")
+    mse = quality_metrics.get("mse")
+    r2 = quality_metrics.get("r2")
+    bias = quality_metrics.get("bias")
+    std = quality_metrics.get("std")
+    p95 = quality_metrics.get("p95")
+    p99 = quality_metrics.get("p99")
     
     # Форматируем аккуратно
     f_mae = f"{mae:.4g}" if mae is not None else "—"
@@ -562,6 +611,15 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
     add_multiline(metrics_text_1)
     add_multiline(metrics_text_2)
     add_multiline(metrics_text_3)
+
+    if metrics:
+        add_text("История обучения (ошибка обучения):", bold=True)
+        img_buf = _generate_training_history_chart(metrics)
+        if img_buf:
+            p_img = doc.add_paragraph()
+            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_img.paragraph_format.first_line_indent = Cm(0)
+            p_img.add_run().add_picture(img_buf, width=Inches(6.0))
 
     add_text("Схема модели:", bold=True)
     inputs = [inp["name"] for inp in config_data.get("inputs", [])]
@@ -681,7 +739,8 @@ def build_zip(project_payload: dict,
               model_meta_path: str,
               base_name: str,
               startup_data: dict = None,
-              rule_data: dict = None) -> bytes:
+              rule_data: dict = None,
+              metrics: list = None) -> bytes:
     """
     Возвращает байты ZIP-архива.
     """
@@ -693,7 +752,7 @@ def build_zip(project_payload: dict,
     cfg = build_config(project_payload)
     
     # Генерируем Word
-    docx_bytes = _build_model_docx_bytes(project_payload, cfg, startup_data, rule_data)
+    docx_bytes = _build_model_docx_bytes(project_payload, cfg, startup_data, rule_data, metrics)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
