@@ -27,6 +27,15 @@ const NeuralApp = {
                     input.dispatchEvent(new Event('input'));
                 }
             }
+            if (event.data && event.data.type === 'TECH_COND_CREATED') {
+                const kks = event.data.kks;
+                const input = document.getElementById('project-tech-cond');
+                if (input) {
+                    input.value = kks;
+                    const btn = document.getElementById('btn-open-tech-cond');
+                    if (btn) btn.disabled = false;
+                }
+            }
         });
 
         document.getElementById('btn-new').addEventListener('click', () => this.newProject());

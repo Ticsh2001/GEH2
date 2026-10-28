@@ -1278,6 +1278,13 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                                readonly style="margin-top:4px; background:#1f2937; color:#9ca3af; border-color:#374151; font-size:12px;" 
                                placeholder="Описание подтянется автоматически">
                     </div>
+                    <div class="modal-row" style="position:relative; margin-top:15px;">
+                        <label>Техническое состояние (KKS):</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="project-tech-cond" value="${project.tech_condition || ''}" readonly style="flex: 1; background:#1f2937; color:#9ca3af;">
+                            <button class="modal-btn" id="btn-open-tech-cond" style="white-space: nowrap; padding: 0 12px;" ${!project.tech_condition ? 'disabled' : ''}>🔗</button>
+                        </div>
+                    </div>
 
                     <div style="display:flex; gap:10px; margin-top:15px;">
                         <div class="modal-row" style="flex:1;">
@@ -1516,6 +1523,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
 
                 setupOpenButton('btn-open-startup', 'project-startup-kks', 'parameter');
                 setupOpenButton('btn-open-diag', 'project-diag-kks', 'rule');
+                setupOpenButton('btn-open-tech-cond', 'project-tech-cond', 'parameter');
 
             }
 
@@ -1825,6 +1833,9 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                 const diagKks = getVal('project-diag-kks');
                 const diagDesc = getVal('project-diag-desc');
                 AppState.project.diagnostic_rule = diagKks ? { kks: diagKks, description: diagDesc } : null;
+
+                const techCondEl = document.getElementById('project-tech-cond');
+                if (techCondEl) AppState.project.tech_condition = techCondEl.value.trim();
 
                 const parseMetric = (id) => {
                     const el = document.getElementById(id);

@@ -62,6 +62,24 @@
             </div>
         </div>
 
+        <div id="normal-state-fields" class="hidden">
+            <hr style="border-color:#374151; margin:15px 0;">
+            <h4 style="margin-bottom:10px; font-size:14px; color:#9ca3af;">Техническое состояние</h4>
+            
+            <div class="form-group">
+                <label>Время валидации параметра (в мин):</label>
+                <input type="number" id="val-valid-time" value="1440" step="1">
+            </div>
+            <div class="form-group">
+                <label>Чувствительность валидации:</label>
+                <input type="number" id="val-valid-sens" value="1.0" step="any">
+            </div>
+            <div class="form-group">
+                <label>Временное окно памяти накопления деградации (в мин):</label>
+                <input type="number" id="val-tech-time" value="43200" step="1">
+            </div>
+        </div>
+
         <button id="btn-save" class="btn btn-primary">Создать проекты</button>
         
         <div id="status"></div>
@@ -88,7 +106,6 @@
             startupEl.style.color = '#fbbf24';
         }
         
-        // Автозаполнение в зависимости от типа
         const setPValue = (val) => { document.getElementById('val-p95').value = val; };
         setPValue(p95);
 
@@ -106,15 +123,18 @@
             const pLabel = document.getElementById('p-label');
             if (type === 'prediction') {
                 document.getElementById('prediction-fields').classList.remove('hidden');
+                document.getElementById('normal-state-fields').classList.add('hidden');
                 setPValue(p95);
                 pLabel.textContent = '95-й перцентиль модели (Погрешность):';
             } else {
                 document.getElementById('prediction-fields').classList.add('hidden');
+                document.getElementById('normal-state-fields').classList.remove('hidden');
                 setPValue(p99); // Используем 99-й перцентиль
                 pLabel.textContent = '99-й перцентиль модели (Погрешность):';
             }
         });
 
+        // --- ОДИН ЕДИНСТВЕННЫЙ ОБРАБОТЧИК КНОПКИ ---
         document.getElementById('btn-save').onclick = async () => {
             const modelType = document.getElementById('model-type').value;
             const isPrediction = modelType === 'prediction';
@@ -126,10 +146,20 @@
             }
 
             let maxVal = null;
+            let validTime = null, validSens = null, techTime = null;
+
             if (isPrediction) {
                 maxVal = parseFloat(document.getElementById('val-max-param').value);
                 if (isNaN(maxVal)) {
                     showStatus('Введите предельно допустимое значение!', true);
+                    return;
+                }
+            } else {
+                validTime = parseFloat(document.getElementById('val-valid-time').value);
+                validSens = parseFloat(document.getElementById('val-valid-sens').value);
+                techTime = parseFloat(document.getElementById('val-tech-time').value);
+                if (isNaN(validTime) || isNaN(validSens) || isNaN(techTime)) {
+                    showStatus('Заполните все поля технического состояния!', true);
                     return;
                 }
             }
@@ -150,126 +180,157 @@
                 const ruleKks = `${nnKks}_PROBLEM`;
 
                 // Хелпер для создания проекта-константы
-                const createConstProject = async (code, value, description) => {
+                const createConstProject = async (code, value, description, dim = "") => {
                     const payload = {
                         version: '1.0',
                         project: {
-                            code: code,
-                            type: 'parameter',
-                            description: description,
-                            dimension: dimension,
-                            author: 'Система',
-                            status: 'draft',
-                            statusHistory: []
+                            code: code, type: 'parameter', description: description, dimension: dim,
+                            author: 'Система', status: 'draft', statusHistory: []
                         },
                         elements: {
                             const_1: { id: 'const_1', type: 'const', x: 100, y: 100, width: 120, height: 60, props: { value: value, description: description } },
                             out_1: { id: 'out_1', type: 'output', x: 300, y: 100, width: 150, height: 60, props: { label: code } }
                         },
-                        connections: [
-                            { fromElement: 'const_1', fromPort: 'out-0', toElement: 'out_1', toPort: 'in-0' }
-                        ],
-                        counter: 2,
-                        code: String(value)
+                        connections: [ { fromElement: 'const_1', fromPort: 'out-0', toElement: 'out_1', toPort: 'in-0' } ],
+                        counter: 2, code: String(value)
                     };
                     const resp = await fetch(addConfig('/api/project/save'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ filename: `${code}_parameter.json`, target: 'projects', content: payload })
                     });
                     if (!resp.ok) throw new Error(`Ошибка сохранения ${code}`);
                 };
 
-                // Описание для перцентиля
+                // Хелпер для создания проекта с формулой
+                const createMathProject = async (code, description, formulaText, inputKksList, dim = "") => {
+                    const elements = {};
+                    const connections = [];
+                    
+                    inputKksList.forEach((kks, i) => {
+                        const id = `in_${i+1}`;
+                        elements[id] = { id: id, type: 'input-signal', x: 100, y: 50 + i * 100, width: 150, height: 60, props: { name: kks } };
+                        connections.push({ fromElement: id, fromPort: 'out-0', toElement: 'formula_1', toPort: `in-${i}` });
+                    });
+                    
+                    elements['formula_1'] = {
+                        id: 'formula_1', type: 'formula', x: 350, y: 150, width: 200, height: 100,
+                        props: { expression: formulaText, inputCount: inputKksList.length }
+                    };
+                    elements['out_1'] = { id: 'out_1', type: 'output', x: 650, y: 150, width: 150, height: 60, props: { label: code } };
+                    connections.push({ fromElement: 'formula_1', fromPort: 'out-0', toElement: 'out_1', toPort: 'in-0' });
+                    
+                    const payload = {
+                        version: '1.0',
+                        project: { code: code, type: 'parameter', description: description, dimension: dim, author: 'Система', status: 'draft', statusHistory: [] },
+                        elements: elements, connections: connections, counter: 10, code: formulaText
+                    };
+                    
+                    const resp = await fetch(addConfig('/api/project/save'), {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: `${code}_parameter.json`, target: 'projects', content: payload })
+                    });
+                    if (!resp.ok) throw new Error(`Ошибка создания ${code}`);
+                };
+
+                // --- БАЗОВОЕ СОЗДАНИЕ (Общее для обоих типов) ---
                 const pDesc = isPrediction 
                     ? `95-й перцентиль модели. Погрешность работы модели, при которой 95% всех ее предсказаний ниже этой величины`
                     : `99-й перцентиль модели. Погрешность работы модели, при которой 99% всех ее предсказаний ниже этой величины`;
-                
-                // 2. Создаем константу перцентиля
                 await createConstProject(pConstKks, pVal, pDesc);
 
-                // 3. Подготовка элементов графа
-                const inputCount = startupKks ? 4 : 3;
-                const formulaId = 'formula_5';
-                const outId = 'out_6';
+                let ruleElements = {};
+                let ruleConnections = [];
                 let formulaText = '';
                 
-                let ruleElements = {
-                    in_1: { id: 'in_1', type: 'input-signal', x: 100, y: 50, width: 150, height: 60, props: { name: nnKks } },
-                    in_2: { id: 'in_2', type: 'input-signal', x: 100, y: 150, width: 150, height: 60, props: { name: isPrediction ? maxConstKks : yKks } },
-                    in_3: { id: 'in_3', type: 'input-signal', x: 100, y: 250, width: 150, height: 60, props: { name: pConstKks } }
-                };
-                
-                let ruleConnections = [
-                    { fromElement: 'in_1', fromPort: 'out-0', toElement: formulaId, toPort: 'in-0' },
-                    { fromElement: 'in_2', fromPort: 'out-0', toElement: formulaId, toPort: 'in-1' },
-                    { fromElement: 'in_3', fromPort: 'out-0', toElement: formulaId, toPort: 'in-2' }
+                let baseInputs = [
+                    { id: 'in_1', name: nnKks },
+                    { id: 'in_2', name: isPrediction ? maxConstKks : yKks },
+                    { id: 'in_3', name: pConstKks }
                 ];
 
-                if (startupKks) {
-                    ruleElements['in_4'] = { id: 'in_4', type: 'input-signal', x: 100, y: 350, width: 150, height: 60, props: { name: startupKks } };
-                    ruleConnections.push({ fromElement: 'in_4', fromPort: 'out-0', toElement: formulaId, toPort: 'in-3' });
-                }
-
-                // Формируем формулу и создаем константу уставки (если нужно)
-                let formulaArgs = [nnKks];
                 if (isPrediction) {
-                    // Получаем выбранный тип уставки
                     const limitType = document.querySelector('input[name="limit_type"]:checked').value;
                     const maxDesc = limitType === 'working' 
                         ? `Уставка на допустимое значение измеряемого параметра ${yKks}. Соответствует максимальному значению рабочего диапазона.`
                         : `Уставка на допустимое значение измеряемого параметра ${yKks}. Соответствует значению срабатывания предупредительной сигнализации.`;
-                    
-                    await createConstProject(maxConstKks, maxVal, maxDesc);
-                    formulaArgs.push(maxConstKks);
-                } else {
-                    formulaArgs.push(yKks);
+                    await createConstProject(maxConstKks, maxVal, maxDesc, dimension);
                 }
-                formulaArgs.push(pConstKks);
-                
-                if (startupKks) formulaArgs.push(startupKks);
-                
+
+                if (startupKks) {
+                    baseInputs.push({ id: 'in_4', name: startupKks });
+                }
+
+                let formulaArgs = baseInputs.map(i => i.name);
                 formulaText = `${isPrediction ? 'prediction_nn' : 'normal_operation_nn'}(${formulaArgs.join(', ')})`;
 
-                // Добавляем формулу и выход
-                ruleElements[formulaId] = { 
-                    id: formulaId, type: 'formula', x: 350, y: 150 + (startupKks ? 50 : 0), width: 200, height: 120, 
-                    props: { expression: formulaText, inputCount: inputCount } 
-                };
-                ruleElements[outId] = { id: outId, type: 'output', x: 650, y: 150 + (startupKks ? 50 : 0), width: 150, height: 60, props: { label: ruleKks } };
+                baseInputs.forEach((inp, idx) => {
+                    ruleElements[inp.id] = { id: inp.id, type: 'input-signal', x: 100, y: 50 + idx * 100, width: 150, height: 60, props: { name: inp.name } };
+                    ruleConnections.push({ fromElement: inp.id, fromPort: 'out-0', toElement: 'formula_5', toPort: `in-${idx}` });
+                });
                 
-                ruleConnections.push({ fromElement: formulaId, fromPort: 'out-0', toElement: outId, toPort: 'in-0' });
+                ruleElements['formula_5'] = { id: 'formula_5', type: 'formula', x: 350, y: 150, width: 200, height: 120, props: { expression: formulaText, inputCount: baseInputs.length } };
+                ruleElements['out_6'] = { id: 'out_6', type: 'output', x: 650, y: 150, width: 150, height: 60, props: { label: ruleKks } };
+                ruleConnections.push({ fromElement: 'formula_5', fromPort: 'out-0', toElement: 'out_6', toPort: 'in-0' });
 
-                // 4. Сохраняем проект правила
                 const rulePayload = {
                     version: '1.0',
-                    project: {
-                        code: ruleKks,
-                        type: 'rule',
-                        description: '',
-                        possibleCause: '',
-                        guidelines: '',
-                        author: 'Система',
-                        status: 'draft',
-                        statusHistory: []
-                    },
-                    elements: ruleElements,
-                    connections: ruleConnections,
-                    counter: 6,
-                    code: formulaText
+                    project: { code: ruleKks, type: 'rule', description: '', possibleCause: '', guidelines: '', author: 'Система', status: 'draft', statusHistory: [] },
+                    elements: ruleElements, connections: ruleConnections, counter: 6, code: formulaText
                 };
 
                 const ruleResp = await fetch(addConfig('/api/project/save'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ filename: `${ruleKks}_rule.json`, target: 'projects', content: rulePayload })
                 });
-                
                 if (!ruleResp.ok) throw new Error(`Ошибка создания правила ${ruleKks}`);
+
+                // --- ДОПОЛНИТЕЛЬНОЕ СОЗДАНИЕ ДЛЯ NORMAL STATE ---
+                let techCondKks = null;
+                if (!isPrediction) {
+                    const validTimeKks = `${nnKks}_VALID_TIME_CONST`;
+                    const validSensKks = `${nnKks}_VALID_SENSITIVITY_CONST`;
+                    const techTimeKks = `${nnKks}_TECHNICAL_TIME_CONST`;
+                    const validCondKks = `${nnKks}_VALID_COND`;
+                    const degradKks = `${nnKks}_DEGRADATION`;
+                    techCondKks = `${nnKks}_TECHNICAL_CONDITION`;
+
+                    // 1. Константы
+                    await createConstProject(validTimeKks, validTime, `Временное окно, на котором валидируются показания отслеживаемого параметра`, "мин");
+                    await createConstProject(validSensKks, validSens, `Величина чувствительности для контроля изменения параметра`, dimension);
+                    await createConstProject(techTimeKks, techTime, `Временное окно накопления деградации оборудования`, "мин");
+
+                    // 2. VALID_COND
+                    await createMathProject(
+                        validCondKks, 
+                        `Валидация значений сигнала ${yKks} для расчета коэффициенте технического состояния. 1 - показания валидные, 0 - показания невалидные`,
+                        `valid_func(${yKks}, ${startupKks}, ${validTimeKks}, ${validSensKks})`,
+                        [yKks, startupKks, validTimeKks, validSensKks],
+                        "флаг"
+                    );
+
+                    // 3. DEGRADATION
+                    await createMathProject(
+                        degradKks,
+                        `Расчет коэффициента деградации оборудования по параметру ${yKks}`,
+                        `tech_cond_calc(${nnKks}, ${yKks}, ${pConstKks}, ${validCondKks})`,
+                        [nnKks, yKks, pConstKks, validCondKks],
+                        "коэф."
+                    );
+
+                    // 4. TECHNICAL_CONDITION
+                    await createMathProject(
+                        techCondKks,
+                        `Расчет коэффициента технического состояния оборудования по параметру ${yKks}`,
+                        `integral_tech_cond(${degradKks}, ${validCondKks}, ${techTimeKks})`,
+                        [degradKks, validCondKks, techTimeKks],
+                        "коэф."
+                    );
+                }
 
                 // Успех
                 let successMsg = `✅ Успешно созданы проекты:\n1. ${pConstKks}`;
                 if (isPrediction) successMsg += `\n2. ${maxConstKks}`;
+                else successMsg += `\n... и полный набор проектов технического состояния`;
                 successMsg += `\n3. ${ruleKks}\n\nВы можете закрыть эту вкладку и выбрать правило в свойствах проекта.`;
                 
                 showStatus(successMsg);
@@ -277,6 +338,9 @@
                 
                 if (window.opener) {
                     window.opener.postMessage({ type: 'RULE_CREATED', kks: ruleKks }, '*');
+                    if (techCondKks) {
+                        window.opener.postMessage({ type: 'TECH_COND_CREATED', kks: techCondKks }, '*');
+                    }
                 }
 
             } catch (e) {
