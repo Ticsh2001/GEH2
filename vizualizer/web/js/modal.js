@@ -1516,7 +1516,7 @@ Write all text values in Russian. Keep the field labels (DESCRIPTION, POSSIBLE_C
                         
                         // Формируем URL и открываем новую вкладку
                         // ДОБАВЛЕН startup_kks
-                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&p99=${p99}&startup_kks=${encodeURIComponent(startupKks)}&config=${encodeURIComponent(config)}`;
+                        const url = `/create_rule.html?nn_kks=${encodeURIComponent(nnKks)}&y_kks=${encodeURIComponent(yKks)}&p95=${p95}&p99=${p99}&startup_kks=${encodeURIComponent(startupKks)}&diag_rule_kks=${encodeURIComponent(diagRule.kks || '')}&config=${encodeURIComponent(config)}`;
                         window.open(url, '_blank');
                     };
                 }
