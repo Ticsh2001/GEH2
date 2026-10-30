@@ -17,12 +17,6 @@ from datetime import datetime, timezone
 # =============================================================================
 
 def build_dataset(signals_data, ref_signal, interpolation='linear'):
-    """Выровнять все сигналы по временной шкале опорного и интерполировать.
-
-    signals_data : {имя: DataFrame[datetime, value]}
-    ref_signal   : ключ в signals_data, чья шкала — опорная
-    interpolation: 'linear' | 'nearest' | 'cubic'
-    """
     if not signals_data:
         raise ValueError("Нет данных для построения датасета")
 
@@ -53,18 +47,11 @@ def build_dataset(signals_data, ref_signal, interpolation='linear'):
 
 
 def _collect_range_violations(df, ts, range_checks):
-    """Для каждой строки df собрать список нарушений границ.
-
-    Возвращает list длиной len(df), где элемент i — список dict'ов:
-        {"column": str, "value": float, "min": float|None,
-         "max": float|None, "timestamp": str}
-    """
     violations = [[] for _ in range(len(df))]
     if not range_checks:
         return violations
 
     fmt = None
-
     for rule in range_checks:
         col = rule.get("column")
         if col not in df.columns:
@@ -83,7 +70,6 @@ def _collect_range_violations(df, ts, range_checks):
             if not bad:
                 continue
             if fmt is None:
-                # Определяем формат по ts один раз
                 fmt = "%d.%m.%Y %H:%M:%S"
             violations[i].append({
                 "column": col,
@@ -95,11 +81,7 @@ def _collect_range_violations(df, ts, range_checks):
     return violations
 
 
- 
-
 def filter_dataset(df, rules):
-    """Убрать строки вне [min, max]; опционально min-max нормализация.
-    """
     df = df.copy()
     for rule in rules:
         col = rule.get('column')
@@ -134,12 +116,6 @@ def filter_dataset(df, rules):
 
 
 def normalize_dataset(df, rules):
-    """Нормализовать столбцы по заранее сохранённым [min, max].
-
-    Приводит значения к [0, 1]. Используется на инференсе, где дроп строк не нужен.
-    Правила имеют вид {'column': <имя>, 'min': <float>, 'max': <float>}.
-    NaN-строки не трогаются.
-    """
     df = df.copy()
     for rule in rules:
         col = rule.get('column')
@@ -163,7 +139,6 @@ def normalize_dataset(df, rules):
 
 
 def apply_time_filter(df, intervals):
-    """Оставить строки, чей datetime попадает хотя бы в один интервал."""
     if not intervals:
         return df
     df = df.copy()
@@ -189,8 +164,6 @@ def apply_time_filter(df, intervals):
 
 
 def apply_time_shift(df, shift_value, shift_unit):
-    """Вернуть (df_original, df_shifted).
-    """
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)
@@ -212,8 +185,6 @@ def apply_time_shift(df, shift_value, shift_unit):
 
 
 def apply_labeler(df, x_columns, y_column, window_size=1, window_unit='rows'):
-    """Собрать X (признаки с окном).
-    """
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)
@@ -241,8 +212,6 @@ def apply_labeler(df, x_columns, y_column, window_size=1, window_unit='rows'):
 
 
 def resample_to_fixed_grid(df, freq):
-    """Линейно интерполировать сигнал на регулярную сетку с шагом `freq`.
-    """
     df = df.dropna(subset=['datetime']).sort_values('datetime')
     df = df.drop_duplicates(subset='datetime', keep='last')
     if df.empty:
@@ -266,10 +235,6 @@ def resample_to_fixed_grid(df, freq):
 # =============================================================================
 
 def _raw_to_signal_frames(raw_signals, ordered_names, datetime_format):
-    """{имя: ndarray (N, 2)} -> {имя: DataFrame[datetime, value]}.
-    Столбец 0 парсится по формату `datetime_format`; строки, которые не
-    удалось распарсить, отбрасываются. Столбец 1 приводится к числу.
-    """
     out = {}
     for name in ordered_names:
         if name not in raw_signals:
@@ -292,9 +257,6 @@ def _raw_to_signal_frames(raw_signals, ordered_names, datetime_format):
 
 def _run_chain_input(chain_input, raw_signals, *, min_history_rows,
                      resample_freq, datetime_format, range_checks=None):
-    """Применить цепочку X-преобразований.
-   
-    """
     if not chain_input:
         raise RuntimeError("Пустая цепочка — нечего выполнять")
     first = chain_input[0]
@@ -364,7 +326,6 @@ def _run_chain_input(chain_input, raw_signals, *, min_history_rows,
 
 
 def _expected_feature_shape(model):
-    """Ожидаемая форма входа модели (на образец)."""
     shape = model.input_shape
     if isinstance(shape, list):
         return tuple(shape[0][1:])
@@ -376,8 +337,6 @@ def _expected_feature_shape(model):
 # =============================================================================
 
 class InferenceSession:
-    """Единая сессия инференса, управляемая конфигом проекта."""
-
     def __init__(self, config, model_path=None, metadata_path=None):
         rt_req = config.get('runtime_version')
         if rt_req and rt_req != __version__:
@@ -387,7 +346,6 @@ class InferenceSession:
                 "соответствующую версию среды или перегенерируйте конфиг."
                 % (rt_req, __version__))
 
-        # --- проверка структуры ---
         for key in ('chain_input', 'input_contract', 'project'):
             if key not in config:
                 raise ValueError(
@@ -408,19 +366,20 @@ class InferenceSession:
         self._contract = contract
         self._inputs = config.get('inputs', [])
         self._project = config.get('project', {})
+        
+        self._startup_condition = config.get('startup_condition')
+        self._diagnostic_rule = config.get('diagnostic_rule')
+        
         self._model = None
         self.last_log = {}
 
     @classmethod
     def from_config_file(cls, config_path, model_path=None, metadata_path=None):
-        """Загрузить конфиг из файла и создать сессию."""
         with open(config_path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
         return cls(cfg, model_path=model_path, metadata_path=metadata_path)
 
-
     def metadata(self):
-        """Вернуть метаданные модели и входных сигналов в виде словаря."""
         md = {
             'project_code': list(self._project.get('code') or []),
             'project_description': list(self._project.get('description') or []),
@@ -428,6 +387,8 @@ class InferenceSession:
             'input_contract': dict(self._contract),
             'prediction_shift': dict(self._prediction_shift),
             'chain_output': dict(self._chain_output),
+            'startup_condition': self._startup_condition,
+            'diagnostic_rule': self._diagnostic_rule,
             'inputs': [
                 {
                     'name': s.get('name', ''),
@@ -454,7 +415,6 @@ class InferenceSession:
         return md
 
     def describe_chain(self):
-        """Структурное описание chain_input."""
         out = []
         for i, step in enumerate(self._chain_input):
             t = step.get('type')
@@ -501,7 +461,6 @@ class InferenceSession:
         return out
 
     def describe_chain_output(self):
-        """Структурное описание выходных преобразований по KKS."""
         out = {}
         for code, steps in self._chain_output.items():
             entries = []
@@ -522,9 +481,7 @@ class InferenceSession:
             out[code] = entries
         return out
 
-    
     def _build_log_summary(self):
-        """Сводка по last_log: сколько точек и нарушений."""
         total = ok = warning = violations = 0
         for entries in self.last_log.values():
             for e in entries:
@@ -542,31 +499,6 @@ class InferenceSession:
         }
 
     def save_log(self, path):
-        """Сохранить last_log в JSON-файл.
-
-        Формат файла:
-            {
-                "project_code": [...],
-                "project_description": [...],
-                "logged_at": "ISO-8601",
-                "model_path": "model.keras",
-                "runtime_version": "1.0",
-                "config_version": "1.0",
-                "input_contract": {...},
-                "summary": {
-                "total_points": N,
-                "ok": N,
-                "warning": N,
-                "total_violations": N
-                },
-                "outputs": {
-                "<KKS>": [
-                    {"output_index", "output_timestamp", "status", "violations": [...]},
-                    ...
-                ]
-                }
-            }
-        """
         summary = self._build_log_summary()
         payload = {
             "project_code": list(self._project.get("code") or []),
@@ -588,25 +520,26 @@ class InferenceSession:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
         return path
-    
 
     def _load_model(self):
         if self._model is None:
             if not self._model_path:
-                raise RuntimeError(
-                    "Отсуствует путь к модели ")
+                raise RuntimeError("Отсуствует путь к модели ")
             self._model = tf.keras.models.load_model(self._model_path)
         return self._model
 
     def expected_input_shape(self):
-        """Ожидаемая форма входа модели."""
         return _expected_feature_shape(self._load_model())
 
     def validate_signals(self, signals):
-        """Проверить, что набор `signals` пригоден для цепочки.
-        """
         required = list(self._chain_input[0]['inputs'])
         provided = set(signals.keys())
+        
+        # Не требуем startup_condition в signals, если оно задано в конфиге
+        cond_kks = self._startup_condition.get('kks') if self._startup_condition else None
+        if cond_kks in required:
+            required.remove(cond_kks)
+            
         missing = [n for n in required if n not in provided]
         extra = sorted(provided - set(required))
         if missing or extra:
@@ -620,8 +553,47 @@ class InferenceSession:
                 raise ValueError("Сигнал %r содержит %d строк; требуется минимум %d." % (name, arr.shape[0], self._contract['min_history_rows']))
         return True
 
-    def predict(self, signals, *, log_path=None):
+    def _evaluate_startup_condition(self, cond_arr, ts_out):
+        """Проверяет условие запуска для каждой выходной метки времени."""
+        if not self._startup_condition or cond_arr is None:
+            return None
+            
+        arr = np.asarray(cond_arr)
+        
+        # Если передан одномерный массив просто значений (0 или 1) без времени
+        if arr.ndim == 1:
+            if len(arr) != len(ts_out):
+                raise ValueError(f"Размер 1D-массива условия запуска ({len(arr)}) не совпадает с числом выходных точек ({len(ts_out)}).")
+            return arr.astype(float)
+
+        if arr.ndim != 2 or arr.shape[1] != 2:
+            raise ValueError(f"Сигнал условия запуска должен иметь форму (N, 2) или (N,).")
+            
+        s_df = pd.DataFrame({'datetime': arr[:, 0], 'value': arr[:, 1]})
+        s_df['datetime'] = pd.to_datetime(s_df['datetime'], format=self._contract['datetime_format'], errors='coerce')
+        s_df['value'] = pd.to_numeric(s_df['value'], errors='coerce')
+        s_df = s_df.dropna(subset=['datetime']).sort_values('datetime')
+        
+        if s_df.empty:
+            raise ValueError(f"Сигнал условия запуска не содержит валидных временных меток.")
+            
+        res_df = pd.DataFrame({'datetime': ts_out})
+        merged = pd.merge_asof(res_df, s_df, on='datetime', direction='backward')
+        
+        return merged['value'].fillna(0).values
+
+    def predict(self, signals, startup_condition=None, *, log_path=None):
         """Выполнить полный конвейер инференса.
+        
+        Параметры:
+        ----------
+        signals : dict
+            Словарь входных сигналов {KKS: ndarray (N, 2)}.
+        startup_condition : ndarray, optional
+            Условие запуска (если требуется конфигом). Может быть 
+            передан как ndarray (N, 2) с временем, либо как 1D массив значений (0/1).
+        log_path : str, optional
+            Путь для сохранения лога.
         """
         if self._metadata_path:
             try:
@@ -630,11 +602,23 @@ class InferenceSession:
             except (FileNotFoundError, OSError, json.JSONDecodeError):
                 pass
 
+        cond_kks = self._startup_condition.get('kks') if self._startup_condition else None
+        
+        # Подготовка сигналов для цепочки
+        signals_for_chain = dict(signals)
+        
+        # Если условие запуска требуется в цепочке, подставляем его
+        if cond_kks:
+            if startup_condition is not None:
+                signals_for_chain[cond_kks] = startup_condition
+            elif cond_kks not in signals_for_chain:
+                raise ValueError(f"В конфиге задано условие запуска ({cond_kks}), но оно не передано.")
+
         range_checks = self._config.get('range_checks') or []
 
         X, ts_window_start, violations, window_size = _run_chain_input(
             self._chain_input,
-            signals,
+            signals_for_chain,
             min_history_rows=self._contract['min_history_rows'],
             resample_freq=self._contract['resample_freq'],
             datetime_format=self._contract['datetime_format'],
@@ -662,8 +646,7 @@ class InferenceSession:
 
         output_codes = list(self._project.get('code') or [])
         if not output_codes:
-            raise RuntimeError(
-                "В конфиге project.code пуст.")
+            raise RuntimeError("В конфиге project.code пуст.")
         if len(output_codes) != preds.shape[1]:
             raise ValueError("project.code содержит %d KKS-код(ов), а модель выдаёт %d значений." % (len(output_codes), preds.shape[1]))
 
@@ -674,6 +657,7 @@ class InferenceSession:
         for k, code in enumerate(output_codes):
             shift = self._prediction_shift.get(code)
             ts_out = pd.to_datetime(ts_window_start)
+            
             if shift and shift.get('value'):
                 val = int(shift['value'])
                 unit = shift['unit']
@@ -698,24 +682,29 @@ class InferenceSession:
             arr[:, 1] = values
             result[code] = arr
 
-            log_entries = self._build_log_for_output(
-                k, ts_str, violations, window_size)
+            log_entries = self._build_log_for_output(k, ts_str, violations, window_size)
+            
+            startup_vals = self._evaluate_startup_condition(startup_condition, ts_out)
+            if startup_vals is not None:
+                for i, val in enumerate(startup_vals):
+                    if val <= 0.5:  # Проверяем > 0.5
+                        log_entries[i]['status'] = "WARNING"
+                        log_entries[i]['violations'].append({
+                            "column": "startup_condition",
+                            "value": float(val),
+                            "min": 0.5,
+                            "max": None,
+                            "timestamp": ts_str[i]
+                        })
+
             self.last_log[code] = log_entries
-
-
 
         if log_path:
             self.save_log(log_path)
 
         return result
 
-    def _build_log_for_output(self, output_index, ts_str,
-                              violations, window_size):
-        """Собрать диагностику по одному выходному ряду.
-
-        Для X-строки k окно покрывает df[k .. k+window_size-1].
-        Собираем нарушения из этого диапазона.
-        """
+    def _build_log_for_output(self, output_index, ts_str, violations, window_size):
         n = len(ts_str)
         entries = []
         for k in range(n):
