@@ -12,6 +12,8 @@ import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
 from export import prepare_code_for_system
+from docx.enum.section import WD_ORIENT, WD_SECTION
+
 
 
 
@@ -386,89 +388,130 @@ def build_config(project,
 # Генерация схемы и Word-документа
 # =============================================================================
 
-def _generate_model_diagram(inputs, nn_kks, rule_kks=None, startup_kks=None):
+def _generate_model_diagram(inputs, nn_kks, rule_kks=None, startup_kks=None, tech_cond_kks=None, y_kks=None):
     n = len(inputs)
-    gap_y = 1.2 # Чуть больше расстояния между входами
+    gap_y = 1.2
     y_inputs = [-(i * gap_y) for i in range(n)]
     model_y = -(n - 1) * gap_y / 2 if n > 1 else 0
     startup_y = max(y_inputs) + 1.8 if y_inputs else 1.8
+    y_tech = model_y - 3.5
+    y_kks_y = y_tech - 2.5  # Контролируемый параметр теперь внизу
 
-    # Координаты по X
+    # --- Динамическая ширина ---
+    all_texts = inputs + [nn_kks]
+    if rule_kks: all_texts.append(rule_kks)
+    if startup_kks: all_texts.append(startup_kks)
+    if tech_cond_kks: all_texts.append(tech_cond_kks)
+    if y_kks: all_texts.append(y_kks)
+    max_len = max([len(t) for t in all_texts if t] + [10])
+
+    w_in = max(4.5, max_len * 0.15 + 1.5)
+    w_out = w_in
+    w_rule = w_in
+    w_tech = w_in
+    
     x_in = 0.5
-    w_in = 4.5 # Увеличили ширину входа для KKS
-    
-    x_model = 6.0
+    x_model = x_in + w_in + 1.5
     w_model = 1.5
-    h_model = max(1.5, n * gap_y)
+    x_out = x_model + w_model + 1.5
+    x_right = x_out + w_out + 1.5
+    x_hi_end = x_right + w_tech + 2.5 
     
-    x_out = 8.5
-    w_out = 4.0 # Выход тоже сделаем достаточно широким, но это прямоугольник
-    h_out = 0.6
+    total_x = x_hi_end + 2.0
+    fig_width = max(15, total_x * 0.8)
     
-    x_rule = 13.5
-    w_rule = 3.0
-    h_rule = 1.5
+    # Y-лимиты
+    all_ys = list(y_inputs) + [model_y]
+    if startup_kks: all_ys.append(startup_y)
+    if tech_cond_kks:
+        all_ys.append(y_tech - 1.0)
+        all_ys.append(y_tech + 1.0)
+    if y_kks: all_ys.append(y_kks_y)
+    
+    min_y = min(all_ys) - 2.0
+    max_y = max(all_ys) + 2.0
+    fig_height = max(6, (max_y - min_y) * 0.8)
 
-    fig_width = 18 # Холст шире
-    fig_height = max(5, n * 1.4)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    ax.set_xlim(0, 18)
-    
-    min_y = min(y_inputs) - 1.0 if y_inputs else -2.0
-    max_y = startup_y + 1.0
+    ax.set_xlim(0, total_x)
     ax.set_ylim(min_y, max_y)
     ax.axis('off')
 
+    def get_font_size(text):
+        return 12#9 if len(text) < 20 else max(6, 14 - len(text)//3)
+
     def draw_pin(x, y, w, h, text):
-        # Рисуем "кол" одним полигоном, чтобы не было внутренней линии
         tip_w = h * 0.8
         rect_w = w - tip_w
-        
-        points = [
-            [x, y - h/2],             # нижний левый
-            [x, y + h/2],             # верхний левый
-            [x + rect_w, y + h/2],    # верхний правый (основание треугольника)
-            [x + w, y],               # острие
-            [x + rect_w, y - h/2],    # нижний правый (основание треугольника)
-            [x, y - h/2]              # замыкаем
-        ]
+        points = [[x, y - h/2], [x, y + h/2], [x + rect_w, y + h/2], [x + w, y], [x + rect_w, y - h/2], [x, y - h/2]]
         ax.add_patch(patches.Polygon(points, closed=True, edgecolor='#4a90d9', facecolor='#e6f0fa', linewidth=1.5))
-        ax.text(x + rect_w/2, y, text, ha='center', va='center', fontsize=9, fontweight='bold')
+        ax.text(x + rect_w/2, y, text, ha='center', va='center', fontsize=get_font_size(text), fontweight='bold')
 
     def draw_rect(x, y, w, h, text, color='#10b981'):
         ax.add_patch(patches.Rectangle((x, y - h/2), w, h, linewidth=1.5, edgecolor=color, facecolor='#d1fae5'))
-        ax.text(x + w/2, y, text, ha='center', va='center', fontsize=10, fontweight='bold')
+        ax.text(x + w/2, y, text, ha='center', va='center', fontsize=get_font_size(text), fontweight='bold')
 
-    # 1. Входные сигналы
+    # Входные сигналы модели
     for i, y in enumerate(y_inputs):
         draw_pin(x_in, y, w_in, 0.5, inputs[i])
         ax.annotate('', xy=(x_model, model_y), xytext=(x_in + w_in, y),
-                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, connectionstyle="arc3,rad=0.1" if y != model_y else "arc3,rad=0"))
+                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5,
+                                    connectionstyle="arc3,rad=0.1" if y != model_y else "arc3,rad=0"))
 
-    # 2. Модель
-    ax.add_patch(patches.Rectangle((x_model, model_y - h_model/2), w_model, h_model, linewidth=2, edgecolor='#f97316', facecolor='#ffedd5'))
+    # Модель
+    ax.add_patch(patches.Rectangle((x_model, model_y - max(1.5, n * gap_y)/2), w_model, max(1.5, n * gap_y),
+                                    linewidth=2, edgecolor='#f97316', facecolor='#ffedd5'))
     ax.text(x_model + w_model/2, model_y, "МОДЕЛЬ", ha='center', va='center', fontsize=12, fontweight='bold', color='#c2410c')
 
-    # 3. Выход модели (Прямоугольник)
-    draw_rect(x_out, model_y, w_out, h_out, nn_kks)
+    # Выход модели
+    draw_rect(x_out, model_y, w_out, 0.6, nn_kks)
     ax.annotate('', xy=(x_out, model_y), xytext=(x_model + w_model, model_y),
                 arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
 
-    # 4. Правило и условие
+    # Правило
     if rule_kks:
-        ax.add_patch(patches.Rectangle((x_rule, model_y - h_rule/2), w_rule, h_rule, linewidth=2, edgecolor='#8b5cf6', facecolor='#ede9fe'))
-        ax.text(x_rule + w_rule/2, model_y, f"ПРАВИЛО\n{rule_kks}", ha='center', va='center', fontsize=10, fontweight='bold', color='#6d28d9')
-        
-        ax.annotate('', xy=(x_rule, model_y), xytext=(x_out + w_out, model_y),
+        ax.add_patch(patches.Rectangle((x_right, model_y - 0.8), w_rule, 1.6,
+                                        linewidth=2, edgecolor='#8b5cf6', facecolor='#ede9fe'))
+        ax.text(x_right + w_rule/2, model_y, f"ПРАВИЛО\n{rule_kks}", ha='center', va='center',
+                fontsize=10, fontweight='bold', color='#6d28d9')
+        ax.annotate('', xy=(x_right, model_y), xytext=(x_out + w_out, model_y),
                     arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5))
-                    
+        
         if startup_kks:
             draw_pin(x_in, startup_y, w_in, 0.5, startup_kks)
-            ax.text(x_in + w_in/2, startup_y + 0.4, "Условие активации", ha='center', va='bottom', fontsize=10, color='#4a90d9')
-            
-            # Стрелка от условия к правилу (вход сверху)
-            ax.annotate('', xy=(x_rule + w_rule/2, model_y + h_rule/2), xytext=(x_in + w_in, startup_y),
-                        arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5, connectionstyle="arc3,rad=-0.2"))
+            ax.text(x_in + w_in/2, startup_y + 0.4, "Условие активации", ha='center', va='bottom',
+                    fontsize=10, color='#4a90d9')
+            ax.annotate('', xy=(x_right + w_rule/2, model_y + 0.8), xytext=(x_in + w_in, startup_y),
+                        arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5,
+                                        connectionstyle="arc3,rad=-0.2"))
+
+    # Техническое состояние
+    if tech_cond_kks:
+        ax.add_patch(patches.Rectangle((x_right, y_tech - 1.0), w_tech, 2.0,
+                                        linewidth=2, edgecolor='#10b981', facecolor='#d1fae5'))
+        ax.text(x_right + w_tech/2, y_tech, f"ТЕХНИЧЕСКОЕ СОСТОЯНИЕ\n{tech_cond_kks}",
+                ha='center', va='center', fontsize=get_font_size(tech_cond_kks), fontweight='bold', color='#047857')
+        
+        # Стрелка от модели к техническому состоянию (перпендикулярно к левой грани)
+        ax.annotate('', xy=(x_right, y_tech), xytext=(x_out + w_out, model_y - 0.3),
+                    arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5,
+                                    connectionstyle="angle3,angleA=-70,angleB=0"))
+
+        if y_kks:
+            draw_pin(x_in, y_kks_y, w_in, 0.5, y_kks)
+            # Подпись под пином (т.к. он внизу)
+            ax.text(x_in + w_in/2, y_kks_y - 0.4, "Контролируемый параметр",
+                    ha='center', va='top', fontsize=10, color='#4a90d9')
+            # Стрелка от Y_kks к техническому состоянию (снизу, перпендикулярно)
+            ax.annotate('', xy=(x_right + w_tech/2, y_tech - 1.0), xytext=(x_in + w_in, y_kks_y),
+                        arrowprops=dict(arrowstyle='->', color='#6b7280', lw=1.5,
+                                        connectionstyle="angle3,angleA=0,angleB=90"))
+
+        # Стрелка к HI
+        ax.annotate('', xy=(x_right + w_tech + 2.0, y_tech), xytext=(x_right + w_tech, y_tech),
+                    arrowprops=dict(arrowstyle='->', color='#ef4444', lw=2.5))
+        ax.text(x_right + w_tech + 1.0, y_tech + 0.2, "HI", ha='center', va='bottom',
+                fontsize=14, fontweight='bold', color='#ef4444')
 
     buf = BytesIO()
     fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True, pad_inches=0.1)
@@ -525,7 +568,7 @@ def _generate_training_history_chart(metrics):
     buf.seek(0)
     return buf
 
-def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rule_data=None, metrics=None):
+def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rule_data=None, tech_cond_data=None, metrics=None, y_kks=None):
     """Генерирует DOCX с описанием модели."""
     doc = Document()
     
@@ -621,24 +664,67 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
             p_img.paragraph_format.first_line_indent = Cm(0)
             p_img.add_run().add_picture(img_buf, width=Inches(6.0))
 
+    # --- ФИЛЬТРАЦИЯ ВХОДОВ (ТОЛЬКО X ИЗ ЛЕЙБЛЕРА) ---
+    x_columns = []
+    for step in config_data.get("chain_input", []):
+        if step.get("type") == "labeler":
+            x_columns = step.get("x_columns", [])
+            break
+            
+    all_inputs = config_data.get("inputs", [])
+    if x_columns:
+        filtered_inputs = [inp for inp in all_inputs if inp["name"] in x_columns]
+    else:
+        filtered_inputs = all_inputs
+    # ------------------------------------------------
+
+     # ==================== СХЕМА МОДЕЛИ (АЛЬБОМНАЯ) ====================
+    # 1. Создаем новую секцию и делаем её альбомной
+    landscape_section = doc.add_section(WD_SECTION.NEW_PAGE)
+    landscape_section.orientation = WD_ORIENT.LANDSCAPE
+    # В python-docx при смене ориентации нужно вручную поменять ширину и высоту местами
+    w, h = landscape_section.page_height, landscape_section.page_width
+    landscape_section.page_width = w
+    landscape_section.page_height = h
+    landscape_section.top_margin = Cm(2)
+    landscape_section.bottom_margin = Cm(2)
+    landscape_section.left_margin = Cm(2)
+    landscape_section.right_margin = Cm(2)
+
     add_text("Схема модели:", bold=True)
-    inputs = [inp["name"] for inp in config_data.get("inputs", [])]
+    inputs = [inp["name"] for inp in filtered_inputs]
     if inputs:
-        nn_kks = proj_meta.get("code", "")
-        rule_kks = rule_data.get("kks") if rule_data else None
-        startup_kks = startup_data.get("kks") if startup_data else None
-        img_buf = _generate_model_diagram(inputs, nn_kks, rule_kks, startup_kks)
+        img_buf = _generate_model_diagram(
+            inputs, code,
+            rule_kks=rule_data.get("kks") if rule_data else None,
+            startup_kks=startup_data.get("kks") if startup_data else None,
+            tech_cond_kks=tech_cond_data.get("kks") if tech_cond_data else None,
+            y_kks=y_kks
+        )
         # Центрируем картинку без красной строки
         p_img = doc.add_paragraph()
         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_img.paragraph_format.first_line_indent = Cm(0)
         # Делаем картинку шириной во всю доступную область (16 см максимум, но 15 см безопаснее)
-        p_img.add_run().add_picture(img_buf, width=Inches(6.0))
+        p_img.add_run().add_picture(img_buf, width=Inches(9.5))
+
     else:
         add_text("(нет входных сигналов)")
 
+    # 2. Возвращаем книжную ориентацию для следующих разделов
+    portrait_section = doc.add_section(WD_SECTION.NEW_PAGE)
+    portrait_section.orientation = WD_ORIENT.PORTRAIT
+    w, h = portrait_section.page_height, portrait_section.page_width
+    portrait_section.page_width = w
+    portrait_section.page_height = h
+    portrait_section.top_margin = Cm(2)
+    portrait_section.bottom_margin = Cm(2)
+    portrait_section.left_margin = Cm(3)
+    portrait_section.right_margin = Cm(1.5)
+    # =================================================================
+
     add_text("Используемые параметры:", bold=True)
-    if config_data.get("inputs"):
+    if filtered_inputs:
         for inp in config_data["inputs"]:
             name = inp.get("name", "")
             d = inp.get("description", "")
@@ -725,6 +811,35 @@ def _build_model_docx_bytes(project_payload, config_data, startup_data=None, rul
         add_text("Методические указания:", bold=True)
         add_multiline(rule_data.get("guidelines", ""))
 
+    # ==================== РАЗДЕЛ 4: ТЕХНИЧЕСКОЕ СОСТОЯНИЕ ====================
+    if tech_cond_data:
+        add_heading("4. Коэффициент технического состояния")
+        
+        add_text("KKS параметра:", bold=True)
+        add_multiline(tech_cond_data.get('kks', ''))
+
+        if tech_cond_data.get("description"):
+            add_text("Описание:", bold=True)
+            add_multiline(tech_cond_data['description'])
+
+        if tech_cond_data.get("code"):
+            add_text("Формула:", bold=True)
+            input_names = [inp["name"] for inp in tech_cond_data.get("inputs", [])]
+            prepared_code = prepare_code_for_system(tech_cond_data["code"], input_names)
+            add_multiline(prepared_code)
+
+        add_text("Используемые параметры:", bold=True)
+        if tech_cond_data.get("inputs"):
+            for inp in tech_cond_data["inputs"]:
+                name = inp.get("name", "")
+                d = inp.get("description", "")
+                line = f"- {name}"
+                if d:
+                    line += f" — {d}"
+                add_multiline(line)
+        else:
+            add_text("- (нет)")
+
     out = BytesIO()
     doc.save(out)
     return out.getvalue()
@@ -740,7 +855,9 @@ def build_zip(project_payload: dict,
               base_name: str,
               startup_data: dict = None,
               rule_data: dict = None,
-              metrics: list = None) -> bytes:
+              tech_cond_data: dict = None,
+              metrics: list = None,
+              y_kks: str = None) -> bytes:
     """
     Возвращает байты ZIP-архива.
     """
@@ -752,7 +869,7 @@ def build_zip(project_payload: dict,
     cfg = build_config(project_payload)
     
     # Генерируем Word
-    docx_bytes = _build_model_docx_bytes(project_payload, cfg, startup_data, rule_data, metrics)
+    docx_bytes = _build_model_docx_bytes(project_payload, cfg, startup_data, rule_data, tech_cond_data, metrics, y_kks)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

@@ -2493,6 +2493,10 @@ async def export_nn_project(payload: dict = Body(...)):
         proj_meta = project_data.get("project", {})
         startup_kks = (proj_meta.get("startup_condition") or {}).get("kks")
         rule_kks = (proj_meta.get("diagnostic_rule") or {}).get("kks")
+        tech_cond_kks = proj_meta.get("tech_condition")
+
+        y_labelers = nn_export.find_y_labelers(project_data)
+        y_kks = y_labelers[0][1] if y_labelers else None
 
         def get_extended_project_data(kks, config):
             if not kks: return None
@@ -2526,6 +2530,7 @@ async def export_nn_project(payload: dict = Body(...)):
 
         startup_data = get_extended_project_data(startup_kks, config)
         rule_data = get_extended_project_data(rule_kks, config)
+        tech_cond_data = get_extended_project_data(tech_cond_kks, config)
         metrics = []
         if os.path.isfile(model_meta_path):
             with open(model_meta_path, "r", encoding="utf-8") as f:
@@ -2550,7 +2555,9 @@ async def export_nn_project(payload: dict = Body(...)):
             base_name=project_code,
             startup_data=startup_data,  # <-- передаем
             rule_data=rule_data,         # <-- передаем
-            metrics=metrics
+            tech_cond_data=tech_cond_data,
+            metrics=metrics,
+            y_kks=y_kks                    # <-- НОВОЕ
         )
 
         zip_name = f"{project_code}_export.zip"
