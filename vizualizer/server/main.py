@@ -2460,6 +2460,52 @@ async def nn_check_prepare(payload: dict = Body(...)):
         print(f"[nn_check_prepare] error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/project/export-nn-selected")
+async def api_export_nn_projects(payload: dict = Body(...), config: str = Query(...)):
+    try:
+        filenames = payload.get("filenames", [])
+        if not filenames:
+            raise HTTPException(status_code=400, detail="Список filenames пуст")
+
+        project_dir = config_path("projectDataFolder", config)
+        if not project_dir:
+            raise HTTPException(status_code=500, detail="projectDataFolder не сконфигурирована")
+
+        # Загружаем все проекты из папки для поиска зависимостей
+        all_payloads = {}
+        by_code = {}
+        for fname in os.listdir(project_dir):
+            if not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(project_dir, fname), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["__filename__"] = fname
+                all_payloads[fname] = data
+                code = (data.get("project") or {}).get("code")
+                if code:
+                    by_code[code] = data
+            except Exception as e:
+                print(f"[export-nn] пропускаю {fname}: {e}")
+
+        from export import export_nn_projects
+        result = export_nn_projects(filenames, all_payloads, by_code)
+
+        return StreamingResponse(
+            BytesIO(result["content"]),
+            media_type=result["media_type"],
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(result['filename'])}",
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[export-nn] error:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/nn/export")
 async def export_nn_project(payload: dict = Body(...)):
     try:

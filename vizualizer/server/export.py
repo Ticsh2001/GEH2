@@ -662,3 +662,401 @@ def get_code_length(payload: dict) -> int:
         processed = raw_code
 
     return len(processed)
+
+# =============================================================================
+# Экспорт нейросетевых проектов
+# =============================================================================
+
+def _extract_input_signals(payload):
+    """Возвращает список KKS всех input-signal в проекте."""
+    elements = payload.get("elements") or {}
+    out = []
+    for el in elements.values():
+        if el.get("type") == "input-signal":
+            name = (el.get("props") or {}).get("name")
+            if name:
+                out.append(name)
+    return out
+
+
+def _extract_nn_model_info(payload):
+    """Собирает информацию о нейросетевой модели для таблицы моделей."""
+    proj = payload.get("project") or {}
+    elements = payload.get("elements") or {}
+    connections = payload.get("connections") or []
+
+    # Ищем nn-template
+    template_id = None
+    for eid, el in elements.items():
+        if el.get("nnType") == "nn-template":
+            template_id = eid
+            break
+
+    x_signals = []
+    y_signals = []
+    if template_id:
+        for conn in connections:
+            if conn.get("toElement") != template_id:
+                continue
+            port = conn.get("toPort")
+            src_id = conn.get("fromElement")
+            src = elements.get(src_id, {})
+            if src.get("nnType") == "labeler":
+                props = src.get("props") or {}
+                if port == "in-1":  # X_train
+                    x_signals = list(props.get("x_columns") or [])
+                elif port == "in-2":  # Y_train
+                    y_col = props.get("y_column")
+                    if y_col:
+                        y_signals = [y_col]
+
+    # Тип модели
+    has_timeshift = any(el.get("nnType") == "timeshift" for el in elements.values())
+    if has_timeshift:
+        model_type = "Предсказательная модель (предсказывает значение через 24 часа)"
+    else:
+        model_type = "Модель по текущему состоянию, предсказывает значение параметра для нормально работающего оборудования"
+
+    return {
+        "model_kks": proj.get("code", ""),
+        "x_signals": x_signals,
+        "y_signals": y_signals,
+        "model_type": model_type,
+        "startup_kks": (proj.get("startup_condition") or {}).get("kks"),
+        "rule_kks": (proj.get("diagnostic_rule") or {}).get("kks"),
+        "tech_cond_kks": proj.get("tech_condition"),
+    }
+
+
+def _collect_nn_dependencies(payload, by_code, consumers):
+    """
+    Возвращает set KKS проектов, относящихся к данной нейросети.
+    
+    Логика:
+    - Seeds (X/Y/startup/rule/tech_cond) включаются всегда.
+    - Для остальных: проект включается, если он используется
+      только в одном месте, ИЛИ если все потребители — это проекты
+      нейросетевого пайплайна (содержат "_NN_" в KKS).
+    - Нейросетевые проекты в параметры не включаются.
+    """
+    proj = payload.get("project") or {}
+    elements = payload.get("elements") or {}
+    connections = payload.get("connections") or []
+
+    seeds = set()
+
+    template_id = None
+    for eid, el in elements.items():
+        if el.get("nnType") == "nn-template":
+            template_id = eid
+            break
+
+    if template_id:
+        for conn in connections:
+            if conn.get("toElement") != template_id:
+                continue
+            port = conn.get("toPort")
+            src_id = conn.get("fromElement")
+            src = elements.get(src_id, {})
+            if src.get("nnType") == "labeler":
+                props = src.get("props") or {}
+                if port == "in-1":
+                    seeds.update(props.get("x_columns") or [])
+                elif port == "in-2":
+                    y_col = props.get("y_column")
+                    if y_col:
+                        seeds.add(y_col)
+
+    startup_kks = (proj.get("startup_condition") or {}).get("kks")
+    rule_kks = (proj.get("diagnostic_rule") or {}).get("kks")
+    tech_cond_kks = proj.get("tech_condition")
+
+    for k in (startup_kks, rule_kks, tech_cond_kks):
+        if k:
+            seeds.add(k)
+
+    result = set()
+    visited = set()
+
+    def is_nn_pipeline(kks):
+        """Проект относится к нейросетевому пайплайну."""
+        return "_NN_" in (kks or "")
+
+    def walk(kks):
+        if kks in visited:
+            return
+        visited.add(kks)
+
+        proj_data = by_code.get(kks)
+        if not proj_data:
+            return  # базовый сигнал
+
+        ptype = (proj_data.get("project") or {}).get("type")
+        if ptype in ("neural_network", "neural_template"):
+            return  # сама модель не идёт в параметры
+
+        parents = set(consumers.get(kks, []))
+
+        # Разрешаем мульти-использование, если ВСЕ потребители — из NN-пайплайна
+        if len(parents) > 1:
+            all_nn = all(is_nn_pipeline(p) for p in parents)
+            if not all_nn:
+                print(f"  [skip]  {kks} — используется в {sorted(parents)} (не все из NN-пайплайна)")
+                return
+
+        print(f"  [incl]  {kks}  (parents={sorted(parents) or ['<seed>']})")
+        result.add(kks)
+
+        for inp_kks in _extract_input_signals(proj_data):
+            walk(inp_kks)
+
+    print(f"\n[export-nn] === Анализ модели: {proj.get('code')} ===")
+    print(f"  Seeds ({len(seeds)}): {sorted(seeds)}")
+    for s in seeds:
+        walk(s)
+    print(f"  → Итого: {len(result)}")
+    print(f"  → {sorted(result)}")
+    return result
+
+
+def _build_models_xlsx_bytes(rows):
+    """Excel-таблица моделей с объединением ячеек по каждой модели."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Модели"
+
+    headers = [
+        "KKS модели",
+        "KKS входных сигналов",
+        "Отслеживаемые сигналы",
+        "Тип модели",
+        "Условие активации",
+        "Правило",
+        "Коэффициент технического состояния",
+    ]
+    ws.append(headers)
+
+    for row in rows:
+        x_sigs = row.get("x_signals") or [""]
+        y_sigs = row.get("y_signals") or [""]
+        num_rows = max(len(x_sigs), len(y_sigs), 1)
+        start_row = ws.max_row + 1
+
+        # Строки с "расширяющимися" данными (X и Y)
+        for i in range(num_rows):
+            x_val = x_sigs[i] if i < len(x_sigs) else ""
+            y_val = y_sigs[i] if i < len(y_sigs) else ""
+            ws.cell(row=start_row + i, column=2, value=x_val)
+            ws.cell(row=start_row + i, column=3, value=y_val)
+
+        # "Общие" столбцы — только в первой строке
+        ws.cell(row=start_row, column=1, value=row.get("model_kks", ""))
+        ws.cell(row=start_row, column=4, value=row.get("model_type", ""))
+        ws.cell(row=start_row, column=5, value=row.get("startup_kks") or "")
+        ws.cell(row=start_row, column=6, value=row.get("rule_kks") or "")
+        ws.cell(row=start_row, column=7, value=row.get("tech_cond_kks") or "")
+
+        # Объединение ячеек для общих столбцов
+        if num_rows > 1:
+            for col in (1, 4, 5, 6, 7):
+                ws.merge_cells(
+                    start_row=start_row, start_column=col,
+                    end_row=start_row + num_rows - 1, end_column=col
+                )
+
+    # Форматирование
+    widths = {1: 28, 2: 28, 3: 30, 4: 45, 5: 28, 6: 28, 7: 28}
+    for col, w in widths.items():
+        ws.column_dimensions[chr(64 + col)].width = w
+
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def export_nn_projects(nn_filenames, all_payloads, by_code):
+    """
+    Экспортирует выбранные нейросетевые проекты в два Excel-файла:
+      - Модели.xlsx    — сводка моделей
+      - Параметры.xlsx — параметры/правила/константы с указанием моделей-потребителей
+    Возвращает ZIP.
+    """
+    # Индекс потребителей: KKS → список проектов, где он используется как input-signal
+    consumers = {}
+    for code, payload in by_code.items():
+        for inp in _extract_input_signals(payload):
+            consumers.setdefault(inp, []).append(code)
+
+    model_usage = {}  # kks -> set(model_codes)
+    models_rows = []
+    params_to_export = set()
+
+    print(f"\n[export-nn] === Экспорт {len(nn_filenames)} моделей ===")
+
+    for fname in nn_filenames:
+        payload = all_payloads.get(fname)
+        if not payload:
+            print(f"  [skip] {fname}: не найден в all_payloads")
+            continue
+        ptype = (payload.get("project") or {}).get("type")
+        if ptype not in ("neural_network", "neural_template"):
+            print(f"  [skip] {fname}: type={ptype}")
+            continue
+
+        info = _extract_nn_model_info(payload)
+        model_code = info["model_kks"]
+        print(f"  [model] {fname} → code={model_code!r}")
+        models_rows.append(info)
+
+        deps = _collect_nn_dependencies(payload, by_code, consumers)
+        print(f"    → зависимостей: {len(deps)}")
+        for dep in deps:
+            params_to_export.add(dep)
+            model_usage.setdefault(dep, set()).add(model_code)
+
+    print(f"\n[export-nn] === model_usage ===")
+    for kks, models in sorted(model_usage.items()):
+        print(f"  {kks}: {sorted(models)}")
+
+    # Разбивка по типам
+    param_only, rule_only, const_only = [], [], []
+    for code in params_to_export:
+        p = by_code.get(code)
+        if not p:
+            print(f"  [warn] {code}: в by_code не найден")
+            continue
+        ptype = (p.get("project") or {}).get("type")
+        entry = (p.get("__filename__", ""), p)
+        if ptype == "rule":
+            rule_only.append(entry)
+        elif ptype == "parameter":
+            if "CONST" in code.upper():
+                const_only.append(entry)
+            else:
+                param_only.append(entry)
+
+    parameter_rows = _build_parameter_rows(param_only)
+    rule_rows = _build_rule_rows(rule_only)
+    const_rows = _build_parameter_rows(const_only)
+
+    def add_model_usage(rows, label):
+        for r in rows:
+            kks = r.get("KKS код", "")
+            used_raw = model_usage.get(kks, [])
+            if isinstance(used_raw, str):
+                used_raw = [used_raw]
+            # Дедупликация + сортировка
+            used = sorted(set(used_raw))
+            r["Используется в моделях"] = "; ".join(used)
+            print(f"  [{label}] {kks} → {r['Используется в моделях'] or '(пусто)'}")
+        return rows
+
+    add_model_usage(parameter_rows, "PARAM")
+    add_model_usage(rule_rows, "RULE")
+    add_model_usage(const_rows, "CONST")
+
+    files_to_send = []
+
+    if models_rows:
+        files_to_send.append({
+            "filename": "Модели.xlsx",
+            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "content": _build_models_xlsx_bytes(models_rows),
+        })
+
+    if parameter_rows or rule_rows or const_rows:
+        files_to_send.append({
+            "filename": "Параметры.xlsx",
+            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "content": _build_nn_params_workbook(parameter_rows, rule_rows, const_rows),
+        })
+
+    if not files_to_send:
+        raise ValueError("Нет данных для экспорта (не найдено ни одной модели)")
+
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, "w", ZIP_DEFLATED) as zf:
+        for item in files_to_send:
+            zf.writestr(item["filename"], item["content"])
+
+    return {
+        "filename": "Экспорт_моделей.zip",
+        "media_type": "application/zip",
+        "content": zip_buffer.getvalue(),
+    }
+
+def _build_nn_params_workbook(params_rows, rules_rows, consts_rows) -> bytes:
+    """
+    Excel-файл с тремя листами: Параметры, Правила, Константы.
+    Все листы имеют колонку "Используется в моделях".
+    """
+    from openpyxl import Workbook
+
+    columns = [
+        "KKS код",
+        "Описание",
+        "Ед. изм.",
+        "Используемые сигналы",
+        "Код",
+        "Используется в моделях",
+    ]
+
+    widths = {
+        "KKS код": 30,
+        "Описание": 40,
+        "Ед. изм.": 10,
+        "Используемые сигналы": 35,
+        "Код": 50,
+        "Используется в моделях": 30,
+    }
+
+    wrap_cols = {"Описание", "Используемые сигналы", "Код", "Используется в моделях"}
+
+    def write_sheet(wb, title, rows):
+        ws = wb.create_sheet(title=title)
+        ws.append(columns)
+
+        for r in rows:
+            ws.append([
+                r.get("KKS код", "") or "",
+                r.get("Описание", "") or "",
+                r.get("Ед. изм.", "") or "",
+                r.get("Используемые сигналы", "") or "",
+                r.get("Код", "") or "",
+                r.get("Используется в моделях", "") or "",
+            ])
+
+        # Ширина столбцов
+        for i, col in enumerate(columns, start=1):
+            ws.column_dimensions[chr(64 + i)].width = widths.get(col, 20)
+
+        # Перенос текста и выравнивание
+        for row in ws.iter_rows(min_row=2):
+            for i, cell in enumerate(row):
+                if columns[i] in wrap_cols:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+                else:
+                    cell.alignment = Alignment(vertical="top")
+
+        # Жирный заголовок
+        for cell in ws[1]:
+            cell.font = cell.font.copy(bold=True)
+
+    wb = Workbook()
+    # Убираем дефолтный пустой лист
+    default_ws = wb.active
+    wb.remove(default_ws)
+
+    write_sheet(wb, "Параметры", params_rows)
+    write_sheet(wb, "Правила", rules_rows)
+    write_sheet(wb, "Константы", consts_rows)
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()

@@ -289,6 +289,7 @@
                     </select>
                     <button id="filter-rules" class="button primary">📋 Правила</button>
                     <button id="filter-params" class="button primary">📊 Параметры</button>
+                    <button id="filter-nn" class="button primary">🧠 Нейросети</button>
                 </div>
                 <div class="user-info">
                     <strong>Пользователь:</strong>
@@ -514,6 +515,7 @@
                 filterType = 'rule';
                 this.classList.add('active');
                 document.getElementById('filter-params').classList.remove('active');
+                document.getElementById('filter-nn').classList.remove('active');
             }
             filterProjects();
         });
@@ -526,6 +528,20 @@
                 filterType = 'parameter';
                 this.classList.add('active');
                 document.getElementById('filter-rules').classList.remove('active');
+                document.getElementById('filter-nn').classList.remove('active');
+            }
+            filterProjects();
+        });
+
+        document.getElementById('filter-nn').addEventListener('click', function() {
+            if (filterType === 'neural') {
+                filterType = null;
+                this.classList.remove('active');
+            } else {
+                filterType = 'neural';
+                this.classList.add('active');
+                document.getElementById('filter-rules').classList.remove('active');
+                document.getElementById('filter-params').classList.remove('active');
             }
             filterProjects();
         });
@@ -572,7 +588,12 @@
                     const pTags = tagsData.assignments[project.filename] || [];
                     matchesTag = pTags.includes(activeTagFilter);
                 }
-                const matchesType = !filterType || project.type === filterType;
+                                let matchesType = true;
+                if (filterType === 'neural') {
+                    matchesType = project.type === 'neural_network';
+                } else if (filterType) {
+                    matchesType = project.type === filterType;
+                }
                 return matchesSearch && matchesAuthor && matchesTag && matchesType;
             });
             sortProjects();
@@ -1277,19 +1298,56 @@ function generatePaths(nodes) {
         // ---------- Экспорт с выбором формата ----------
         let pendingExportFilenames = [];
 
-        document.getElementById('export-selected').onclick = async () => {
+                document.getElementById('export-selected').onclick = async () => {
             const projects = getSelectedProjectObjects();
             if (!projects.length) return;
 
+            const nnProjects = projects.filter(p => p.type === 'neural_network' || p.type === 'neural_template');
+            const otherProjects = projects.filter(p => p.type !== 'neural_network' && p.type !== 'neural_template');
+
+            // Если выбраны ТОЛЬКО нейросети — экспорт моделей
+            if (nnProjects.length > 0 && otherProjects.length === 0) {
+                await exportNNProjects(nnProjects.map(p => p.filename));
+                return;
+            }
+
+            // Иначе — обычный экспорт
             const filenames = projects.map(p => p.filename);
             const hasParameter = projects.some(p => p.type === 'parameter');
-
             if (hasParameter) {
                 showExportFormatModal(filenames);
             } else {
                 exportSelectedProjects(filenames, 'excel');
             }
         };
+
+        async function exportNNProjects(filenames) {
+            try {
+                const resp = await fetch(addConfig('/api/project/export-nn-selected'), {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ filenames })
+                });
+                if (!resp.ok) {
+                    let msg = 'Ошибка экспорта моделей';
+                    try { const err = await resp.json(); msg = err.detail || msg; } catch {}
+                    throw new Error(msg);
+                }
+                const blob = await resp.blob();
+                const disposition = resp.headers.get('Content-Disposition') || '';
+                const filename = getFilenameFromDisposition(disposition) || 'Экспорт_моделей.zip';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert(e.message);
+            }
+        }
 
         function showExportFormatModal(filenames) {
             pendingExportFilenames = filenames;
