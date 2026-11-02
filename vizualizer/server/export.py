@@ -719,6 +719,7 @@ def _extract_nn_model_info(payload):
 
     return {
         "model_kks": proj.get("code", ""),
+        "model_description": proj.get("description", ""),
         "x_signals": x_signals,
         "y_signals": y_signals,
         "model_type": model_type,
@@ -736,7 +737,7 @@ def _collect_nn_dependencies(payload, by_code, consumers):
     - Seeds (X/Y/startup/rule/tech_cond) включаются всегда.
     - Для остальных: проект включается, если он используется
       только в одном месте, ИЛИ если все потребители — это проекты
-      нейросетевого пайплайна (содержат "_NN_" в KKS).
+      нейросетевого пайплайна (содержат "_NN_" в KKS или имеют тип neural_network/neural_template).
     - Нейросетевые проекты в параметры не включаются.
     """
     proj = payload.get("project") or {}
@@ -779,8 +780,15 @@ def _collect_nn_dependencies(payload, by_code, consumers):
     visited = set()
 
     def is_nn_pipeline(kks):
-        """Проект относится к нейросетевому пайплайну."""
-        return "_NN_" in (kks or "")
+        """Проверяет, относится ли проект к нейросетевому пайплайну (по имени или по типу)."""
+        if "_NN_" in (kks or ""):
+            return True
+        parent_proj = by_code.get(kks)
+        if parent_proj:
+            ptype = (parent_proj.get("project") or {}).get("type")
+            if ptype in ("neural_network", "neural_template"):
+                return True
+        return False
 
     def walk(kks):
         if kks in visited:
@@ -815,7 +823,6 @@ def _collect_nn_dependencies(payload, by_code, consumers):
     for s in seeds:
         walk(s)
     print(f"  → Итого: {len(result)}")
-    print(f"  → {sorted(result)}")
     return result
 
 
@@ -829,6 +836,7 @@ def _build_models_xlsx_bytes(rows):
 
     headers = [
         "KKS модели",
+        "Описание",                                  # <-- НОВОЕ (сдвиг вправо)
         "KKS входных сигналов",
         "Отслеживаемые сигналы",
         "Тип модели",
@@ -848,26 +856,29 @@ def _build_models_xlsx_bytes(rows):
         for i in range(num_rows):
             x_val = x_sigs[i] if i < len(x_sigs) else ""
             y_val = y_sigs[i] if i < len(y_sigs) else ""
-            ws.cell(row=start_row + i, column=2, value=x_val)
-            ws.cell(row=start_row + i, column=3, value=y_val)
+            ws.cell(row=start_row + i, column=3, value=x_val)  # <-- сдвинули на 3
+            ws.cell(row=start_row + i, column=4, value=y_val)  # <-- сдвинули на 4
 
         # "Общие" столбцы — только в первой строке
         ws.cell(row=start_row, column=1, value=row.get("model_kks", ""))
-        ws.cell(row=start_row, column=4, value=row.get("model_type", ""))
-        ws.cell(row=start_row, column=5, value=row.get("startup_kks") or "")
-        ws.cell(row=start_row, column=6, value=row.get("rule_kks") or "")
-        ws.cell(row=start_row, column=7, value=row.get("tech_cond_kks") or "")
+        ws.cell(row=start_row, column=2, value=row.get("model_description", ""))  # <-- НОВОЕ
+        ws.cell(row=start_row, column=5, value=row.get("model_type", ""))
+        ws.cell(row=start_row, column=6, value=row.get("startup_kks") or "")
+        ws.cell(row=start_row, column=7, value=row.get("rule_kks") or "")
+        ws.cell(row=start_row, column=8, value=row.get("tech_cond_kks") or "")
 
         # Объединение ячеек для общих столбцов
         if num_rows > 1:
-            for col in (1, 4, 5, 6, 7):
+            # Столбцы для объединения: 1 (KKS), 2 (Описание), 5, 6, 7, 8
+            # Столбцы 3 (X) и 4 (Y) НЕ объединяем, так как там разные значения
+            for col in (1, 2, 5, 6, 7, 8):
                 ws.merge_cells(
                     start_row=start_row, start_column=col,
                     end_row=start_row + num_rows - 1, end_column=col
                 )
 
     # Форматирование
-    widths = {1: 28, 2: 28, 3: 30, 4: 45, 5: 28, 6: 28, 7: 28}
+    widths = {1: 28, 2: 40, 3: 28, 4: 30, 5: 45, 6: 28, 7: 28, 8: 28}
     for col, w in widths.items():
         ws.column_dimensions[chr(64 + col)].width = w
 
