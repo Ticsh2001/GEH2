@@ -1259,6 +1259,85 @@ async def get_tags_list():
     return load_tags_data()
 
 
+def _count_func_args(code: str, start_pos: int):
+    """
+    Начиная с позиции сразу после открывающей скобки функции, считает
+    количество аргументов до соответствующей закрывающей скобки.
+    Возвращает (arg_count, end_pos) или (None, None), если скобки не сбалансированы.
+    """
+    depth = 1
+    pos = start_pos
+    in_str = False
+    str_ch = None
+    args_count = 1
+    has_content = False
+
+    while pos < len(code):
+        ch = code[pos]
+        if in_str:
+            if ch == str_ch and (pos == 0 or code[pos - 1] != "\\"):
+                in_str = False
+            pos += 1
+            continue
+
+        if ch in ('"', "'"):
+            in_str = True
+            str_ch = ch
+            has_content = True
+            pos += 1
+            continue
+
+        if ch == "(":
+            depth += 1
+            has_content = True
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                if not has_content:
+                    args_count = 0
+                return args_count, pos
+        elif ch == "," and depth == 1:
+            args_count += 1
+            has_content = True
+        elif not ch.isspace():
+            has_content = True
+
+        pos += 1
+
+    return None, None
+
+
+def _check_function_arity(code: str, func_name: str, expected):
+    """
+    Проверяет количество аргументов для всех вызовов func_name.
+    expected: int (точное кол-во) или tuple (min, max).
+    Возвращает список текстовых проблем.
+    """
+    problems = []
+    pattern = re.compile(rf"\b{re.escape(func_name)}\s*\(", re.IGNORECASE)
+
+    for match in pattern.finditer(code):
+        open_paren_pos = match.end() - 1
+        count, _ = _count_func_args(code, open_paren_pos + 1)
+        if count is None:
+            continue  # несбалансированные скобки уже отловлены другими проверками
+
+        if isinstance(expected, int):
+            if count != expected:
+                problems.append(
+                    f"{func_name}: ожидается аргументов {expected}, передано {count}"
+                )
+        elif isinstance(expected, tuple):
+            mn, mx = expected
+            if not (mn <= count <= mx):
+                problems.append(
+                    f"{func_name}: ожидается аргументов от {mn} до {mx}, передано {count}"
+                )
+    return problems
+
+
+
+
 @app.post("/api/check-syntax")
 async def check_syntax(file: UploadFile = File(...), config: str = Query(...)):
     if not file.filename.endswith(('.xlsx', '.xls')):
@@ -1494,6 +1573,46 @@ async def check_syntax(file: UploadFile = File(...), config: str = Query(...)):
                             "Возможно, пропущен оператор (например, = 1)."
                         )
                         break
+
+        # 11. Проверка арности (количество аргументов) для известных функций
+        if not is_constant:
+            arity_map = {
+                # Логика / статистика
+                "WHEN": 3,
+                "ABS": 1,
+                "EXP": 1,
+                "POW": 2,
+                "LOG": 1,
+                "LOG10": 1,
+                "MIN": (1, 100),
+                "MAX": (1, 100),
+                "AVG": (1, 100),
+                "MED": (1, 100),
+                "ROUND": (1, 2),
+                # История
+                "PREV": 1,
+                "HISTORYAVG": 2,
+                "HISTORYCOUNT": 2,
+                "HISTORYSUM": 2,
+                "HISTORYMAX": 2,
+                "HISTORYMIN": 2,
+                "HISTORYDIFF": 2,
+                "HISTORYGRADIENT": 2,
+                # Таблицы
+                "INTERPOLATE": (3, 4),
+                "GETPOINT": (3, 4),
+                # Термодинамика
+                "ENTHALPY_PS": 2,
+                "ENTHALPY_PT": 2,
+                "PRESSURE_SATURATION": 1,
+                "TEMPERATURE_SATURATION": 1,
+                "ENTROPY_PT": 2,
+                "TEMPERATURE_PS": 2,
+            }
+
+            for func_name, expected in arity_map.items():
+                for problem in _check_function_arity(code, func_name, expected):
+                    row_remarks.append(problem)
 
         if row_remarks:
             remarks.append({"row": row_num, "remarks": row_remarks})
