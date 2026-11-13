@@ -152,15 +152,18 @@ def normalize_code_tables(code_str: str) -> str:
         return code_str
     s = code_str
 
-    # Только случаи без кавычек: (FUNC( IDENT , ...)) → (FUNC("IDENT", ...))
+    # Регексп теперь принимает имена, начинающиеся с цифры или подчёркивания,
+    # а также имена с точками (например, "21_22dNGTU_QNR" или "table.v2").
+    # Класс [^\s,()'\"]+ означает "один или более символов, кроме пробела,
+    # запятой, скобок и кавычек" — то есть любое "слово" без спецсимволов.
     s = re.sub(
-        r'(INTERPOLATE\s*\(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*,)',
+        r'(INTERPOLATE\s*\(\s*)([^\s,()\'"]+)(\s*,)',
         r'\1"\2"\3',
         s,
         flags=re.IGNORECASE,
     )
     s = re.sub(
-        r'(GETPOINT\s*\(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*,)',
+        r'(GETPOINT\s*\(\s*)([^\s,()\'"]+)(\s*,)',
         r'\1"\2"\3',
         s,
         flags=re.IGNORECASE,
