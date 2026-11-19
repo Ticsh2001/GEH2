@@ -1617,6 +1617,139 @@ async def check_syntax(file: UploadFile = File(...), config: str = Query(...)):
         if row_remarks:
             remarks.append({"row": row_num, "remarks": row_remarks})
 
+        # --- 12. Проверка циклических зависимостей между строками таблицы ---
+    def canon(s: str) -> str:
+        """Каноническое имя сигнала: без §, невидимых символов и префикса P перед цифрой."""
+        b = normalize_kks(str(s))
+        if len(b) > 1 and b[0] == 'P' and b[1].isdigit():
+            b = b[1:]
+        return b
+
+    # PREV('X') / HISTORY*('X', ...) — обращение к прошлому значению, цикла не создаёт
+    hist_arg_re = re.compile(r'\b(PREV|HISTORY[A-Z]+)\s*\(\s*([\'"]?)[^\'",)]+\2')
+
+    graph = {}       # узел -> множество узлов, от которых он зависит
+    node_rows = {}   # узел -> номера строк Excel, где он определяется
+    node_label = {}  # узел -> имя, как написано в таблице
+
+    for idx, row in df.iterrows():
+        code = str(row[code_col]) if pd.notna(row[code_col]) else ""
+        kks = str(row[kks_col]).strip() if pd.notna(row[kks_col]) else ""
+        if not code.strip() or not kks:
+            continue
+
+        node = canon(kks)
+        node_rows.setdefault(node, []).append(idx + 2)
+        node_label.setdefault(node, kks)
+
+        signals_str = str(row[signals_col]) if pd.notna(row[signals_col]) else ""
+        input_signals = [s.strip() for s in re.split(r'[;,\n]', signals_str) if s.strip()]
+
+        code_dep = hist_arg_re.sub(lambda m: m.group(1) + '(', code)
+        code_dep = re.sub(r'[\'"].*?[\'"]', '', code_dep)
+
+        deps = graph.setdefault(node, set())
+        for sig in input_signals:
+            sig_u = sig.replace('§', '_')
+            cands = {sig, sig_u}
+            if sig[0].isdigit():
+                cands |= {'P' + sig, 'P' + sig_u}
+            used = any(
+                re.search(rf'(?<![A-Za-z0-9_]){re.escape(c)}(?![A-Za-z0-9_])', code_dep)
+                for c in cands
+            )
+            if used:
+                deps.add(canon(sig))
+
+    # Оставляем только рёбра к сигналам, которые сами вычисляются в таблице
+    for node in graph:
+        graph[node] = {d for d in graph[node] if d in graph}
+
+    # Tarjan (итеративный)
+    def find_sccs(g):
+        index_counter = 0
+        index, low, on_stack = {}, {}, set()
+        stack, result = [], []
+        for root in g:
+            if root in index:
+                continue
+            work = [(root, iter(g[root]))]
+            index[root] = low[root] = index_counter; index_counter += 1
+            stack.append(root); on_stack.add(root)
+            while work:
+                v, it = work[-1]
+                advanced = False
+                for w in it:
+                    if w not in index:
+                        index[w] = low[w] = index_counter; index_counter += 1
+                        stack.append(w); on_stack.add(w)
+                        work.append((w, iter(g[w])))
+                        advanced = True
+                        break
+                    elif w in on_stack:
+                        low[v] = min(low[v], index[w])
+                if advanced:
+                    continue
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[v])
+                if low[v] == index[v]:
+                    comp = []
+                    while True:
+                        w = stack.pop(); on_stack.discard(w)
+                        comp.append(w)
+                        if w == v:
+                            break
+                    result.append(comp)
+        return result
+
+    def cycle_path(start, scc_set):
+        """Кратчайший путь start -> ... -> start внутри компоненты (BFS)."""
+        from collections import deque
+        parent = {}
+        q = deque()
+        for n in graph[start]:
+            if n in scc_set and n not in parent:
+                parent[n] = start
+                q.append(n)
+        while q:
+            cur = q.popleft()
+            if cur == start:
+                break
+            for n in graph[cur]:
+                if n in scc_set and n not in parent:
+                    parent[n] = cur
+                    q.append(n)
+        path, cur = [start], start
+        while True:
+            cur = parent[cur]
+            path.append(cur)
+            if cur == start:
+                break
+        return list(reversed(path))
+
+    remarks_by_row = {r["row"]: r for r in remarks}
+
+    for scc in find_sccs(graph):
+        if len(scc) == 1 and scc[0] not in graph[scc[0]]:
+            continue  # одиночный узел без петли на себя — не цикл
+        scc_set = set(scc)
+        start = min(scc, key=lambda n: min(node_rows[n]))
+        path = cycle_path(start, scc_set)
+        chain = " → ".join(node_label[n] for n in path)
+        msg = f"Циклическая зависимость: {chain}"
+
+        for n in scc:
+            for row_num in node_rows[n]:
+                entry = remarks_by_row.get(row_num)
+                if entry is None:
+                    entry = {"row": row_num, "remarks": []}
+                    remarks_by_row[row_num] = entry
+                    remarks.append(entry)
+                entry["remarks"].append(msg)
+
+    remarks.sort(key=lambda r: r["row"])
     return remarks
 
 @app.post("/api/export-remarks")
