@@ -706,54 +706,81 @@ const NeuralApp = {
 
         // ---------- DATASET ----------
         if (nnType === 'dataset') {
-            // ... (inputs, refIdx, interpolation) ...
-            const inputs = [];
+            // ---- 1. Собираем только РЕАЛЬНО ПОДКЛЮЧЁННЫЕ входы ----
+            // value у <option> — это НОМЕР ПОРТА (in-N), а не позиция в массиве.
+            // Это сохраняет обратную совместимость: reference_signal_index по-прежнему
+            // означает «номер порта» (in-{index}), как его и читает бэкенд.
+            const connectedInputs = [];
             for (let i = 0; i < (elemData.inputs || 2); i++) {
-                const conn = AppState.connections.find(c => c.toElement === elemId && c.toPort === `in-${i}`);
-                let label = `in-${i}`;
-                if (conn) {
-                    const src = AppState.elements[conn.fromElement];
-                    if (src) {
-                        label = src.props?.name || src.nnType || src.id;
-                    }
-                }
-                inputs.push(label);
+                const conn = AppState.connections.find(
+                    c => c.toElement === elemId && c.toPort === `in-${i}`
+                );
+                if (!conn) continue; // порт пуст — в селект не попадает
+                const src = AppState.elements[conn.fromElement];
+                const label = src?.props?.name || src?.nnType || src?.id || `in-${i}`;
+                connectedInputs.push({ port: i, label });
             }
+
             const status = await this.fetchElementStatus(elemId);
             const statusIcon = status.up_to_date ? '🟢' : '🔴';
             const statusText = status.up_to_date ? 'Данные актуальны' : 'Данные не сохранены';
-            const refIdx = elemData.props.reference_signal_index ?? 0;
+
+            // ---- 2. Нормализуем текущий ref ----
+            // Если сохранённый порт отключён/невалиден — берём первый подключённый.
+            const savedRef = elemData.props.reference_signal_index ?? 0;
+            const refValid = connectedInputs.some(x => x.port === savedRef);
+            const refIdx = refValid ? savedRef : (connectedInputs[0]?.port ?? 0);
             const interpolation = elemData.props.interpolation ?? 'linear';
+
+            const noInputs = connectedInputs.length === 0;
 
             modalContent.innerHTML = `
                 <div class="modal-row">
                     <label>Опорный сигнал (синхронизация времени):</label>
-                    <select id="prop-ref-index">
-                        ${inputs.map((name, idx) => `<option value="${idx}" ${idx === refIdx ? 'selected' : ''}>${name}</option>`).join('')}
-                    </select>
+                    ${noInputs
+                        ? `<div style="color:#f87171; font-size:13px;">
+                            Нет подключённых входов. Подключите хотя бы один сигнал.
+                        </div>`
+                        : `<select id="prop-ref-index">
+                            ${connectedInputs.map(({ port, label }) =>
+                                `<option value="${port}" ${port === refIdx ? 'selected' : ''}>${label}</option>`
+                            ).join('')}
+                        </select>`
+                    }
                 </div>
                 <div class="modal-row">
                     <label>Метод интерполяции:</label>
                     <select id="prop-interpolation">
-                        <option value="linear" ${interpolation === 'linear' ? 'selected' : ''}>Линейная</option>
+                        <option value="linear"  ${interpolation === 'linear'  ? 'selected' : ''}>Линейная</option>
                         <option value="nearest" ${interpolation === 'nearest' ? 'selected' : ''}>Ближайшее</option>
-                        <option value="cubic" ${interpolation === 'cubic' ? 'selected' : ''}>Кубическая</option>
+                        <option value="cubic"   ${interpolation === 'cubic'   ? 'selected' : ''}>Кубическая</option>
                     </select>
                 </div>
                 <div class="modal-row">
                     <label>Количество входов:</label>
-                    <input type="number" id="prop-inputCount" value="${elemData.inputs || 2}" min="2" max="${cfg.maxInputs || 50}" step="1">
+                    <input type="number" id="prop-inputCount"
+                        value="${elemData.inputs || 2}"
+                        min="2" max="${cfg.maxInputs || 50}" step="1">
                 </div>
-                <div id="processing-status" style="margin-bottom:10px; font-size:14px;">${statusIcon} ${statusText}</div>
+                <div id="processing-status" style="margin-bottom:10px; font-size:14px;">
+                    ${statusIcon} ${statusText}
+                </div>
                 <div style="margin-top:12px; text-align:left;">
-                    <button class="modal-btn apply-btn" id="modal-apply">⚡ Применить</button>
+                    <button class="modal-btn apply-btn" id="modal-apply" ${noInputs ? 'disabled' : ''}>⚡ Применить</button>
                 </div>
             `;
 
-            // Переопределяем стандартные кнопки
+            // ---- 3. Сохранение ----
             document.getElementById('modal-save').onclick = () => {
-                elemData.props.reference_signal_index = parseInt(document.getElementById('prop-ref-index').value) || 0;
+                const select = document.getElementById('prop-ref-index');
+                if (select) {
+                    // select.value — номер порта (in-N), сохраняем как есть.
+                    elemData.props.reference_signal_index = parseInt(select.value, 10) || 0;
+                }
+                // Если входов нет — оставляем прежнее значение reference_signal_index,
+                // но обработку всё равно не запустить (кнопка "Применить" disabled).
                 elemData.props.interpolation = document.getElementById('prop-interpolation').value;
+
                 const newInputCount = parseInt(document.getElementById('prop-inputCount').value) || 2;
                 if (newInputCount !== elemData.inputs) {
                     elemData.inputs = newInputCount;
@@ -761,13 +788,12 @@ const NeuralApp = {
                 }
                 Modal.hideModal('modal-overlay');
             };
+
             document.getElementById('modal-cancel').onclick = () => Modal.hideModal('modal-overlay');
 
-            // Кнопка "Применить"
             document.getElementById('modal-apply').onclick = () => {
-                // сначала сохраняем, как при обычном сохранении
+                if (noInputs) return;
                 document.getElementById('modal-save').click();
-                // затем запускаем обработку
                 this.applyElement(elemId);
             };
 

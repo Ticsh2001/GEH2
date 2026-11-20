@@ -60,29 +60,50 @@ def compute_hash(obj) -> str:
 
 def build_dataset(signals_data: Dict[str, pd.DataFrame], ref_signal: str,
                   interpolation: str = 'linear') -> pd.DataFrame:
+    """Накладывает все сигналы на временную сетку опорного сигнала.
+
+    Каждый сигнал интерполируется на объединении собственных меток и опорной сетки,
+    после чего берутся значения только в узлах опорной сетки. Поэтому сигналы со
+    сдвинутой (но не совпадающей по меткам) сеткой выравниваются корректно.
+    """
     if not signals_data:
         raise ValueError("Нет данных для построения датасета")
 
-    df_ref = signals_data[ref_signal][['datetime']].drop_duplicates().sort_values('datetime')
-    df_ref = df_ref.set_index('datetime')
+    ref_index = pd.DatetimeIndex(
+        pd.to_datetime(signals_data[ref_signal]['datetime']).drop_duplicates().sort_values()
+    )
+    result = pd.DataFrame(index=ref_index)
+    result.index.name = 'datetime'
 
-    result = df_ref.copy()
     for name, df in signals_data.items():
-        df = df.drop_duplicates(subset='datetime').set_index('datetime')
-        aligned = df.reindex(result.index)
-        aligned['value'] = pd.to_numeric(aligned['value'], errors='coerce')
-        if interpolation == 'linear':
-            aligned = aligned.interpolate(method='time', limit_direction='both')
-        elif interpolation == 'nearest':
-            aligned = aligned.interpolate(method='nearest', limit_direction='both')
-        elif interpolation == 'cubic':
-            aligned = aligned.interpolate(method='cubic', limit_direction='both')
-        aligned = aligned.fillna(method='ffill').fillna(method='bfill')
-        result[name] = pd.to_numeric(aligned['value'], errors='coerce')
+        df = df.copy()
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        s = (df.drop_duplicates(subset='datetime')
+               .set_index('datetime')['value']
+               .pipe(pd.to_numeric, errors='coerce')
+               .dropna()
+               .sort_index())
 
-    for col in result.columns:
-        if col != 'datetime':
-            result[col] = pd.to_numeric(result[col], errors='coerce')
+        if s.empty:
+            print(f"[WARN] build_dataset: у сигнала '{name}' нет числовых данных")
+            result[name] = np.nan
+            continue
+
+        union_idx = s.index.union(ref_index)
+        s_u = s.reindex(union_idx)
+        if interpolation == 'linear':
+            s_u = s_u.interpolate(method='time', limit_direction='both')
+        elif interpolation == 'nearest':
+            s_u = s_u.interpolate(method='nearest', limit_direction='both')
+        elif interpolation == 'cubic':
+            s_u = s_u.interpolate(method='cubic', limit_direction='both')
+        else:
+            s_u = s_u.ffill()
+        s_u = s_u.ffill().bfill()
+        result[name] = s_u.reindex(ref_index)
+
+        if result[name].isna().all():
+            print(f"[WARN] build_dataset: столбец '{name}' пуст после выравнивания")
 
     return result.reset_index()
 
@@ -207,10 +228,25 @@ def load_input_data(element_id: str, project: dict, config: str, project_code: s
     if not signals_data:
         raise ValueError("Нет входных данных для построения датасета")
 
-    ref_names = list(signals_data.keys())
-    if ref_index >= len(ref_names):
-        ref_index = 0
-    ref_name = ref_names[ref_index]
+    ref_index = elem.get('props', {}).get('reference_signal_index', 0)
+    ref_port = f'in-{ref_index}'
+    ref_conn = next((c for c in inputs if c['toPort'] == ref_port), None)
+
+    if ref_conn is None:
+        # выбранный порт отключён (или его нет) — берём первый подключённый
+        ref_conn = inputs[0] if inputs else None
+        if ref_conn is None:
+            raise ValueError("Нет входных данных для построения датасета")
+
+    ref_src = elements[ref_conn['fromElement']]
+    if ref_src['type'] == 'input-signal':
+        ref_name = ref_src['props'].get('name', '').strip()
+        if ref_name not in signals_data:
+            # страховка: имя не совпало (напр. дубль имени) — падаем на первый столбец
+            ref_name = next(iter(signals_data.keys()))
+    else:
+        # многоколоночный источник (filter/timeshift/…) — старое поведение, первый столбец
+        ref_name = next(iter(signals_data.keys()))
 
     df_combined = build_dataset(signals_data, ref_name, interpolation)
     return df_combined, hashes

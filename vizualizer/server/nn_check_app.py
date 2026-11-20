@@ -139,7 +139,7 @@ if model_dir not in sys.path:
     sys.path.insert(0, model_dir)
 
 try:
-    from nn_inference_runtime import InferenceSession
+    from nn_inference_runtime_v3 import InferenceSession
 except Exception as e:
     st.error(f"Не удалось импортировать nn_inference_runtime: {e}")
     st.stop()
@@ -271,18 +271,32 @@ with st.sidebar:
                 
                 st.session_state.loaded_signals = new_loaded
                 
-                # 3. Проверяем, что все входы модели на месте
-                missing = [inp["name"] for inp in meta["inputs"] if inp["name"] not in new_loaded]
+                # 3. Проверяем, что все нужные сигналы на месте (входы модели + условие запуска)
+                required = [inp["name"] for inp in meta["inputs"]]
+                if startup_kks and startup_kks not in required:
+                    required.append(startup_kks)
+                missing = [n for n in required if n not in new_loaded]
                 if missing:
                     st.error(f"Ошибка: не удалось загрузить входные сигналы {missing}")
                 else:
-                    input_data = {k: new_loaded[k][0] for k in [i["name"] for i in meta["inputs"]]}
+                    # Условие запуска передаём в predict отдельным аргументом,
+                    # а не вместе с входами модели (runtime подставляет его в цепочку сам).
+                    model_inputs = [i["name"] for i in meta["inputs"] if i["name"] != startup_kks]
+                    input_data = {k: new_loaded[k][0] for k in model_inputs}
+                    startup_arr = new_loaded[startup_kks][0] if startup_kks else None
                     log_path = os.path.join(model_dir, f"{project_code}.inference_log.json")
                     try:
-                        result = session.predict(input_data, log_path=log_path)
-                    except TypeError:
-                        result = session.predict(input_data)
-                    
+                        result = session.predict(
+                            input_data,
+                            startup_condition=startup_arr,
+                            log_path=log_path,
+                        )
+                    except Exception as e:
+                        st.session_state.pop("inference_result", None)
+                        st.session_state.pop("inference_log", None)
+                        st.error(f"Ошибка инференса: {type(e).__name__}: {e}")
+                        st.stop()
+
                     st.session_state["inference_result"] = result
                     st.session_state["inference_log"] = log_path
                     st.success("✅ Инференс завершен!")
