@@ -2714,6 +2714,7 @@ async def nn_check_prepare(payload: dict = Body(...)):
 
 @app.post("/api/project/export-nn-selected")
 async def api_export_nn_projects(payload: dict = Body(...), config: str = Query(...)):
+    import zipfile
     try:
         filenames = payload.get("filenames", [])
         if not filenames:
@@ -2723,7 +2724,7 @@ async def api_export_nn_projects(payload: dict = Body(...), config: str = Query(
         if not project_dir:
             raise HTTPException(status_code=500, detail="projectDataFolder не сконфигурирована")
 
-        # Загружаем все проекты из папки для поиска зависимостей
+        # Загружаем все проекты (для поиска зависимостей)
         all_payloads = {}
         by_code = {}
         for fname in os.listdir(project_dir):
@@ -2740,14 +2741,148 @@ async def api_export_nn_projects(payload: dict = Body(...), config: str = Query(
             except Exception as e:
                 print(f"[export-nn] пропускаю {fname}: {e}")
 
+        # 1. Базовый архив с xlsx
         from export import export_nn_projects
-        result = export_nn_projects(filenames, all_payloads, by_code)
+        base_result = export_nn_projects(filenames, all_payloads, by_code)
+
+        # 2. Собираем финальный архив
+        final_buffer = BytesIO()
+        skipped = []  # проекты, которые не удалось экспортировать
+
+        with zipfile.ZipFile(final_buffer, "w", zipfile.ZIP_DEFLATED) as final_zf:
+            # 2.1. Копируем Модели.xlsx и Параметры.xlsx из базового архива
+            with zipfile.ZipFile(BytesIO(base_result["content"]), "r") as base_zf:
+                for name in base_zf.namelist():
+                    final_zf.writestr(name, base_zf.read(name))
+
+            # 2.2. Для каждой NN-модели — свой подэкспорт в models/<code>/
+            for fname in filenames:
+                payload_data = all_payloads.get(fname)
+                if not payload_data:
+                    continue
+                if (payload_data.get("project") or {}).get("type") not in ("neural_network", "neural_template"):
+                    continue
+
+                project_code = (payload_data.get("project") or {}).get("code", "")
+                if not project_code:
+                    continue
+
+                # Ищем nn-template
+                template_id = None
+                for eid, el in payload_data.get("elements", {}).items():
+                    if el.get("nnType") == "nn-template":
+                        template_id = eid
+                        break
+
+                if not template_id:
+                    print(f"[export-nn] {project_code}: нет nn-template, пропускаю")
+                    skipped.append(f"{project_code}: нет шаблона сети")
+                    continue
+
+                model_path = nn_template.get_model_path(config, project_code, template_id)
+                model_meta_path = nn_template.get_model_meta_path(config, project_code, template_id)
+
+                if not os.path.isfile(model_path):
+                    print(f"[export-nn] {project_code}: модель не обучена, пропускаю")
+                    skipped.append(f"{project_code}: модель не обучена")
+                    continue
+
+                # --- Сбор данных для Word (как в /api/nn/export) ---
+                proj_meta = payload_data.get("project") or {}
+                startup_kks = (proj_meta.get("startup_condition") or {}).get("kks")
+                rule_kks = (proj_meta.get("diagnostic_rule") or {}).get("kks")
+                tech_cond_kks = proj_meta.get("tech_condition")
+
+                y_labelers = nn_export.find_y_labelers(payload_data)
+                y_kks = y_labelers[0][1] if y_labelers else None
+
+                def _get_ext(kks):
+                    if not kks:
+                        return None
+                    pp = load_project_by_code(kks, config)
+                    if not pp:
+                        return None
+                    meta = pp.get("project", {})
+                    inputs = []
+                    for el in (pp.get("elements") or {}).values():
+                        if el.get("type") == "input-signal":
+                            props = el.get("props") or {}
+                            name = props.get("name")
+                            if name:
+                                inputs.append({
+                                    "name": name,
+                                    "description": props.get("description", "")
+                                })
+                    return {
+                        "kks": kks,
+                        "description": meta.get("description", ""),
+                        "possibleCause": meta.get("possibleCause", ""),
+                        "guidelines": meta.get("guidelines", ""),
+                        "code": pp.get("formula", ""),
+                        "inputs": inputs
+                    }
+
+                startup_data = _get_ext(startup_kks)
+                rule_data = _get_ext(rule_kks)
+                tech_cond_data = _get_ext(tech_cond_kks)
+
+                # Метрики истории обучения
+                metrics = []
+                if os.path.isfile(model_meta_path):
+                    try:
+                        with open(model_meta_path, "r", encoding="utf-8") as f:
+                            m = json.load(f)
+                        job_id = m.get("job_id")
+                        if job_id:
+                            metrics_path = tq._metrics_path(job_id)
+                            if os.path.exists(metrics_path):
+                                with open(metrics_path, "r", encoding="utf-8") as f:
+                                    for line in f:
+                                        if line.strip():
+                                            try:
+                                                metrics.append(json.loads(line))
+                                            except:
+                                                pass
+                    except Exception as e:
+                        print(f"[export-nn] {project_code}: ошибка чтения метрик: {e}")
+
+                # Собираем подэкспорт через nn_export.build_zip
+                try:
+                    single_zip = nn_export.build_zip(
+                        project_payload=payload_data,
+                        model_path=model_path,
+                        model_meta_path=model_meta_path,
+                        base_name=project_code,
+                        startup_data=startup_data,
+                        rule_data=rule_data,
+                        tech_cond_data=tech_cond_data,
+                        metrics=metrics,
+                        y_kks=y_kks
+                    )
+
+                    subdir = f"models/{project_code}"
+                    with zipfile.ZipFile(BytesIO(single_zip), "r") as szf:
+                        for inner_name in szf.namelist():
+                            final_zf.writestr(f"{subdir}/{inner_name}", szf.read(inner_name))
+
+                    print(f"[export-nn] {project_code}: файлы добавлены")
+                except Exception as e:
+                    import traceback
+                    print(f"[export-nn] {project_code}: ошибка сборки:\n{traceback.format_exc()}")
+                    skipped.append(f"{project_code}: {e}")
+
+            # 2.3. Если что-то не выгрузилось — пишем отчёт
+            if skipped:
+                final_zf.writestr(
+                    "skipped.txt",
+                    "Не удалось выгрузить следующие модели:\n" + "\n".join(f"- {s}" for s in skipped)
+                )
 
         return StreamingResponse(
-            BytesIO(result["content"]),
-            media_type=result["media_type"],
+            BytesIO(final_buffer.getvalue()),
+            media_type="application/zip",
             headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(result['filename'])}",
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote('Экспорт_моделей.zip')}",
                 "Cache-Control": "no-cache, no-store, must-revalidate"
             }
         )
